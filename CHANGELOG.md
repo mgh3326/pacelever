@@ -5,6 +5,8 @@
 - Read both legacy text and native structured `last_error` snapshot metadata.
 - Ignore retired-provider cache entries before decoding their provider-specific
   shapes, retaining measurements for supported pools.
+- Preserve imported last-good measurements across a failed first refresh and
+  verify the current account identity before accepting stale values.
 
 ## v0.1.0
 

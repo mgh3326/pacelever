@@ -62,6 +62,11 @@ func loadSnapshots(ownPath, legacyPath string) (map[string]CacheEntry, error) {
 			if e := json.Unmarshal(data, &entry); e != nil {
 				return nil, fmt.Errorf("invalid cache entry for pool %s", pool)
 			}
+			previous := merged[pool]
+			if entry.FetchedAt <= 0 && previous.FetchedAt > 0 {
+				entry.FetchedAt = previous.FetchedAt
+				entry.Result = previous.Result
+			}
 			merged[pool] = entry
 		}
 	}
@@ -102,13 +107,17 @@ func (c *CacheEntry) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func updateSnapshot(ownPath, pool string, obs Observation, now time.Time) error {
+func updateSnapshot(ownPath, pool string, obs Observation, now time.Time, previous CacheEntry) error {
 	return WithFileLock(ownPath+".lock", false, func() error {
 		entries := map[string]CacheEntry{}
 		if e := ReadJSON(ownPath, &entries); e != nil && !os.IsNotExist(e) {
 			return e
 		}
 		entry := entries[pool]
+		if entry.FetchedAt <= 0 && previous.FetchedAt > 0 {
+			entry.FetchedAt = previous.FetchedAt
+			entry.Result = previous.Result
+		}
 		if obs.Error == "" && obs.Warning == "" && len(obs.Buckets) > 0 {
 			entry = CacheEntry{FetchedAt: float64(now.UnixMilli()) / 1000, Result: obs}
 		} else if obs.ErrorKind != "probe_in_progress" {
@@ -213,7 +222,12 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		return o
 	}
 	if entry.NegativeUntil > float64(now.UnixMilli())/1000 {
-		return fallback("backoff", "provider backoff active")
+		kind := "backoff"
+		if entry.LastError != nil && entry.LastError.ErrorKind != "" {
+			kind = entry.LastError.ErrorKind
+		}
+		result := fallback(kind, "provider backoff active")
+		return currentFailureIdentity(result, entry.LastError, entry.Result.AccountFP)
 	}
 	if pool == "commandcode" && !c.Worker && c.DeferredRefresh != nil {
 		if e := c.DeferredRefresh(pool); e != nil {
@@ -230,7 +244,7 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		obs = provider.Fetch(ctx)
 		obs.ID = pool
 		obs.PoolClass = p.Class
-		return updateSnapshot(c.cacheFile(), pool, obs, now)
+		return updateSnapshot(c.cacheFile(), pool, obs, now, entry)
 	})
 	if e == ErrBusy {
 		return fallback("probe_in_progress", "probe already in progress")
@@ -239,7 +253,8 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		return fallback("cache_error", "cannot persist provider observation")
 	}
 	if obs.Error != "" || obs.Warning != "" {
-		return fallback(obs.ErrorKind, obs.Error)
+		result := fallback(obs.ErrorKind, obs.Error)
+		return currentFailureIdentity(result, &obs, entry.Result.AccountFP)
 	}
 	obs.FetchedAt = float64(now.UnixMilli()) / 1000
 	obs.AgeS = ptr(0.0)
@@ -268,3 +283,19 @@ func (c Collector) cacheFile() string {
 	return CachePath()
 }
 func (c Collector) cacheDir() string { return filepath.Dir(c.cacheFile()) }
+
+func currentFailureIdentity(result Observation, current *Observation, cachedFP string) Observation {
+	if current == nil || current.AccountFP == "" {
+		return result
+	}
+	matches := cachedFP != "" && current.AccountFP == cachedFP
+	result.AccountFPMatch = &matches
+	result.AccountFP = current.AccountFP
+	result.AccountFPKind = current.AccountFPKind
+	if !matches {
+		result.Buckets = nil
+		result.PublishFP = current.PublishFP
+		result.PublishFPKind = current.PublishFPKind
+	}
+	return result
+}

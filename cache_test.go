@@ -101,3 +101,51 @@ func TestLegacyTextFailureMetadata(t *testing.T) {
 		t.Fatalf("structured failure metadata rejected: %v", e)
 	}
 }
+
+func TestFailedRefreshRetainsLegacyMeasurementAndIdentity(t *testing.T) {
+	for _, same := range []bool{true, false} {
+		name := "same account"
+		if !same {
+			name = "changed account"
+		}
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			old := observation("claude", 10)
+			old.AccountFP = "fp-original"
+			old.AccountFPKind = "account"
+			if !same {
+				old = observation("claude", 99)
+				old.AccountFP = "fp-original"
+				old.AccountFPKind = "account"
+			}
+			if e := WriteJSON(legacyCachePath(), map[string]CacheEntry{"claude": {FetchedAt: float64(testNow.Unix()), Result: old}}); e != nil {
+				t.Fatal(e)
+			}
+			currentFP := "fp-original"
+			if !same {
+				currentFP = "fp-current"
+			}
+			c := Collector{Now: func() time.Time { return testNow.Add(5 * time.Minute) }, Providers: map[string]Provider{"claude": ProviderFunc(func(context.Context) Observation {
+				return Observation{ID: "claude", Error: "usage HTTP 429", ErrorKind: "rate_limited", AccountFP: currentFP, AccountFPKind: "account"}
+			})}}
+			for attempt := 0; attempt < 2; attempt++ {
+				rows, e := c.Collect(context.Background(), []string{"claude"})
+				if e != nil {
+					t.Fatal(e)
+				}
+				d := Gate(Inputs{Now: testNow.Add(5 * time.Minute), Observations: rows}, Request{Profile: "sonnet"})
+				if same {
+					if d.ExitCode != 0 || !d.StaleAccepted {
+						t.Fatalf("last good measurement lost: %+v", d)
+					}
+				} else if d.ExitCode != 4 {
+					t.Fatalf("old account quota used after identity change: %+v", d)
+				}
+			}
+			entries, e := LoadSnapshots()
+			if e != nil || entries["claude"].FetchedAt != float64(testNow.Unix()) || len(entries["claude"].Result.Buckets) != 2 {
+				t.Fatal("failed probe replaced last successful snapshot")
+			}
+		})
+	}
+}
