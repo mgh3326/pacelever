@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -79,6 +80,10 @@ func ReadJSON(path string, v any) error {
 	decoder := json.NewDecoder(bytes.NewReader(b))
 	decoder.UseNumber()
 	if e = decoder.Decode(v); e != nil {
+		return fmt.Errorf("invalid JSON state")
+	}
+	var extra any
+	if e = decoder.Decode(&extra); e != io.EOF {
 		return fmt.Errorf("invalid JSON state")
 	}
 	return nil

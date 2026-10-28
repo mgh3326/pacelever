@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -223,7 +224,7 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 		if token == "" {
 			return Observation{ID: "claude", Error: "credentials unavailable", ErrorKind: "credentials"}
 		}
-		if expires, ok := oauth["expiresAt"].(float64); ok && expires/1000 < float64(time.Now().Unix()) {
+		if expires, ok := finiteNumber(oauth["expiresAt"]); ok && expires/1000 < float64(time.Now().Unix()) {
 			return Observation{ID: "claude", Error: "token expired", ErrorKind: "token_expired"}
 		}
 		o := (HTTPProvider{ID: "claude", URL: "https://api.anthropic.com/api/oauth/usage", Headers: map[string]string{"Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20"}}).Fetch(ctx)
@@ -317,8 +318,8 @@ func chooseOAuth(file, keychain map[string]any, now time.Time) map[string]any {
 	if str(keychain["accessToken"]) == "" {
 		return file
 	}
-	f, fok := file["expiresAt"].(float64)
-	k, kok := keychain["expiresAt"].(float64)
+	f, fok := finiteNumber(file["expiresAt"])
+	k, kok := finiteNumber(keychain["expiresAt"])
 	expiredF := fok && f/1000 <= float64(now.Unix())
 	expiredK := kok && k/1000 <= float64(now.Unix())
 	if expiredF != expiredK {
@@ -331,4 +332,25 @@ func chooseOAuth(file, keychain map[string]any, now time.Time) map[string]any {
 		return keychain
 	}
 	return file
+}
+
+func finiteNumber(value any) (float64, bool) {
+	var n float64
+	switch v := value.(type) {
+	case float64:
+		n = v
+	case json.Number:
+		var e error
+		n, e = v.Float64()
+		if e != nil {
+			return 0, false
+		}
+	case int64:
+		n = float64(v)
+	case int:
+		n = float64(v)
+	default:
+		return 0, false
+	}
+	return n, !math.IsNaN(n) && !math.IsInf(n, 0)
 }

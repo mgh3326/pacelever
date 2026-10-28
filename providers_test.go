@@ -2,11 +2,13 @@ package pacelever
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 type doFunc func(*http.Request) (*http.Response, error)
@@ -56,5 +58,18 @@ func TestCommandcodeExplicitBinary(t *testing.T) {
 	t.Setenv("PACELEVER_COMMANDCODE_BIN", "/explicit/cmd")
 	if ResolveBinary("commandcode", cfg) != "/explicit/cmd" {
 		t.Fatal("explicit path ignored")
+	}
+}
+
+func TestOAuthChoiceWithDecodedNumbers(t *testing.T) {
+	expired := map[string]any{"accessToken": "fixture-file-placeholder", "expiresAt": json.Number("1")}
+	fresh := map[string]any{"accessToken": "fixture-keychain-placeholder", "expiresAt": float64(testNow.Add(time.Hour).UnixMilli())}
+	chosen := chooseOAuth(expired, fresh, testNow)
+	if chosen["expiresAt"] != fresh["expiresAt"] {
+		t.Fatal("expired file preferred over current keychain context")
+	}
+	expires, ok := finiteNumber(json.Number("1000"))
+	if !ok || expires != 1000 {
+		t.Fatal("JSON expiry lost numeric meaning")
 	}
 }
