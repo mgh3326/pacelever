@@ -1,0 +1,1309 @@
+{
+  "reference": "installed scopefuel 9fd1c45",
+  "captured_at": "2026-10-28T06:41:44.465977+00:00",
+  "cases": [
+    {
+      "request": {
+        "profile": "sonnet",
+        "effort": "high",
+        "role": "",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "high",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A",
+        "model_id": "claude-sonnet-5-5",
+        "operator_request": false,
+        "pool": "claude",
+        "profile": "sonnet"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "sonnet",
+        "effort": "high",
+        "role": "worker",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "high",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A",
+        "model_id": "claude-sonnet-5-5",
+        "operator_request": false,
+        "pool": "claude",
+        "profile": "sonnet"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "sonnet",
+        "effort": "high",
+        "role": "tester",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "high",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A",
+        "model_id": "claude-sonnet-5-5",
+        "operator_request": false,
+        "pool": "claude",
+        "profile": "sonnet"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "sonnet",
+        "effort": "high",
+        "role": "builder",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "high",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A",
+        "model_id": "claude-sonnet-5-5",
+        "operator_request": false,
+        "pool": "claude",
+        "profile": "sonnet"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "sonnet",
+        "effort": "max",
+        "role": "",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "max",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A",
+        "model_id": "claude-sonnet-5-5",
+        "operator_request": false,
+        "pool": "claude",
+        "profile": "sonnet"
+      },
+      "gate_code": 3
+    },
+    {
+      "request": {
+        "profile": "sonnet",
+        "effort": "max",
+        "role": "worker",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "max",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A",
+        "model_id": "claude-sonnet-5-5",
+        "operator_request": false,
+        "pool": "claude",
+        "profile": "sonnet"
+      },
+      "gate_code": 3
+    },
+    {
+      "request": {
+        "profile": "sonnet",
+        "effort": "max",
+        "role": "tester",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "max",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A",
+        "model_id": "claude-sonnet-5-5",
+        "operator_request": false,
+        "pool": "claude",
+        "profile": "sonnet"
+      },
+      "gate_code": 3
+    },
+    {
+      "request": {
+        "profile": "sonnet",
+        "effort": "max",
+        "role": "builder",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "max",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A",
+        "model_id": "claude-sonnet-5-5",
+        "operator_request": false,
+        "pool": "claude",
+        "profile": "sonnet"
+      },
+      "gate_code": 3
+    },
+    {
+      "request": {
+        "profile": "opus",
+        "effort": "low",
+        "role": "",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "low",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "S",
+        "model_id": "claude-opus-5-5",
+        "operator_request": false,
+        "pool": "claude",
+        "profile": "opus"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "opus",
+        "effort": "low",
+        "role": "worker",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "low",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "S",
+        "model_id": "claude-opus-5-5",
+        "operator_request": false,
+        "pool": "claude",
+        "profile": "opus"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "opus",
+        "effort": "low",
+        "role": "tester",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "low",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "S",
+        "model_id": "claude-opus-5-5",
+        "operator_request": false,
+        "pool": "claude",
+        "profile": "opus"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "opus",
+        "effort": "low",
+        "role": "builder",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "low",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "S",
+        "model_id": "claude-opus-5-5",
+        "operator_request": false,
+        "pool": "claude",
+        "profile": "opus"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "codex-sol",
+        "effort": "max",
+        "role": "",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "max",
+        "family": "codex",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "S+",
+        "model_id": "gpt-6.1-sol",
+        "operator_request": false,
+        "pool": "codex",
+        "profile": "codex-sol"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "codex-sol",
+        "effort": "max",
+        "role": "worker",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "max",
+        "family": "codex",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "S+",
+        "model_id": "gpt-6.1-sol",
+        "operator_request": false,
+        "pool": "codex",
+        "profile": "codex-sol"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "codex-sol",
+        "effort": "max",
+        "role": "tester",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "max",
+        "family": "codex",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "S+",
+        "model_id": "gpt-6.1-sol",
+        "operator_request": false,
+        "pool": "codex",
+        "profile": "codex-sol"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "codex-sol",
+        "effort": "max",
+        "role": "builder",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "max",
+        "family": "codex",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "S+",
+        "model_id": "gpt-6.1-sol",
+        "operator_request": false,
+        "pool": "codex",
+        "profile": "codex-sol"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "codex-sol",
+        "effort": "xhigh",
+        "role": "",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "xhigh",
+        "family": "codex",
+        "gate": "escalation",
+        "gate_reason": "쿼타 절약·속도 우선",
+        "grade": "S+",
+        "model_id": "gpt-6.1-sol",
+        "operator_request": false,
+        "pool": "codex",
+        "profile": "codex-sol"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "codex-sol",
+        "effort": "xhigh",
+        "role": "worker",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "xhigh",
+        "family": "codex",
+        "gate": "escalation",
+        "gate_reason": "쿼타 절약·속도 우선",
+        "grade": "S+",
+        "model_id": "gpt-6.1-sol",
+        "operator_request": false,
+        "pool": "codex",
+        "profile": "codex-sol"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "codex-sol",
+        "effort": "xhigh",
+        "role": "tester",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "xhigh",
+        "family": "codex",
+        "gate": "escalation",
+        "gate_reason": "쿼타 절약·속도 우선",
+        "grade": "S+",
+        "model_id": "gpt-6.1-sol",
+        "operator_request": false,
+        "pool": "codex",
+        "profile": "codex-sol"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "codex-sol",
+        "effort": "xhigh",
+        "role": "builder",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "xhigh",
+        "family": "codex",
+        "gate": "escalation",
+        "gate_reason": "쿼타 절약·속도 우선",
+        "grade": "S+",
+        "model_id": "gpt-6.1-sol",
+        "operator_request": false,
+        "pool": "codex",
+        "profile": "codex-sol"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "codex-luna",
+        "effort": "medium",
+        "role": "",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "medium",
+        "family": "codex",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "B",
+        "model_id": "gpt-6-luna",
+        "operator_request": false,
+        "pool": "codex",
+        "profile": "codex-luna"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "codex-luna",
+        "effort": "medium",
+        "role": "worker",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "medium",
+        "family": "codex",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "B",
+        "model_id": "gpt-6-luna",
+        "operator_request": false,
+        "pool": "codex",
+        "profile": "codex-luna"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "codex-luna",
+        "effort": "medium",
+        "role": "tester",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "medium",
+        "family": "codex",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "B",
+        "model_id": "gpt-6-luna",
+        "operator_request": false,
+        "pool": "codex",
+        "profile": "codex-luna"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "codex-luna",
+        "effort": "medium",
+        "role": "builder",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "medium",
+        "family": "codex",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "B",
+        "model_id": "gpt-6-luna",
+        "operator_request": false,
+        "pool": "codex",
+        "profile": "codex-luna"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "devin-swe2",
+        "effort": "",
+        "role": "",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "free",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "",
+        "family": "devin",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A+",
+        "model_id": "swe-2",
+        "operator_request": false,
+        "pool": "devin",
+        "profile": "devin-swe2"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "devin-swe2",
+        "effort": "",
+        "role": "worker",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "free",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "",
+        "family": "devin",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A+",
+        "model_id": "swe-2",
+        "operator_request": false,
+        "pool": "devin",
+        "profile": "devin-swe2"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "devin-swe2",
+        "effort": "",
+        "role": "tester",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "free",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "",
+        "family": "devin",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A+",
+        "model_id": "swe-2",
+        "operator_request": false,
+        "pool": "devin",
+        "profile": "devin-swe2"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "devin-swe2",
+        "effort": "",
+        "role": "builder",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "free",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "",
+        "family": "devin",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A+",
+        "model_id": "swe-2",
+        "operator_request": false,
+        "pool": "devin",
+        "profile": "devin-swe2"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "devin-swe2-medium",
+        "effort": "",
+        "role": "",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "free",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "",
+        "family": "devin",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A",
+        "model_id": "swe-2-medium",
+        "operator_request": false,
+        "pool": "devin",
+        "profile": "devin-swe2-medium"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "devin-swe2-medium",
+        "effort": "",
+        "role": "worker",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "free",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "",
+        "family": "devin",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A",
+        "model_id": "swe-2-medium",
+        "operator_request": false,
+        "pool": "devin",
+        "profile": "devin-swe2-medium"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "devin-swe2-medium",
+        "effort": "",
+        "role": "tester",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "free",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "",
+        "family": "devin",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A",
+        "model_id": "swe-2-medium",
+        "operator_request": false,
+        "pool": "devin",
+        "profile": "devin-swe2-medium"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "devin-swe2-medium",
+        "effort": "",
+        "role": "builder",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "free",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "",
+        "family": "devin",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A",
+        "model_id": "swe-2-medium",
+        "operator_request": false,
+        "pool": "devin",
+        "profile": "devin-swe2-medium"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "pi-sonnet55",
+        "effort": "high",
+        "role": "",
+        "purpose": ""
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 5
+    },
+    {
+      "request": {
+        "profile": "pi-sonnet55",
+        "effort": "high",
+        "role": "worker",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "paid",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "high",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A",
+        "model_id": "anthropic/claude-sonnet-5-5",
+        "operator_request": false,
+        "pool": "anthropic-api",
+        "profile": "pi-sonnet55"
+      },
+      "gate_code": 4
+    },
+    {
+      "request": {
+        "profile": "pi-sonnet55",
+        "effort": "high",
+        "role": "tester",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "paid",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "high",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A",
+        "model_id": "anthropic/claude-sonnet-5-5",
+        "operator_request": false,
+        "pool": "anthropic-api",
+        "profile": "pi-sonnet55"
+      },
+      "gate_code": 4
+    },
+    {
+      "request": {
+        "profile": "pi-sonnet55",
+        "effort": "high",
+        "role": "builder",
+        "purpose": ""
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 5,
+      "intentional_change": "placed default credit rung admits builder"
+    },
+    {
+      "request": {
+        "profile": "pi-haiku55",
+        "effort": "medium",
+        "role": "",
+        "purpose": ""
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 5
+    },
+    {
+      "request": {
+        "profile": "pi-haiku55",
+        "effort": "medium",
+        "role": "worker",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "paid",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "medium",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "C",
+        "model_id": "anthropic/claude-haiku-5-5",
+        "operator_request": false,
+        "pool": "anthropic-api",
+        "profile": "pi-haiku55"
+      },
+      "gate_code": 4
+    },
+    {
+      "request": {
+        "profile": "pi-haiku55",
+        "effort": "medium",
+        "role": "tester",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "paid",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "medium",
+        "family": "claude",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "C",
+        "model_id": "anthropic/claude-haiku-5-5",
+        "operator_request": false,
+        "pool": "anthropic-api",
+        "profile": "pi-haiku55"
+      },
+      "gate_code": 4
+    },
+    {
+      "request": {
+        "profile": "pi-haiku55",
+        "effort": "medium",
+        "role": "builder",
+        "purpose": ""
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 5,
+      "intentional_change": "placed default credit rung admits builder"
+    },
+    {
+      "request": {
+        "profile": "cmd-dsflash41",
+        "effort": "high",
+        "role": "",
+        "purpose": ""
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 5
+    },
+    {
+      "request": {
+        "profile": "cmd-dsflash41",
+        "effort": "high",
+        "role": "worker",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "paid",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "high",
+        "family": "devin",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A+",
+        "model_id": "deepseek/deepseek-v4.1-flash",
+        "operator_request": false,
+        "pool": "commandcode",
+        "profile": "cmd-dsflash41"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "cmd-dsflash41",
+        "effort": "high",
+        "role": "tester",
+        "purpose": ""
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "paid",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "high",
+        "family": "devin",
+        "gate": "default",
+        "gate_reason": null,
+        "grade": "A+",
+        "model_id": "deepseek/deepseek-v4.1-flash",
+        "operator_request": false,
+        "pool": "commandcode",
+        "profile": "cmd-dsflash41"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "cmd-dsflash41",
+        "effort": "high",
+        "role": "builder",
+        "purpose": ""
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 5,
+      "intentional_change": "placed default credit rung admits builder"
+    },
+    {
+      "request": {
+        "profile": "codex-astra",
+        "effort": "",
+        "role": "",
+        "purpose": "architect"
+      },
+      "launch_code": 0,
+      "launch": {
+        "billing": "unknown",
+        "catalog": {
+          "age_s": null,
+          "source": "snapshot",
+          "stale": false
+        },
+        "e6_arm": null,
+        "effort": "xhigh",
+        "family": "codex",
+        "gate": "consult_only",
+        "gate_reason": "astra 는 director 판정·architect 자문·운영자 요청 조언에 한정 (hk:doc decision/2026-09-21/astra-allowed-purposes-approved)",
+        "grade": "S+",
+        "model_id": "gpt-6-astra",
+        "operator_request": false,
+        "pool": "codex",
+        "profile": "codex-astra"
+      },
+      "gate_code": 0
+    },
+    {
+      "request": {
+        "profile": "codex-astra",
+        "effort": "",
+        "role": "worker",
+        "purpose": "architect"
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 5
+    },
+    {
+      "request": {
+        "profile": "codex-astra",
+        "effort": "",
+        "role": "tester",
+        "purpose": "architect"
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 5
+    },
+    {
+      "request": {
+        "profile": "codex-astra",
+        "effort": "",
+        "role": "builder",
+        "purpose": "architect"
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 5
+    },
+    {
+      "request": {
+        "profile": "fable",
+        "effort": "",
+        "role": "",
+        "purpose": ""
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 3
+    },
+    {
+      "request": {
+        "profile": "fable",
+        "effort": "",
+        "role": "worker",
+        "purpose": ""
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 5
+    },
+    {
+      "request": {
+        "profile": "fable",
+        "effort": "",
+        "role": "tester",
+        "purpose": ""
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 5
+    },
+    {
+      "request": {
+        "profile": "fable",
+        "effort": "",
+        "role": "builder",
+        "purpose": ""
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 5
+    },
+    {
+      "request": {
+        "profile": "pi-opus55",
+        "effort": "",
+        "role": "",
+        "purpose": ""
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 3
+    },
+    {
+      "request": {
+        "profile": "pi-opus55",
+        "effort": "",
+        "role": "worker",
+        "purpose": ""
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 3
+    },
+    {
+      "request": {
+        "profile": "pi-opus55",
+        "effort": "",
+        "role": "tester",
+        "purpose": ""
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 3
+    },
+    {
+      "request": {
+        "profile": "pi-opus55",
+        "effort": "",
+        "role": "builder",
+        "purpose": ""
+      },
+      "launch_code": 3,
+      "launch": null,
+      "gate_code": 3
+    },
+    {
+      "request": {
+        "profile": "sonnet"
+      },
+      "state": "exhausted",
+      "gate_code": 3
+    },
+    {
+      "request": {
+        "profile": "sonnet"
+      },
+      "state": "unmeasurable",
+      "gate_code": 4
+    },
+    {
+      "request": {
+        "profile": "sonnet"
+      },
+      "state": "unsubscribed",
+      "gate_code": 6
+    }
+  ]
+}
