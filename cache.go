@@ -1,0 +1,210 @@
+package pacelever
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+type Provider interface {
+	Fetch(context.Context) Observation
+}
+type ProviderFunc func(context.Context) Observation
+
+func (f ProviderFunc) Fetch(ctx context.Context) Observation { return f(ctx) }
+
+type CacheEntry struct {
+	FetchedAt     float64      `json:"fetched_at"`
+	Result        Observation  `json:"result"`
+	LastError     *Observation `json:"last_error,omitempty"`
+	LastErrorAt   float64      `json:"last_error_at,omitempty"`
+	NegativeUntil float64      `json:"negative_until,omitempty"`
+}
+type Collector struct {
+	Config    Config
+	Providers map[string]Provider
+	Now       func() time.Time
+	// DeferredRefresh starts an independent, bounded worker. Used for slow PTY
+	// probes so short-lived display/gate callers cannot starve collection.
+	DeferredRefresh func(string) error
+	TTL             time.Duration
+	NoCache         bool
+	Worker          bool
+}
+
+func LoadSnapshots() (map[string]CacheEntry, error) {
+	merged := map[string]CacheEntry{}
+	var legacy map[string]CacheEntry
+	if e := ReadJSON(legacyCachePath(), &legacy); e != nil && !os.IsNotExist(e) {
+		return nil, e
+	}
+	for k, v := range legacy {
+		if knownPool(k) {
+			merged[k] = v
+		}
+	}
+	var own map[string]CacheEntry
+	if e := ReadJSON(CachePath(), &own); e != nil && !os.IsNotExist(e) {
+		return nil, e
+	}
+	for k, v := range own {
+		merged[k] = v
+	}
+	return merged, nil
+}
+func updateSnapshot(pool string, obs Observation, now time.Time) error {
+	return WithFileLock(filepath.Join(CacheDir(), "snapshots.lock"), false, func() error {
+		entries := map[string]CacheEntry{}
+		if e := ReadJSON(CachePath(), &entries); e != nil && !os.IsNotExist(e) {
+			return e
+		}
+		entry := entries[pool]
+		if obs.Error == "" && obs.Warning == "" && len(obs.Buckets) > 0 {
+			entry = CacheEntry{FetchedAt: float64(now.UnixMilli()) / 1000, Result: obs}
+		} else if obs.ErrorKind != "probe_in_progress" {
+			entry.LastError = &obs
+			entry.LastErrorAt = float64(now.UnixMilli()) / 1000
+			entry.NegativeUntil = entry.LastErrorAt + 30
+			if obs.ErrorKind == "rate_limited" || obs.ErrorKind == "network" {
+				entry.NegativeUntil = entry.LastErrorAt + 60
+			}
+		}
+		entries[pool] = entry
+		return WriteJSON(CachePath(), entries)
+	})
+}
+func ttlFor(pool string) time.Duration {
+	switch pool {
+	case "claude", "devin", "commandcode":
+		return 180 * time.Second
+	}
+	return 60 * time.Second
+}
+func (c Collector) Collect(ctx context.Context, pools []string) ([]Observation, error) {
+	entries, e := LoadSnapshots()
+	if e != nil {
+		return nil, e
+	}
+	results := make([]Observation, len(pools))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 3)
+	for i, pool := range pools {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				results[i] = Observation{ID: pool, Error: "collection deadline", ErrorKind: "timeout"}
+				return
+			}
+			results[i] = c.one(ctx, pool, entries[pool])
+		}()
+	}
+	wg.Wait()
+	return results, nil
+}
+func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Observation {
+	now := time.Now().UTC()
+	if c.Now != nil {
+		now = c.Now()
+	}
+	p := c.Config.Pool(pool, now)
+	fallback := func(kind, text string) Observation {
+		o := entry.Result
+		o.ID = pool
+		o.PoolClass = p.Class
+		o.ErrorKind = kind
+		o.Error = text
+		o.Stale = true
+		if entry.FetchedAt > 0 {
+			o.FetchedAt = entry.FetchedAt
+			o.AgeS = ptr(float64(now.UnixMilli())/1000 - entry.FetchedAt)
+		}
+		return o
+	}
+	if p.Class == "exclude" {
+		return Observation{ID: pool, Error: "pool excluded", ErrorKind: "excluded", PoolClass: p.Class}
+	}
+	// A profile override may enable one profile on an unsubscribed pool.
+	enabled := c.Config.Subscribed("", pool)
+	if !enabled {
+		for name, profile := range c.Config.Profiles {
+			if profile.Subscribed != nil && *profile.Subscribed {
+				for _, r := range BundledCatalog().Rows {
+					if r.Profile == name && r.Pool == pool {
+						enabled = true
+					}
+				}
+			}
+		}
+	}
+	if !enabled {
+		return Observation{ID: pool, Error: "pool unsubscribed", ErrorKind: "unsubscribed", PoolClass: p.Class}
+	}
+	ttl := c.TTL
+	if ttl <= 0 {
+		ttl = ttlFor(pool)
+	}
+	age := float64(now.UnixMilli())/1000 - entry.FetchedAt
+	if !c.NoCache && entry.FetchedAt > 0 && age >= 0 && age <= ttl.Seconds() {
+		o := entry.Result
+		o.ID = pool
+		o.FetchedAt = entry.FetchedAt
+		o.AgeS = &age
+		o.Stale = false
+		o.PoolClass = p.Class
+		return o
+	}
+	if entry.NegativeUntil > float64(now.UnixMilli())/1000 {
+		return fallback("backoff", "provider backoff active")
+	}
+	if pool == "commandcode" && !c.Worker && c.DeferredRefresh != nil {
+		if e := c.DeferredRefresh(pool); e != nil {
+			return fallback("probe_deferred", "cannot start deferred probe")
+		}
+		return fallback("probe_in_progress", "bounded refresh started independently")
+	}
+	provider := c.Providers[pool]
+	if provider == nil {
+		return fallback("credentials", "provider not configured")
+	}
+	var obs Observation
+	e := WithFileLock(filepath.Join(CacheDir(), "collect-"+pool+".lock"), true, func() error {
+		obs = provider.Fetch(ctx)
+		obs.ID = pool
+		obs.PoolClass = p.Class
+		return updateSnapshot(pool, obs, now)
+	})
+	if e == ErrBusy {
+		return fallback("probe_in_progress", "probe already in progress")
+	}
+	if e != nil {
+		return fallback("cache_error", "cannot persist provider observation")
+	}
+	if obs.Error != "" || obs.Warning != "" {
+		return fallback(obs.ErrorKind, obs.Error)
+	}
+	obs.FetchedAt = float64(now.UnixMilli()) / 1000
+	obs.AgeS = ptr(0.0)
+	return obs
+}
+func (c Collector) Refresh(ctx context.Context, pool string) (Observation, error) {
+	if !knownPool(pool) || pool == "anthropic-api" {
+		return Observation{}, fmt.Errorf("unknown automatic pool")
+	}
+	c.Worker = true
+	c.NoCache = true
+	r, e := c.Collect(ctx, []string{pool})
+	if e != nil {
+		return Observation{}, e
+	}
+	if len(r) != 1 {
+		return Observation{}, fmt.Errorf("refresh unavailable")
+	}
+	return r[0], nil
+}

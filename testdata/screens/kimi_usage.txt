@@ -1,0 +1,4 @@
+Kimi Code usage
+5h limit: 80% left, resets in 3h 20m
+Weekly limit: 25% used, resets in 6d 2h
+Monthly limit: 90% left, resets in 25d

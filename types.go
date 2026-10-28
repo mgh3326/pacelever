@@ -206,3 +206,44 @@ func knownPool(pool string) bool {
 	}
 	return false
 }
+
+// DisplayObservation uses manual evidence only for an unavailable automatic
+// reading. A confirmed automatic cutoff cannot be hidden on a dashboard.
+func DisplayObservation(o Observation, cfg Config, manual ManualStore, now time.Time) Observation {
+	if o.Error == "" && o.Warning == "" && !o.Stale && len(matching(o.Buckets, "")) > 0 {
+		return o
+	}
+	policy := cfg.Pool(o.ID, now)
+	cutoff := policy.Cutoff
+	if cfg.Pools[o.ID].Cutoff == 0 && policy.Class == "preserve" {
+		cutoff = 90
+	}
+	for _, b := range matching(o.Buckets, "") {
+		if validPct(b.UsedPct) && *b.UsedPct >= cutoff {
+			return o
+		}
+	}
+	valid := manual.Valid(o.ID, now)
+	covered := map[string]bool{}
+	for _, m := range valid {
+		covered[m.Window] = true
+	}
+	for _, w := range RequiredWindows(o.ID, o.Plan, true) {
+		if !covered[w] {
+			return o
+		}
+	}
+	if len(valid) == 0 {
+		return o
+	}
+	out := o
+	out.Error = ""
+	out.Warning = ""
+	out.Stale = false
+	out.Source = "operator"
+	out.Buckets = nil
+	for _, m := range valid {
+		out.Buckets = append(out.Buckets, Bucket{Label: m.Window, Window: m.Window, UsedPct: m.UsedPct, ResetsAt: m.ResetsAt, Scope: Scope{Kind: "account"}, Horizon: horizon(m.Window)})
+	}
+	return out
+}

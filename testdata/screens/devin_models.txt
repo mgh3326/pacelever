@@ -1,0 +1,6 @@
+SWE-2 (swe-2)
+  swe-2-high       SWE-2 High   [262K context, Free]
+  swe-2-medium     SWE-2 Medium [262K context, Free]
+  swe-2-max        SWE-2 Max    [262K context, Free]
+Fusion (fusion)
+  fusion-claude-opus-high-sidekick-swe-2-medium [Sidekick: Free]
