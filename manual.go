@@ -86,7 +86,7 @@ func (s ManualStore) Valid(pool string, now time.Time) []ManualObservation {
 	sort.Slice(out, func(i, j int) bool { return out[i].Window < out[j].Window })
 	return out
 }
-func AddManual(m ManualObservation, ttl time.Duration, now time.Time) (ManualObservation, error) {
+func prepareManual(m ManualObservation, ttl time.Duration, now time.Time) (ManualObservation, error) {
 	if !knownPool(m.Pool) || m.Reason == "" {
 		return m, fmt.Errorf("known pool and --reason required")
 	}
@@ -149,6 +149,13 @@ func AddManual(m ManualObservation, ttl time.Duration, now time.Time) (ManualObs
 		return m, e
 	}
 	m.ID = "manual-" + hex.EncodeToString(b)
+	return m, nil
+}
+func AddManual(m ManualObservation, ttl time.Duration, now time.Time) (ManualObservation, error) {
+	m, e := prepareManual(m, ttl, now)
+	if e != nil {
+		return m, e
+	}
 	e = WithFileLock(filepath.Join(CacheDir(), "manual.lock"), false, func() error {
 		s, e := LoadManual()
 		if e != nil {

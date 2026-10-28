@@ -40,7 +40,17 @@ type BenchConfig struct {
 	AllowPlaintextReps       bool    `toml:"allow_plaintext_reps"`
 	AllowPlaintextQuotaShare bool    `toml:"allow_plaintext_quota_share"`
 }
+type QuotaConfig struct {
+	URL                string            `toml:"url"`
+	CredentialEnv      string            `toml:"credential_env"`
+	FreshTTLS          float64           `toml:"fresh_ttl_s"`
+	LeaseTTLS          int               `toml:"lease_ttl_s"`
+	WaitS              float64           `toml:"wait_s"`
+	Accounts           map[string]string `toml:"accounts"`
+	MeasurableAccounts []string          `toml:"measurable_accounts"`
+}
 type Config struct {
+	Quota    QuotaConfig              `toml:"quota"`
 	Pools    map[string]PoolPolicy    `toml:"pools"`
 	Profiles map[string]ProfilePolicy `toml:"profiles"`
 	Bench    BenchConfig              `toml:"bench"`
@@ -113,6 +123,7 @@ func LoadConfig() (Config, error) {
 	normalized := string(b)
 	// Pool expiry may be an unquoted TOML date. Decode that separately below.
 	type wire struct {
+		Quota    QuotaConfig               `toml:"quota"`
 		Pools    map[string]map[string]any `toml:"pools"`
 		Profiles map[string]ProfilePolicy  `toml:"profiles"`
 		Bench    BenchConfig               `toml:"bench"`
@@ -121,6 +132,10 @@ func LoadConfig() (Config, error) {
 	var w wire
 	if e = toml.Unmarshal([]byte(normalized), &w); e != nil {
 		return c, fmt.Errorf("invalid configuration types (values withheld)")
+	}
+	c.Quota = w.Quota
+	if e := c.Quota.Validate(); e != nil {
+		return c, e
 	}
 	c.Profiles = w.Profiles
 	c.Bench = w.Bench

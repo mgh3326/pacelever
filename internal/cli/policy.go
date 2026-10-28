@@ -208,14 +208,14 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 	}
 	return 2, fmt.Errorf("unknown policy command")
 }
-func (a *App) manual(v args) (int, error) {
+func (a *App) manual(ctx context.Context, v args) (int, error) {
 	pool := v.at(2)
 	if pool == "" {
 		pool = v.get("pool")
 	}
 	switch v.at(1) {
 	case "list":
-		s, e := pl.LoadManual()
+		s, e := a.Collector.ReadManual(ctx)
 		if e != nil {
 			return 2, e
 		}
@@ -227,7 +227,7 @@ func (a *App) manual(v args) (int, error) {
 		if pool == "" {
 			return 2, fmt.Errorf("pool required")
 		}
-		return 0, pl.ClearManual(pool)
+		return 0, a.Collector.ClearManual(ctx, pool)
 	case "set":
 		if e := v.required("measured-at", "reason"); e != nil {
 			return 2, e
@@ -273,7 +273,7 @@ func (a *App) manual(v args) (int, error) {
 			}
 			m.ResetsAt = at.Add(duration).Format(time.RFC3339Nano)
 		}
-		r, e := pl.AddManual(m, ttl, time.Now().UTC())
+		r, e := a.Collector.AddManual(ctx, m, ttl, time.Now().UTC())
 		if e != nil {
 			return 2, e
 		}

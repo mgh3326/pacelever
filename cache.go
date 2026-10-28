@@ -25,6 +25,8 @@ type CacheEntry struct {
 	NegativeUntil float64      `json:"negative_until,omitempty"`
 }
 type Collector struct {
+	Shared          ObservationSource
+	Selectors       map[string]string
 	CachePath       string
 	LegacyCachePath string
 	Config          Config
@@ -147,7 +149,10 @@ func (c Collector) Collect(ctx context.Context, pools []string) ([]Observation, 
 	}
 	entries, e := loadSnapshots(own, legacy)
 	if e != nil {
-		return nil, e
+		if c.sharedSource() == nil {
+			return nil, e
+		}
+		entries = map[string]CacheEntry{}
 	}
 	results := make([]Observation, len(pools))
 	var wg sync.WaitGroup
@@ -206,6 +211,9 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 	}
 	if !enabled {
 		return Observation{ID: pool, Error: "pool unsubscribed", ErrorKind: "unsubscribed", PoolClass: p.Class}
+	}
+	if source := c.sharedSource(); source != nil {
+		return c.sharedOne(ctx, source, pool, entry, now)
 	}
 	ttl := c.TTL
 	if ttl <= 0 {
