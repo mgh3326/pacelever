@@ -83,3 +83,25 @@ func TestLegacyManualAuditPreserved(t *testing.T) {
 		t.Fatal("legacy audit fields lost")
 	}
 }
+
+func TestExplorationConfigData(t *testing.T) {
+	isolate(t)
+	data := `[pools.claude.exploration]
+fraction = 0.05
+experiment_id = "cohort-fixture"
+model_order = ["opus", "sonnet", "haiku"]
+`
+	if e := AtomicWrite(ConfigPath(), []byte(data)); e != nil {
+		t.Fatal(e)
+	}
+	c, e := LoadConfig()
+	if e != nil || !c.Pools["claude"].Exploration.Active() || c.Pools["claude"].Exploration.Fraction != 0.05 {
+		t.Fatalf("policy data %v", e)
+	}
+	if e = AtomicWrite(ConfigPath(), []byte("[pools.claude.exploration]\nfraction = 1.5\nexperiment_id = 'cohort-fixture'\n")); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = LoadConfig(); e == nil {
+		t.Fatal("invalid exploration fraction accepted")
+	}
+}

@@ -110,6 +110,8 @@ func defaultEffort(profile string, rows []CatalogRow, defaults map[string]string
 }
 
 type LaunchDecision struct {
+	Label                 ExperimentLabel   `json:"label"`
+	Exploration           *ExplorationAudit `json:"exploration,omitempty"`
 	Profile               string            `json:"profile"`
 	ModelID               string            `json:"model_id"`
 	Effort                string            `json:"effort"`
@@ -194,6 +196,7 @@ func ResolveLaunch(c Catalog, cfg Config, req Request) (LaunchDecision, error) {
 		return LaunchDecision{}, deny(Blocked, "catalog is stale; non-default gate requires --operator-request")
 	}
 	d := LaunchDecision{Profile: req.Profile, ModelID: row.ModelID, Effort: resolved, Pool: row.Pool, Gate: row.Gate, Grade: row.Grade, GateReason: row.GateReason, Catalog: c.Info, OperatorRequest: req.OperatorRequest != "", Billing: row.Billing, Family: row.Family}
+	d.Label = baselineLabel(d.Profile, d.Effort, ExplorationPolicy{})
 	if d.Billing == "" {
 		d.Billing = "unknown"
 	}

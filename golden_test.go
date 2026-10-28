@@ -82,6 +82,12 @@ func TestScopefuelGolden(t *testing.T) {
 			var got, expected any
 			_ = json.Unmarshal(actual, &got)
 			_ = json.Unmarshal(tt.Launch, &expected)
+			if m, ok := got.(map[string]any); ok {
+				delete(m, "label")
+			}
+			if launch.Label.Profile != launch.Profile || launch.Label.Effort != launch.Effort || launch.Label.Arm != "baseline" {
+				t.Error("baseline label missing")
+			}
 			if !reflect.DeepEqual(got, expected) {
 				t.Errorf("launch JSON mismatch\ngot  %s\nwant %s", actual, tt.Launch)
 			}

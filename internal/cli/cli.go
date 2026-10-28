@@ -98,7 +98,7 @@ func (a *App) catalog(ctx context.Context) pl.Catalog {
 	return c
 }
 func request(a args) pl.Request {
-	return pl.Request{Profile: a.get("profile"), Effort: a.get("effort"), Role: a.get("role"), Purpose: a.get("purpose"), OperatorRequest: a.get("operator-request"), RequestedBy: a.get("requested-by"), PaceOverride: a.get("pace-override"), E6Arm: firstEnv("PACELEVER_E6_ARM", "SCOPEFUEL_E6_ARM"), Area: a.get("area")}
+	return pl.Request{TaskID: a.get("task"), RequiredGrade: a.get("grade"), Profile: a.get("profile"), Effort: a.get("effort"), Role: a.get("role"), Purpose: a.get("purpose"), OperatorRequest: a.get("operator-request"), RequestedBy: a.get("requested-by"), PaceOverride: a.get("pace-override"), E6Arm: firstEnv("PACELEVER_E6_ARM", "SCOPEFUEL_E6_ARM"), Area: a.get("area")}
 }
 func firstEnv(keys ...string) string {
 	for _, k := range keys {
@@ -273,7 +273,7 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 				}
 				in.AreaExceptions = exceptions
 			}
-			rows := pl.Recommend(in, grade, v.get("role"), v.get("area"))
+			rows := pl.RecommendFor(in, pl.RecommendationRequest{Grade: grade, Role: v.get("role"), Area: v.get("area"), TaskID: v.get("task")})
 			if v.flags["json"] {
 				return 0, a.json(map[string]any{"grade": grade, "rows": rows, "catalog": c.Info})
 			}

@@ -12,6 +12,7 @@ import (
 )
 
 type PoolPolicy struct {
+	Exploration        ExplorationPolicy  `toml:"exploration" json:"exploration"`
 	Class              string             `toml:"class" json:"class,omitempty"`
 	Until              string             `toml:"until" json:"until,omitempty"`
 	Note               string             `toml:"note" json:"note,omitempty"`
@@ -142,6 +143,9 @@ func LoadConfig() (Config, error) {
 		}
 		if p.Class != "" && p.Class != "spend" && p.Class != "preserve" && p.Class != "exclude" {
 			return c, fmt.Errorf("invalid pools.%s.class", name)
+		}
+		if e := p.Exploration.Validate(); e != nil {
+			return c, fmt.Errorf("invalid pools.%s.exploration: %w", name, e)
 		}
 		if p.Cutoff < 0 || p.Cutoff > 100 {
 			return c, fmt.Errorf("invalid pools.%s.cutoff", name)

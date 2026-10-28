@@ -349,18 +349,20 @@ func matching(buckets []Bucket, group string) []Bucket {
 }
 
 type Recommendation struct {
-	Profile   string   `json:"profile"`
-	Effort    string   `json:"effort"`
-	Grade     string   `json:"grade"`
-	Pool      string   `json:"pool"`
-	Family    string   `json:"family"`
-	Billing   string   `json:"billing"`
-	Kind      string   `json:"kind"`
-	Reason    string   `json:"reason"`
-	UsedPct   *float64 `json:"used_pct"`
-	Promotion string   `json:"promotion,omitempty"`
-	Score     float64  `json:"score"`
-	priority  int
+	Label       ExperimentLabel   `json:"label"`
+	Exploration *ExplorationAudit `json:"exploration,omitempty"`
+	Profile     string            `json:"profile"`
+	Effort      string            `json:"effort"`
+	Grade       string            `json:"grade"`
+	Pool        string            `json:"pool"`
+	Family      string            `json:"family"`
+	Billing     string            `json:"billing"`
+	Kind        string            `json:"kind"`
+	Reason      string            `json:"reason"`
+	UsedPct     *float64          `json:"used_pct"`
+	Promotion   string            `json:"promotion,omitempty"`
+	Score       float64           `json:"score"`
+	priority    int
 }
 
 func (r Recommendation) LaunchSpelling() string {
@@ -373,6 +375,9 @@ func (r Recommendation) LaunchSpelling() string {
 // Recommend ranks only rows placed in the requested grade. Every paid pool can
 // trigger alternative promotion. Pace changes priority, never eligibility.
 func Recommend(in Inputs, grade, role, area string) []Recommendation {
+	return RecommendFor(in, RecommendationRequest{Grade: grade, Role: role, Area: area})
+}
+func recommendBase(in Inputs, grade, role, area string) []Recommendation {
 	var out []Recommendation
 	c := in.catalog()
 	now := in.clock()
@@ -459,6 +464,10 @@ func Recommend(in Inputs, grade, role, area string) []Recommendation {
 		}
 		if a.Profile != b.Profile {
 			return a.Profile < b.Profile
+		}
+		preferred := c.Defaults[a.Profile]
+		if (a.Effort == preferred) != (b.Effort == preferred) {
+			return a.Effort == preferred
 		}
 		return effortRank(a.Effort) < effortRank(b.Effort)
 	})

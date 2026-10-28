@@ -29,7 +29,19 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 		if req.Profile == "" {
 			return 2, fmt.Errorf("profile required")
 		}
-		d, e := pl.ResolveLaunch(a.catalog(ctx), a.Config, req)
+		catalog := a.catalog(ctx)
+		d, e := pl.ResolveLaunch(catalog, a.Config, req)
+		if e == nil && a.Config.Pools[d.Pool].Exploration.Active() {
+			inputs := pl.Inputs{Catalog: catalog, Config: a.Config, Now: time.Now().UTC()}
+			if strings.TrimSpace(req.TaskID) != "" && req.RequiredGrade != "" {
+				var inputErr error
+				inputs, inputErr = a.inputs(ctx, catalog, []string{d.Pool})
+				if inputErr != nil {
+					return 2, inputErr
+				}
+			}
+			d, e = pl.ResolveLaunchWithInputs(inputs, req)
+		}
 		if e != nil {
 			return 3, e
 		}
@@ -37,6 +49,7 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 			return 0, a.json(d)
 		}
 		fmt.Fprintf(a.Out, "profile %s\nmodel_id %s\neffort %s\npool %s\nfamily %s\nbilling %s\ngate %s\ngrade %s\ncatalog %s\n", d.Profile, d.ModelID, d.Effort, d.Pool, d.Family, d.Billing, d.Gate, d.Grade, d.Catalog.Source)
+		fmt.Fprintf(a.Out, "arm %s\nexperiment_id %s\n", d.Label.Arm, labelID(d.Label))
 		return 0, nil
 	case "list":
 		if v.flags["json"] {
@@ -267,4 +280,11 @@ func (a *App) manual(v args) (int, error) {
 		return 0, a.json(r)
 	}
 	return 2, fmt.Errorf("unknown manual command")
+}
+
+func labelID(label pl.ExperimentLabel) string {
+	if label.ExperimentID == nil {
+		return "-"
+	}
+	return *label.ExperimentID
 }

@@ -56,6 +56,8 @@ type Observation struct {
 	PublishFPKind  string   `json:"publish_fp_kind,omitempty"`
 }
 type Request struct {
+	TaskID          string `json:"task_id,omitempty"`
+	RequiredGrade   string `json:"required_grade,omitempty"`
 	Profile         string `json:"profile"`
 	Effort          string `json:"effort,omitempty"`
 	Role            string `json:"role,omitempty"`

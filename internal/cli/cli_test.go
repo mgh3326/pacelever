@@ -78,7 +78,16 @@ func TestLaunchCLIGoldens(t *testing.T) {
 			}
 			if code == 0 {
 				var got any
-				if json.Unmarshal(out.Bytes(), &got) != nil || !reflect.DeepEqual(got, tt.Launch) {
+				if json.Unmarshal(out.Bytes(), &got) != nil {
+					t.Fatalf("invalid launch JSON: %s", out.String())
+				}
+				m := got.(map[string]any)
+				label, ok := m["label"].(map[string]any)
+				if !ok || label["arm"] != "baseline" || label["profile"] != m["profile"] || label["effort"] != m["effort"] {
+					t.Fatal("baseline label missing")
+				}
+				delete(m, "label")
+				if !reflect.DeepEqual(got, tt.Launch) {
 					t.Fatalf("JSON differs: %s", out.String())
 				}
 			}
