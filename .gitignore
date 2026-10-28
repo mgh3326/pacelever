@@ -1,0 +1,5 @@
+/dist/
+/pacelever
+*.test
+*.prof
+.DS_Store
