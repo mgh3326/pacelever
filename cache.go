@@ -2,6 +2,7 @@ package pacelever
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,29 +43,65 @@ func LoadSnapshots() (map[string]CacheEntry, error) {
 }
 func loadSnapshots(ownPath, legacyPath string) (map[string]CacheEntry, error) {
 	merged := map[string]CacheEntry{}
-	var legacy map[string]CacheEntry
-	if e := func() error {
-		if legacyPath == "" {
-			return nil
+	for _, path := range []string{legacyPath, ownPath} {
+		if path == "" {
+			continue
 		}
-		return ReadJSON(legacyPath, &legacy)
-	}(); e != nil && !os.IsNotExist(e) {
-		return nil, e
-	}
-	for k, v := range legacy {
-		if knownPool(k) {
-			merged[k] = v
+		var raw map[string]json.RawMessage
+		if e := ReadJSON(path, &raw); e != nil {
+			if os.IsNotExist(e) {
+				continue
+			}
+			return nil, e
 		}
-	}
-	var own map[string]CacheEntry
-	if e := ReadJSON(ownPath, &own); e != nil && !os.IsNotExist(e) {
-		return nil, e
-	}
-	for k, v := range own {
-		merged[k] = v
+		for pool, data := range raw {
+			if !knownPool(pool) {
+				continue
+			}
+			var entry CacheEntry
+			if e := json.Unmarshal(data, &entry); e != nil {
+				return nil, fmt.Errorf("invalid cache entry for pool %s", pool)
+			}
+			merged[pool] = entry
+		}
 	}
 	return merged, nil
 }
+
+// Legacy scopefuel records failed-probe text as a string; native entries may
+// carry a structured observation. Both forms preserve the last good snapshot.
+func (c *CacheEntry) UnmarshalJSON(data []byte) error {
+	type plain CacheEntry
+	var fields map[string]json.RawMessage
+	if e := json.Unmarshal(data, &fields); e != nil {
+		return fmt.Errorf("invalid cache entry")
+	}
+	failed := fields["last_error"]
+	delete(fields, "last_error")
+	body, e := json.Marshal(fields)
+	if e != nil {
+		return e
+	}
+	var value plain
+	if e = json.Unmarshal(body, &value); e != nil {
+		return fmt.Errorf("invalid cache entry fields")
+	}
+	if len(failed) > 0 && string(failed) != "null" {
+		var message string
+		if json.Unmarshal(failed, &message) == nil {
+			value.LastError = &Observation{Error: message, ErrorKind: "legacy_failure"}
+		} else {
+			var observation Observation
+			if json.Unmarshal(failed, &observation) != nil {
+				return fmt.Errorf("invalid cache failure metadata")
+			}
+			value.LastError = &observation
+		}
+	}
+	*c = CacheEntry(value)
+	return nil
+}
+
 func updateSnapshot(ownPath, pool string, obs Observation, now time.Time) error {
 	return WithFileLock(ownPath+".lock", false, func() error {
 		entries := map[string]CacheEntry{}

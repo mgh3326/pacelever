@@ -80,3 +80,24 @@ func TestLegacySnapshotCompatibility(t *testing.T) {
 		t.Fatal("read created cache")
 	}
 }
+
+func TestLegacyTextFailureMetadata(t *testing.T) {
+	isolate(t)
+	path := legacyCachePath()
+	body := `{"claude":{"fetched_at":1793145600,"result":{"id":"claude","pool_class":"spend","buckets":[{"window":"7d","used_pct":10,"scope":{"kind":"account"}}]},"last_error":"legacy probe failure","last_error_at":1793145610},"agy":{"result":"retired provider shape","last_error":["ignored"]}}`
+	if e := AtomicWrite(path, []byte(body)); e != nil {
+		t.Fatal(e)
+	}
+	entries, e := LoadSnapshots()
+	if e != nil || len(entries) != 1 || entries["claude"].LastError == nil || *entries["claude"].Result.Buckets[0].UsedPct != 10 {
+		t.Fatalf("legacy failure metadata rejected: %v", e)
+	}
+	native := CachePath()
+	if e = WriteJSON(native, entries); e != nil {
+		t.Fatal(e)
+	}
+	entries, e = LoadSnapshots()
+	if e != nil || entries["claude"].LastError == nil {
+		t.Fatalf("structured failure metadata rejected: %v", e)
+	}
+}
