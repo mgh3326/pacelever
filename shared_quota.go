@@ -207,8 +207,11 @@ func sharedAuto(x *SharedObservation, pool, key string, now time.Time, ttl time.
 		return Observation{}, false
 	}
 	age := now.Sub(x.MeasuredAt)
-	if age < 0 || age > ttl || len(x.Buckets) == 0 {
+	if age < -time.Minute || age > ttl || len(x.Buckets) == 0 {
 		return Observation{}, false
+	}
+	if age < 0 {
+		age = 0
 	}
 	o := Observation{ID: pool, Plan: x.Plan, Source: "handoffkeep", FetchedAt: float64(x.MeasuredAt.UnixMilli()) / 1000, AgeS: ptr(age.Seconds()), AccountFP: strings.SplitN(key, ":", 2)[1], AccountFPKind: "account", AccountFPMatch: ptr(true)}
 	for _, b := range x.Buckets {
@@ -255,7 +258,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		if !reachable {
 			return c.sharedFallback(pool, key, kind, entry, now)
 		}
-		o, _ := sharedAuto(latest.Observation, pool, key, now, 365*24*time.Hour)
+		o, _ := sharedAuto(latest.Observation, pool, key, c.quotaNow(), 365*24*time.Hour)
 		o.ID = pool
 		o.Stale = true
 		o.ErrorKind = kind
@@ -280,7 +283,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	if pool == "anthropic-api" {
 		return finish(fail("manual_only"))
 	}
-	if o, ok := sharedAuto(latest.Observation, pool, key, now, c.Config.Quota.freshTTL()); ok {
+	if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL()); ok {
 		_ = updateSnapshot(c.cacheFile(), pool, o, time.UnixMilli(int64(o.FetchedAt*1000)), entry)
 		return finish(o)
 	}
@@ -326,7 +329,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		reachable = false
 		return fail("shared_unavailable")
 	}
-	if o, ok := sharedAuto(latest.Observation, pool, key, now, c.Config.Quota.freshTTL()); ok {
+	if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL()); ok {
 		return finish(o)
 	}
 	provider := c.Providers[pool]

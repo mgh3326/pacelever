@@ -172,7 +172,7 @@ func TestSharedQuotaRereadAndReadOnly(t *testing.T) {
 	for _, readOnly := range []bool{false, true} {
 		f := &fakeHK{onRead: func(n int) *SharedObservation {
 			if n == 2 {
-				return sampleShared(time.Now().Add(-time.Second))
+				return sampleShared(time.Now())
 			}
 			return nil
 		}}
@@ -311,5 +311,16 @@ func TestSharedQuotaHTTPWire(t *testing.T) {
 	}
 	if strings.Join(methods, ",") != "GET,POST,PUT,DELETE" {
 		t.Fatal(methods)
+	}
+}
+
+func TestSharedQuotaClockSkew(t *testing.T) {
+	now := time.Now().UTC()
+	key := sharedTestKey
+	if o, ok := sharedAuto(sampleShared(now.Add(20*time.Second)), "grok", key, now, 5*time.Minute); !ok || o.Stale || o.AgeS == nil || *o.AgeS != 0 {
+		t.Fatal("small clock skew invalidated fresh observation")
+	}
+	if _, ok := sharedAuto(sampleShared(now.Add(2*time.Minute)), "grok", key, now, 5*time.Minute); ok {
+		t.Fatal("unbounded future observation accepted")
 	}
 }
