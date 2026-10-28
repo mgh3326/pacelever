@@ -224,6 +224,17 @@ func resolveRow(c Catalog, req Request) (CatalogRow, string, string, error) {
 			return CatalogRow{}, "", "", deny(Blocked, "credit effort is not placed")
 		}
 	}
+	for _, barred := range []string{"codex-med", "builder-terra-high", "builder-terra-xhigh", "builder-terra-max"} {
+		if profile == barred {
+			return CatalogRow{}, "", "", deny(Blocked, "model_refused: retired model identity")
+		}
+	}
+	for _, candidate := range c.Rows {
+		if candidate.Profile == profile && candidate.ModelID == "gpt-5.6-terra" {
+			return CatalogRow{}, "", "", deny(Blocked, "model_refused: retired model identity")
+		}
+	}
+
 	rows := c.profileRows(profile)
 	if len(rows) == 0 {
 		return CatalogRow{}, "", "", deny(Blocked, fmt.Sprintf("profile %q is unknown or retired", profile))

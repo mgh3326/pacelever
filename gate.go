@@ -299,7 +299,7 @@ func gate(in Inputs, req Request) Decision {
 			d.Inflight = fmt.Sprintf("inflight=%d", *count)
 			for _, b := range buckets {
 				reserve := policy.InflightReservePct[b.Window]
-				if reserve > 0 && validPct(b.UsedPct) && *b.UsedPct+float64(*count+1)*reserve >= cutoff {
+				if reserve > 0 && validPct(b.UsedPct) && *b.UsedPct+float64(*count)*reserve >= cutoff {
 					return failure(d, Blocked, fmt.Sprintf("inflight_headroom window=%s used=%g n=%d reserve=%g cutoff=%g", b.Window, *b.UsedPct, *count, reserve, cutoff))
 				}
 			}
@@ -378,6 +378,9 @@ func Recommend(in Inputs, grade, role, area string) []Recommendation {
 	now := in.clock()
 	over := map[string]float64{}
 	for _, o := range in.Observations {
+		if o.Stale || o.Error != "" {
+			continue
+		}
 		for _, b := range o.Buckets {
 			if b.Window == "7d" && b.Scope.Kind == "account" {
 				if p := Pace(b, now); p != nil && *p >= in.Config.PaceThreshold() {
@@ -432,9 +435,16 @@ func Recommend(in Inputs, grade, role, area string) []Recommendation {
 		// Exceptions are tied to the exact current model identity and cannot place
 		// a new grade, open a gate or exclude a row.
 		for _, ex := range in.AreaExceptions {
-			if area != "" && ex.Area == area && ex.Profile == row.Profile && ex.Effort == row.Effort && ex.ModelID == row.ModelID && d.OK && ex.Action == "prefer" {
-				r.Score += 10
-				r.Reason += " area preference: " + ex.Reason
+			if area != "" && ex.Area == area && ex.Profile == row.Profile && (ex.Effort == "" || ex.Effort == row.Effort) && ex.ModelID == row.ModelID && d.OK {
+				if ex.Action == "prefer" {
+					r.Score += 10
+					r.Reason += " area preference: " + ex.Reason
+				}
+				if ex.Action == "exclude" {
+					r.Kind = "excluded"
+					r.priority = 9
+					r.Reason = "area exclusion: " + ex.Reason
+				}
 			}
 		}
 		out = append(out, r)

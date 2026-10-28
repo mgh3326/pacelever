@@ -1,0 +1,38 @@
+[
+  {
+    "profile": "cc-qwen38",
+    "slug": "cline-pass/qwen3.8-max",
+    "recorded": "private/qwen3p8-max-wave",
+    "as_of": "2026-08-15"
+  },
+  {
+    "profile": "oc-dsflash",
+    "slug": "cline-pass/deepseek-v4-flash",
+    "recorded": "deepseek/deepseek-v4-flash",
+    "as_of": "2026-08-15"
+  },
+  {
+    "profile": "oc-glm",
+    "slug": "cline-pass/glm-5.2",
+    "recorded": "private/glm-5p2-wave",
+    "as_of": "2026-08-15"
+  },
+  {
+    "profile": "cc-glm",
+    "slug": "cline-pass/glm-5.2",
+    "recorded": "private/glm-5p2-wave",
+    "as_of": "2026-08-15"
+  },
+  {
+    "profile": "oc-qwen37-max",
+    "slug": "cline-pass/qwen3.7-max",
+    "recorded": null,
+    "as_of": null
+  },
+  {
+    "profile": "oc-minimax-m3",
+    "slug": "cline-pass/minimax-m3",
+    "recorded": null,
+    "as_of": null
+  }
+]

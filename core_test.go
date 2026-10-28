@@ -99,3 +99,29 @@ func TestPaceAllPaidPools(t *testing.T) {
 		})
 	}
 }
+
+func TestCreditRestrictedRungs(t *testing.T) {
+	for _, gateName := range []string{"consult_only", "escalation", "unplaced"} {
+		for _, role := range []string{"worker", "tester", "builder", ""} {
+			t.Run(gateName+"/"+role, func(t *testing.T) {
+				c := BundledCatalog()
+				g := gateName
+				placed := true
+				if g == "unplaced" {
+					g = "default"
+					placed = false
+				}
+				c.Rows = []CatalogRow{{Profile: "pi-sonnet55", Effort: "high", ModelID: "anthropic/claude-sonnet-5-5", Pool: "anthropic-api", Grade: "A", Gate: g, Placed: placed}}
+				r := Request{Profile: "pi-sonnet55", Effort: "high", Role: role, E6Arm: "pi-sonnet55@high"}
+				if g == "consult_only" {
+					r.OperatorRequest = "hk:task/1"
+				}
+				_, e := ResolveLaunch(c, Config{}, r)
+				want := role == "worker" || role == "tester"
+				if (e == nil) != want {
+					t.Fatalf("error=%v allowed=%t", e, want)
+				}
+			})
+		}
+	}
+}

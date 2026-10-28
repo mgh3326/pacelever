@@ -51,7 +51,7 @@ func LoadManual() (ManualStore, error) {
 	if e != nil {
 		return s, e
 	}
-	if s.Latest == nil || s.History == nil {
+	if (s.Schema != "scopefuel.manual.v1" && s.Schema != "pacelever.manual.v1") || s.Latest == nil || s.History == nil {
 		return s, fmt.Errorf("invalid manual observation store")
 	}
 	return s, nil

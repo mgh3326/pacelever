@@ -1,0 +1,98 @@
+package pacelever
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"testing"
+	"time"
+)
+
+func TestQuotaShareIdentityAndTTL(t *testing.T) {
+	var payload QuotaSnapshot
+	b := fakeBench(t, func(*http.Request) (*http.Response, error) {
+		body, _ := json.Marshal(payload)
+		envelope, _ := json.Marshal(map[string]any{"document": map[string]any{"body": string(body)}})
+		return response(200, string(envelope)), nil
+	})
+	payload = QuotaSnapshot{Schema: "scopefuel.quota-share.v1", Pool: "claude", AccountFP: "example-fingerprint", MeasuredAt: testNow.Add(-time.Minute).Format(time.RFC3339), Buckets: observation("claude", 10).Buckets}
+	original := Observation{ID: "claude", Error: "unavailable", AccountFP: "example-fingerprint", AccountFPKind: "account"}
+	got := b.QuotaFallback(context.Background(), original, "")
+	if got.Source != "remote" {
+		t.Fatal("valid peer not used")
+	}
+	payload.AccountFP = "different"
+	if got = b.QuotaFallback(context.Background(), original, ""); got.Source == "remote" {
+		t.Fatal("wrong account used")
+	}
+	payload.AccountFP = original.AccountFP
+	payload.MeasuredAt = testNow.Add(-16 * time.Minute).Format(time.RFC3339)
+	if got = b.QuotaFallback(context.Background(), original, ""); got.Source == "remote" {
+		t.Fatal("expired peer used")
+	}
+}
+func TestInflightDedupAndAge(t *testing.T) {
+	local := []InflightJob{{"job-a", testNow.Add(-time.Hour).Format(time.RFC3339)}, {"old-job", testNow.Add(-9 * time.Hour).Format(time.RFC3339)}}
+	remote := InflightSnapshot{Schema: "scopefuel.quota-inflight.v1", Pool: "codex", AccountFP: "example-fingerprint", Host: "fixture-peer", PublishedAt: testNow.Add(-24 * time.Hour).Format(time.RFC3339), Jobs: []InflightJob{{"job-a", testNow.Add(-time.Hour).Format(time.RFC3339)}, {"job-b", testNow.Add(-2 * time.Hour).Format(time.RFC3339)}}}
+	b := fakeBench(t, func(*http.Request) (*http.Response, error) {
+		body, _ := json.Marshal(remote)
+		raw, _ := json.Marshal(map[string]any{"documents": []any{map[string]any{"key": "quota/codex/example-fingerprint/inflight/fixture-peer", "body": string(body)}}})
+		return response(200, string(raw)), nil
+	})
+	read := b.Inflight(context.Background(), "codex", "example-fingerprint", local, true)
+	if read.N == nil || *read.N != 2 {
+		t.Fatalf("count %+v", read)
+	}
+	read = b.Inflight(context.Background(), "codex", "example-fingerprint", nil, false)
+	if read.N != nil {
+		t.Fatal("unknown local count converted to zero")
+	}
+}
+func TestInflightReserve(t *testing.T) {
+	in := Inputs{Now: testNow, Observations: []Observation{observation("claude", 80)}, Config: Config{Pools: map[string]PoolPolicy{"claude": {InflightReservePct: map[string]float64{"7d": 10}}}}, Inflight: map[string]*int{"claude": ptr(2)}}
+	if d := Gate(in, Request{Profile: "sonnet"}); d.ExitCode != 3 {
+		t.Fatalf("reserve did not block: %s", d.Reason)
+	}
+	in.Inflight = nil
+	if d := Gate(in, Request{Profile: "sonnet"}); d.ExitCode != 0 || d.Inflight != "inflight=unknown(local|remote)" {
+		t.Fatalf("unknown count changed admission %+v", d)
+	}
+}
+func TestFreeLimitAdvisoryAndIdentity(t *testing.T) {
+	isolate(t)
+	r := LimitRecord{ResetAt: testNow.Add(time.Hour).Format(time.RFC3339), ObservedAt: testNow.Format(time.RFC3339), Rung: "devin-swe2", Source: "job:fixture"}
+	if e := ObserveLimit("devin", r, false, "", testNow); e != nil {
+		t.Fatal(e)
+	}
+	if ActiveLimit("devin", testNow) == nil {
+		t.Fatal("observation not active")
+	}
+	if e := ObserveLimit("devin", r, true, "", testNow); e != nil {
+		t.Fatal(e)
+	}
+	if ActiveLimit("devin", testNow) != nil {
+		t.Fatal("clear failed")
+	}
+}
+func TestAreaPlacementBoundary(t *testing.T) {
+	in := Inputs{Now: testNow, Observations: []Observation{observation("claude", 10)}, AreaExceptions: []AreaException{{Profile: "sonnet", Effort: "high", ModelID: "claude-sonnet-5-5", Area: "backend", Action: "exclude", Reason: "hk:task/1"}}}
+	rows := Recommend(in, "A", "builder", "backend")
+	found := false
+	for _, r := range rows {
+		if r.Profile == "sonnet" && r.Effort == "high" {
+			found = true
+			if r.Kind != "excluded" {
+				t.Fatal("area exclusion ignored")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("placement disappeared")
+	}
+	in.AreaExceptions[0].ModelID = "old-model"
+	for _, r := range Recommend(in, "A", "builder", "backend") {
+		if r.Profile == "sonnet" && r.Effort == "high" && r.Kind != "candidate" {
+			t.Fatal("retired model exception applied")
+		}
+	}
+}

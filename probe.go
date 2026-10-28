@@ -298,17 +298,37 @@ func StartRefresh(pool string) error {
 	if !knownPool(pool) || pool == "anthropic-api" {
 		return fmt.Errorf("unknown automatic pool")
 	}
-	exe, e := os.Executable()
-	if e != nil {
+	err := WithFileLock(filepath.Join(CacheDir(), "refresh-"+pool+".lock"), true, func() error {
+		pidPath := filepath.Join(CacheDir(), "refresh-"+pool+".json")
+		var active struct {
+			PID       int    `json:"pid"`
+			StartedAt string `json:"started_at"`
+		}
+		if ReadJSON(pidPath, &active) == nil && active.PID > 1 {
+			if at, e := ParseTime(active.StartedAt); e == nil && time.Since(at) >= 0 && time.Since(at) < 2*time.Minute && syscall.Kill(active.PID, 0) == nil {
+				return nil
+			}
+		}
+		exe, e := os.Executable()
+		if e != nil {
+			return e
+		}
+		cmd := exec.Command(exe, "refresh", pool, "--_worker")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		cmd.Stdin = nil
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+		if e = cmd.Start(); e != nil {
+			return e
+		}
+		active.PID = cmd.Process.Pid
+		active.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		e = WriteJSON(pidPath, active)
+		_ = cmd.Process.Release()
 		return e
+	})
+	if err == ErrBusy {
+		return nil
 	}
-	cmd := exec.Command(exe, "refresh", pool, "--_worker")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Stdin = nil
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if e = cmd.Start(); e != nil {
-		return e
-	}
-	return cmd.Process.Release()
+	return err
 }

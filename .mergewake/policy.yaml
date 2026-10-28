@@ -1,0 +1,15 @@
+version: 1
+enabled: false
+required_checks:
+  - vet
+  - test
+  - probe-macos
+  - build-linux-amd64
+  - build-linux-arm64
+  - build-darwin-amd64
+  - build-darwin-arm64
+blocking:
+  - paths: [gate.go, catalog.go, config.go, share.go]
+    reason: Admission changes affect running work before a revert can land
+  - paths: [.github/workflows/**, .mergewake/**]
+    reason: Verification controls require operator review
