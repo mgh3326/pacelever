@@ -108,19 +108,37 @@ func firstEnv(keys ...string) string {
 	}
 	return ""
 }
+func (a *App) localManual() (pl.ManualStore, error) {
+	if a.Config.Quota.URL != "" {
+		return pl.ManualStore{}, nil
+	}
+	return pl.LoadManual()
+}
 func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inputs, error) {
+	if a.Config.Quota.URL != "" {
+		found := false
+		for _, pool := range pools {
+			if pool == "anthropic-api" {
+				found = true
+			}
+		}
+		if !found {
+			pools = append(append([]string(nil), pools...), "anthropic-api")
+		}
+	}
 	observations, e := a.Collector.Collect(ctx, pools)
 	if e != nil {
 		return pl.Inputs{}, e
 	}
-	manual, e := pl.LoadManual()
+	manual, e := a.localManual()
 	if e != nil {
 		return pl.Inputs{}, e
 	}
+	manual = a.Collector.ManualInputs(observations, manual)
 	now := time.Now().UTC()
 	in := pl.Inputs{Catalog: c, Config: a.Config, Observations: observations, Manual: manual, Now: now, Inflight: map[string]*int{}}
 	for i, o := range in.Observations {
-		if o.Error != "" || o.Stale {
+		if a.Config.Quota.URL == "" && (o.Error != "" || o.Stale) {
 			in.Observations[i] = a.Bench.QuotaFallback(ctx, o, "")
 		}
 		if len(a.Config.Pools[o.ID].InflightReservePct) > 0 {
@@ -141,7 +159,7 @@ func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inpu
 	for _, r := range c.Rows {
 		if strings.HasPrefix(r.Profile, "devin-fusion-sol61") {
 			fp := a.Config.Pools[r.Pool].FusionBillingFP
-			if fp != "" {
+			if fp != "" && a.Config.Quota.URL == "" {
 				for i, o := range in.Observations {
 					if o.ID == r.Pool && o.PublishFP != fp && o.AccountFP != fp {
 						remote := a.Bench.QuotaFallback(ctx, o, fp)
@@ -162,7 +180,7 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 	case "policy":
 		return a.policy(ctx, v)
 	case "manual":
-		return a.manual(v)
+		return a.manual(ctx, v)
 	case "bench":
 		return a.bench(ctx, v)
 	case "reps":
@@ -183,7 +201,9 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 		if o.Error != "" {
 			return 4, fmt.Errorf("%s", o.Error)
 		}
-		_ = a.Bench.PublishQuota(ctx, o)
+		if a.Config.Quota.URL == "" {
+			_ = a.Bench.PublishQuota(ctx, o)
+		}
 		return 0, a.json(o)
 	case "observe":
 		pool := "devin"
@@ -380,7 +400,7 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 	}
 	req := request(v)
 	c := a.catalog(ctx)
-	manual, e := pl.LoadManual()
+	manual, e := a.localManual()
 	if e != nil {
 		return 2, e
 	}
@@ -515,6 +535,7 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 			collector.CachePath = filepath.Join(base, "snapshot-"+event.Provider+"-"+event.Credential+".json")
 			collector.LegacyCachePath = ""
 			collector.Providers = pl.DefaultProvidersFor(a.Config, event.Selectors)
+			collector.Selectors = event.Selectors
 			for key, p := range collector.Providers {
 				if probe, ok := p.(pl.PTYProvider); ok {
 					probe.Guard = pl.GuardProcess

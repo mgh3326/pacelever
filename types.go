@@ -37,23 +37,25 @@ type Bucket struct {
 	Locked   bool     `json:"locked,omitempty"`
 }
 type Observation struct {
-	ID             string   `json:"id"`
-	Plan           string   `json:"plan,omitempty"`
-	Buckets        []Bucket `json:"buckets"`
-	PoolClass      string   `json:"pool_class"`
-	Source         string   `json:"source,omitempty"`
-	Error          string   `json:"error,omitempty"`
-	ErrorKind      string   `json:"error_kind,omitempty"`
-	Warning        string   `json:"warning,omitempty"`
-	Note           string   `json:"note,omitempty"`
-	Stale          bool     `json:"stale"`
-	FetchedAt      float64  `json:"fetched_at,omitempty"`
-	AgeS           *float64 `json:"age_s,omitempty"`
-	AccountFP      string   `json:"account_fp,omitempty"`
-	AccountFPKind  string   `json:"account_fp_kind,omitempty"`
-	AccountFPMatch *bool    `json:"account_fp_match,omitempty"`
-	PublishFP      string   `json:"publish_fp,omitempty"`
-	PublishFPKind  string   `json:"publish_fp_kind,omitempty"`
+	Degraded       bool                `json:"degraded,omitempty"`
+	SharedManual   []ManualObservation `json:"-"`
+	ID             string              `json:"id"`
+	Plan           string              `json:"plan,omitempty"`
+	Buckets        []Bucket            `json:"buckets"`
+	PoolClass      string              `json:"pool_class"`
+	Source         string              `json:"source,omitempty"`
+	Error          string              `json:"error,omitempty"`
+	ErrorKind      string              `json:"error_kind,omitempty"`
+	Warning        string              `json:"warning,omitempty"`
+	Note           string              `json:"note,omitempty"`
+	Stale          bool                `json:"stale"`
+	FetchedAt      float64             `json:"fetched_at,omitempty"`
+	AgeS           *float64            `json:"age_s,omitempty"`
+	AccountFP      string              `json:"account_fp,omitempty"`
+	AccountFPKind  string              `json:"account_fp_kind,omitempty"`
+	AccountFPMatch *bool               `json:"account_fp_match,omitempty"`
+	PublishFP      string              `json:"publish_fp,omitempty"`
+	PublishFPKind  string              `json:"publish_fp_kind,omitempty"`
 }
 type Request struct {
 	TaskID          string `json:"task_id,omitempty"`
@@ -212,6 +214,9 @@ func knownPool(pool string) bool {
 // DisplayObservation uses manual evidence only for an unavailable automatic
 // reading. A confirmed automatic cutoff cannot be hidden on a dashboard.
 func DisplayObservation(o Observation, cfg Config, manual ManualStore, now time.Time) Observation {
+	if o.Degraded {
+		return o
+	}
 	if o.Error == "" && o.Warning == "" && !o.Stale && len(matching(o.Buckets, "")) > 0 {
 		return o
 	}
