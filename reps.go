@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,25 +14,33 @@ import (
 )
 
 type Rep struct {
-	LocalID       int64  `json:"local_id,omitempty"`
-	ID            int64  `json:"id,omitempty"`
-	OriginID      int64  `json:"origin_id"`
-	Profile       string `json:"profile"`
-	ModelID       string `json:"model_id"`
-	TaskRef       string `json:"task_ref"`
-	Tier          string `json:"tier"`
-	Role          string `json:"role"`
-	Rounds        int    `json:"rounds"`
-	BlockersFound int    `json:"blockers_found"`
-	Completed     *int   `json:"completed"`
-	InputTokens   *int64 `json:"input_tokens"`
-	OutputTokens  *int64 `json:"output_tokens"`
-	Notes         string `json:"notes"`
-	RecordedAt    string `json:"recorded_at"`
-	Effort        string `json:"effort"`
-	Grade         string `json:"grade"`
-	TableGrade    string `json:"table_grade"`
-	Pending       bool   `json:"pending,omitempty"`
+	FirstCIGreen       *bool          `json:"first_ci_green,omitempty"`
+	FindingsBySeverity map[string]int `json:"findings_by_severity"`
+	RevertedWithin7d   *bool          `json:"reverted_within_7d,omitempty"`
+	TimeToMergeS       *float64       `json:"time_to_merge_s,omitempty"`
+	ExperimentID       string         `json:"experiment_id,omitempty"`
+	ExperimentArm      string         `json:"experiment_arm,omitempty"`
+	OutcomeFinalized   *bool          `json:"outcome_finalized,omitempty"`
+	OutcomeDecision    string         `json:"outcome_decision,omitempty"`
+	LocalID            int64          `json:"local_id,omitempty"`
+	ID                 int64          `json:"id,omitempty"`
+	OriginID           int64          `json:"origin_id"`
+	Profile            string         `json:"profile"`
+	ModelID            string         `json:"model_id"`
+	TaskRef            string         `json:"task_ref"`
+	Tier               string         `json:"tier"`
+	Role               string         `json:"role"`
+	Rounds             int            `json:"rounds"`
+	BlockersFound      int            `json:"blockers_found"`
+	Completed          *int           `json:"completed"`
+	InputTokens        *int64         `json:"input_tokens"`
+	OutputTokens       *int64         `json:"output_tokens"`
+	Notes              string         `json:"notes"`
+	RecordedAt         string         `json:"recorded_at"`
+	Effort             string         `json:"effort"`
+	Grade              string         `json:"grade"`
+	TableGrade         string         `json:"table_grade"`
+	Pending            bool           `json:"pending,omitempty"`
 }
 
 func repsPath() string { return filepath.Join(CacheDir(), "reps.json") }
@@ -44,7 +53,7 @@ func localReps() ([]Rep, error) {
 	return rows, e
 }
 func repWire(r Rep) map[string]any {
-	return map[string]any{"origin_id": r.OriginID, "profile": r.Profile, "model_id": r.ModelID, "task_ref": r.TaskRef, "tier": r.Tier, "role": r.Role, "rounds": r.Rounds, "blockers_found": r.BlockersFound, "completed": r.Completed, "input_tokens": r.InputTokens, "output_tokens": r.OutputTokens, "notes": r.Notes, "recorded_at": r.RecordedAt, "effort": r.Effort, "grade": r.Grade, "table_grade": r.TableGrade}
+	return map[string]any{"origin_id": r.OriginID, "profile": r.Profile, "model_id": r.ModelID, "task_ref": r.TaskRef, "tier": r.Tier, "role": r.Role, "rounds": r.Rounds, "blockers_found": r.BlockersFound, "completed": r.Completed, "input_tokens": r.InputTokens, "output_tokens": r.OutputTokens, "notes": NotesForWire(r), "recorded_at": r.RecordedAt, "effort": r.Effort, "grade": r.Grade, "table_grade": r.TableGrade}
 }
 func saveRep(r Rep) error {
 	return WithFileLock(repsPath()+".lock", false, func() error {
@@ -69,7 +78,10 @@ func saveRep(r Rep) error {
 // AddRep writes a durable intent before sending it. A failed/uncertain request
 // retains the exact origin id so RetryRep cannot duplicate successful writes.
 func (b BenchClient) AddRep(ctx context.Context, r Rep) (Rep, error) {
-	if r.Profile == "" || r.ModelID == "" || r.TaskRef == "" || r.Rounds < 0 || r.BlockersFound < 0 || r.Completed == nil || (*r.Completed != 0 && *r.Completed != 1) {
+	if e := HydrateRepOutcomes(&r); e != nil {
+		return r, e
+	}
+	if r.Profile == "" || r.ModelID == "" || r.TaskRef == "" || r.Rounds < 0 || r.BlockersFound < 0 || (!HasOutcomeFields(r) && r.Completed == nil) || (r.Completed != nil && *r.Completed != 0 && *r.Completed != 1) {
 		return r, fmt.Errorf("rep requires profile, model, task, valid rounds/blockers and completed 0/1")
 	}
 	if r.Grade != "" && gradeRank(r.Grade) == len(Grades) {
@@ -135,11 +147,16 @@ func (b BenchClient) ReadReps(ctx context.Context, profile string) ([]Rep, strin
 	var rows []Rep
 	seen := map[string]bool{}
 	for _, v := range raw {
-		r := Rep{LocalID: mapInt(v["local_id"]), ID: mapInt(v["id"]), OriginID: mapInt(v["origin_id"]), Profile: str(v["profile"]), ModelID: str(v["model_id"]), TaskRef: str(v["task_ref"]), Tier: str(v["tier"]), Role: str(v["role"]), Rounds: int(mapInt(v["rounds"])), BlockersFound: int(mapInt(v["blockers_found"])), Notes: str(v["notes"]), RecordedAt: str(v["recorded_at"]), Effort: str(v["effort"]), Grade: str(v["grade"]), TableGrade: str(v["table_grade"])}
-		if v["completed"] != nil {
-			n := int(mapInt(v["completed"]))
-			r.Completed = &n
+
+		data, _ := json.Marshal(v)
+		var r Rep
+		if json.Unmarshal(data, &r) != nil {
+			return nil, source, fmt.Errorf("invalid rep field types")
 		}
+		if err := HydrateRepOutcomes(&r); err != nil {
+			return nil, source, err
+		}
+
 		if profile == "" || r.Profile == profile {
 			rows = append(rows, r)
 			seen[fmt.Sprintf("%d", r.ID)] = true
@@ -150,6 +167,9 @@ func (b BenchClient) ReadReps(ctx context.Context, profile string) ([]Rep, strin
 		return nil, source, err
 	}
 	for _, r := range local {
+		if err := HydrateRepOutcomes(&r); err != nil {
+			return nil, source, err
+		}
 		if profile != "" && r.Profile != profile {
 			continue
 		}
@@ -160,6 +180,9 @@ func (b BenchClient) ReadReps(ctx context.Context, profile string) ([]Rep, strin
 		rows = append(rows, r)
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].RecordedAt > rows[j].RecordedAt })
+	if len(raw) >= 5000 && source != "local" {
+		source += "-truncated"
+	}
 	return rows, source, e
 }
 func RepRef(r Rep) string {
@@ -172,6 +195,9 @@ func RepRef(r Rep) string {
 	return fmt.Sprintf("origin:%d", r.OriginID)
 }
 func RepFailure(r Rep) bool {
+	if HasOutcomeFields(r) {
+		return OutcomeClass(r) == "fail"
+	}
 	return r.Completed != nil && *r.Completed == 0 || strings.Contains(strings.ToLower(r.Notes), "[rollback]") || strings.Contains(strings.ToLower(r.Notes), "[post-merge-blocker]")
 }
 

@@ -100,7 +100,7 @@ func (a *App) bench(ctx context.Context, v args) (int, error) {
 func (a *App) reps(ctx context.Context, v args) (int, error) {
 	switch v.at(1) {
 	case "add":
-		if e := v.required("profile", "model", "task", "tier", "role", "grade", "rounds", "blockers-found", "completed"); e != nil {
+		if e := v.required("profile", "model", "task", "tier", "role", "grade"); e != nil {
 			return 2, e
 		}
 		rounds, e := v.integer("rounds", 0)
@@ -115,7 +115,21 @@ func (a *App) reps(ctx context.Context, v args) (int, error) {
 		if e != nil {
 			return 2, e
 		}
-		r := pl.Rep{Profile: v.get("profile"), ModelID: v.get("model"), TaskRef: v.get("task"), Tier: v.get("tier"), Role: v.get("role"), Grade: v.get("grade"), Rounds: rounds, BlockersFound: blockers, Completed: &completed, Effort: v.get("effort"), Notes: v.get("notes")}
+		r := pl.Rep{Profile: v.get("profile"), ModelID: v.get("model"), TaskRef: v.get("task"), Tier: v.get("tier"), Role: v.get("role"), Grade: v.get("grade"), Rounds: rounds, BlockersFound: blockers, Completed: nil, Effort: v.get("effort"), Notes: v.get("notes")}
+		if v.get("completed") != "" {
+			r.Completed = &completed
+		}
+		if e := outcomeFlags(v, &r); e != nil {
+			return 2, e
+		}
+		if e := pl.HydrateRepOutcomes(&r); e != nil {
+			return 2, e
+		}
+		if !pl.HasOutcomeFields(r) {
+			if e := v.required("rounds", "blockers-found", "completed"); e != nil {
+				return 2, e
+			}
+		}
 		for _, key := range []string{"input-tokens", "output-tokens"} {
 			if v.get(key) != "" {
 				n, e := strconv.ParseInt(v.get(key), 10, 64)
@@ -130,8 +144,9 @@ func (a *App) reps(ctx context.Context, v args) (int, error) {
 			}
 		}
 		c := a.catalog(ctx)
+		profile, effort, _ := pl.ResolveRepRung(c, r)
 		for _, row := range c.Rows {
-			if row.Profile == r.Profile && row.Effort == r.Effort {
+			if row.Profile == profile && row.Effort == effort {
 				r.TableGrade = row.Grade
 				break
 			}
@@ -143,7 +158,11 @@ func (a *App) reps(ctx context.Context, v args) (int, error) {
 		if e != nil {
 			return 2, e
 		}
-		return 0, a.json(map[string]any{"ref": pl.RepRef(record), "rep": record})
+		if v.flags["json"] {
+			return 0, a.json(map[string]any{"ref": pl.RepRef(record), "rep": record})
+		}
+		fmt.Fprintf(a.Out, "recorded rep id=%s\n", pl.RepRef(record))
+		return 0, nil
 	case "list", "compare":
 		rows, source, e := a.Bench.ReadReps(ctx, v.get("profile"))
 		if e != nil {
@@ -193,7 +212,29 @@ func (a *App) reps(ctx context.Context, v args) (int, error) {
 		if len(filtered) > limit {
 			filtered = filtered[:limit]
 		}
-		return 0, a.json(map[string]any{"reps": filtered, "source": source})
+		if v.flags["json"] {
+			return 0, a.json(map[string]any{"reps": filtered, "source": source})
+		}
+		for _, r := range filtered {
+			completed := "-"
+			if r.Completed != nil {
+				completed = strconv.Itoa(*r.Completed)
+			}
+			notes := r.Notes
+			var obj map[string]any
+			if json.Unmarshal([]byte(notes), &obj) == nil && obj != nil {
+				data, _ := json.Marshal(obj)
+				notes = string(data)
+			} else {
+				data, _ := json.Marshal(notes)
+				notes = string(data)
+			}
+			fmt.Fprintf(a.Out, "id=%s profile=%s model=%s effort=%s task=%s tier=%s role=%s grade=%s rounds=%d blockers_found=%d completed=%s recorded_at=%s notes=%s\n", pl.RepRef(r), r.Profile, r.ModelID, r.Effort, r.TaskRef, r.Tier, r.Role, r.Grade, r.Rounds, r.BlockersFound, completed, r.RecordedAt, notes)
+		}
+		if strings.Contains(source, "truncated") {
+			fmt.Fprintln(a.Err, "warning: rep window is truncated")
+		}
+		return 0, nil
 	case "pending":
 		pending, e := pl.PendingReps()
 		if e != nil {
@@ -284,4 +325,35 @@ func (a *App) grades(ctx context.Context, v args) (int, error) {
 		return 0, a.json(map[string]any{"cells": pl.GradeAreas(reps, lookup), "source": source})
 	}
 	return 2, fmt.Errorf("unknown grades command")
+}
+
+func outcomeFlags(v args, r *pl.Rep) error {
+	for _, key := range []string{"first-ci-green", "reverted-within-7d"} {
+		if value := v.get(key); value != "" {
+			flag, e := strconv.ParseBool(value)
+			if e != nil {
+				return fmt.Errorf("--%s requires true or false", key)
+			}
+			if key == "first-ci-green" {
+				r.FirstCIGreen = &flag
+			} else {
+				r.RevertedWithin7d = &flag
+			}
+		}
+	}
+	if value := v.get("findings-by-severity"); value != "" {
+		if json.Unmarshal([]byte(value), &r.FindingsBySeverity) != nil || r.FindingsBySeverity == nil {
+			return fmt.Errorf("--findings-by-severity requires a JSON count map")
+		}
+	}
+	if v.get("time-to-merge-s") != "" {
+		seconds, e := v.float("time-to-merge-s", 0)
+		if e != nil || seconds < 0 {
+			return fmt.Errorf("invalid --time-to-merge-s")
+		}
+		r.TimeToMergeS = &seconds
+	}
+	r.ExperimentID = v.get("experiment-id")
+	r.ExperimentArm = v.get("experiment-arm")
+	return nil
 }

@@ -27,7 +27,8 @@ Gate exits remain 0 admitted, 3 quota/policy, 4 unmeasurable, 5 role-denied and
 admission first-line format and `scopefuel.gate.v1` audit schema. JSON quota
 summaries keep `scopefuel.v1`, including provider status/source and scoped buckets.
 Launch JSON keeps the original fields, including catalog provenance, billing,
-provider family and the nullable E6 marker. Launch refusals use exit 3.
+provider family and the nullable E6 marker. Launch refusals use exit 3. The operator-requested `label` is an additive field on
+every successful launch; it identifies actual profile/effort and experiment arm.
 
 Consult seats are checked before quota. Credit rungs require an explicit effort
 and seat. Builder admission is limited to a placed default-gate rung. Other
@@ -73,7 +74,15 @@ same intent for explicit retry. Server IDs, origin IDs and historical local IDs
 have distinct display namespaces. Pending records do not count as grade evidence.
 
 Grade proposals use exact current model/effort evidence, launcher spelling pins,
-latest counted disposition per task, clean passes and recent failure rates.
+latest counted disposition per task, qualifying passes and recent failure rates.
+When PR outcome fields are present, they take precedence over tester round counts.
+The approved outcome rule requires first CI green, no critical/high/blocking
+findings and no seven-day revert for a promotion pass. A revert or critical/high
+finding is failure evidence. Initial red CI alone prevents a clean pass; it is not
+demotion evidence by itself. Unknown quality fields and unfinished producer
+observations cannot count as passes. Merge-time metrics are reported, never used
+as a standalone reason to change grade. Proposals include per-rung and experiment
+arm summaries. Notes JSON keeps these fields compatible with older bench servers.
 Proposals are read-only artifacts. Apply recomputes changes, checks the evidence
 fingerprint, verifies the approved subset and effort monotonicity, and writes a
 catalog artifact. Degraded evidence requires a recorded reason. Publishing is a
@@ -101,6 +110,9 @@ separate `bench push-catalog` operation.
 | Grades propose/apply; area summaries | Implemented with evidence and monotonicity checks |
 | Recommend and area exceptions | Implemented within current grade placements |
 | Stale build warning; models verify | Implemented; advisory cached warning and serving-identity comparison |
+| Optional downshift exploration | Per-pool deterministic cohort; headroom, placed floor and subscription guards; default off |
+| Launch experiment labels | Actual profile, effort, baseline/downshift and nullable experiment ID on every launch |
+| PR outcome reps and grade evidence | First-class optional fields; flat/nested notes JSON; legacy text receipts; per-rung/arm metrics |
 | Retired providers, provider plugin loaders, one-shot migrations | Deliberately omitted |
 | Quota-v2 experimental shadow CLI, historical benchmark ingestion/backfills | Outside this core; no legacy command aliases |
 
@@ -111,13 +123,16 @@ temporary config, data directory and synthetic fresh cache. It disables remote
 catalog selection, quota sharing and stale checks. No provider is invoked, no
 operator files are changed and no server writes occur. The generated fixture
 records 59 gate exits and 56 launch outcomes across profiles, rungs and seats.
-The 39 successful reference JSONs are compared structurally without deleting
-fields or normalizing provenance.
+The 39 successful reference JSONs are compared structurally after removing only
+the new, mandatory `label` field requested for experiments. Every existing field
+and its provenance must remain identical; separate assertions verify the label.
+Raw JSON intentionally contains that additive extension.
 
 Three credit builder cases deliberately differ from the older installed build.
 They now resolve launch JSON successfully and reach ordinary quota evaluation:
 Command Code admits on its fixture observation, while the two API-credit cases
 remain unmeasurable without a manual balance. All other matrix outcomes match.
+Exploration-off keeps every other legacy field and gate verdict unchanged.
 These are contract tests over a representative matrix, not a proof that every
 historical human-readable sentence or ranking score is identical.
 
@@ -155,3 +170,16 @@ parent-death cleanup. Backend tests use an injected HTTP client and local files.
    Monitor verdict differences before changing the next caller. Retain scopefuel
    and its original files for rollback. Installation and service changes are
    separate work, not part of building this repository.
+
+## Continuous downshift experiments
+
+[docs/experiments.md](docs/experiments.md) defines the data policy and outcome
+contract. The cohort hash uses experiment ID, optional seed, pool and normalized
+task ID. It is stable across repeated calls and equivalent task spellings. The
+policy never uses randomness from call timing. Eligibility is proved before cohort
+assignment: a current paid weekly pace strictly below 1.0 or an exact Free bucket,
+a placed ordinary baseline, a one-step placed target at or above the required
+task floor, the same pool, a subscribed target and its normal admission/seat checks.
+Ineligible work remains a baseline with a null experiment ID. Eligible controls
+and downshifts share the configured ID. `RecommendFor` offers the selected arm
+while retaining the baseline. `ResolveLaunchWithInputs` records the actual arm.

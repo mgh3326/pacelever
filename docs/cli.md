@@ -1,6 +1,7 @@
 # CLI reference
 
 Flags may follow subcommands and positional names. JSON is selected with `--json`.
+Rep add/list retain their text receipt format by default for existing publishers.
 Run `pacelever --help` for a compact command list.
 
 | Command | Purpose |
@@ -60,3 +61,19 @@ pacelever observe devin-free-limit --clear
 `models verify` sends a minimal one-token completion to compare the serving model
 with its recorded baseline. It returns 0 for matches, 1 for drift, 2 for unknown.
 It is never run implicitly by gate or launch.
+
+Exploration-aware calls add task attribution and a required floor:
+
+```sh
+pacelever policy launch opus --effort high --role worker \
+  --task hk:task/1 --grade S+ --json
+pacelever --recommend S+ --role worker --task hk:task/1 --json
+```
+
+Rep outcomes can arrive through `--notes` JSON or optional first-class flags:
+`--first-ci-green true|false`, `--findings-by-severity JSON`,
+`--reverted-within-7d true|false`, `--time-to-merge-s NUMBER`,
+`--experiment-id ID`, and `--experiment-arm baseline|downshift`.
+Legacy round/completion flags remain required for records without outcome data.
+They may be omitted when real PR outcomes are supplied; quality is never invented
+from zero rounds. See [the outcome contract](experiments.md).

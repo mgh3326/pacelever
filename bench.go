@@ -224,7 +224,9 @@ func (b BenchClient) ReadRows(ctx context.Context, scope string) ([]map[string]a
 	}
 	var rows []map[string]any
 	if e == nil {
-		if e = json.Unmarshal(payload[key], &rows); e == nil && rows != nil {
+		decoder := json.NewDecoder(bytes.NewReader(payload[key]))
+		decoder.UseNumber()
+		if e = decoder.Decode(&rows); e == nil && rows != nil {
 			if scope == "catalog" {
 				_, e = decodeCatalog(rows)
 			}

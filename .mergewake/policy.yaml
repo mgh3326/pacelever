@@ -9,7 +9,7 @@ required_checks:
   - build-darwin-amd64
   - build-darwin-arm64
 blocking:
-  - paths: [gate.go, catalog.go, config.go, share.go]
+  - paths: [gate.go, catalog.go, config.go, share.go, exploration.go, outcomes.go, grades.go, reps.go, catalog_snapshot.json, internal/cli/**]
     reason: Admission changes affect running work before a revert can land
   - paths: [.github/workflows/**, .mergewake/**]
     reason: Verification controls require operator review

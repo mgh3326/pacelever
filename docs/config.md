@@ -126,3 +126,32 @@ disables exhaustion notices. `PACELEVER_STALE_WARN=0` disables stale-build check
 The legacy quota-share and stale-warning switches remain supported. Use these
 controls while comparing shadow verdicts. `operator-switch` is an explicit
 notification policy; it changes neither the quota verdict nor the login account.
+
+## Exploration policy
+
+Exploration is optional data under each pool. `fraction = 0` is off by default;
+`enabled = false` can suspend an existing cohort. An active policy requires an ID.
+
+```toml
+[pools.claude.exploration]
+fraction = 0.05
+experiment_id = "downshift-cohort-1"
+# enabled = false
+# seed = "optional-stable-seed"
+# model_order = ["opus", "sonnet", "haiku"]
+```
+
+The default ladders are opus → sonnet → haiku, codex-sol → codex-terra61 →
+codex-luna, and pi-opus55 → pi-sonnet55 → pi-haiku55. Devin's baked SWE-2
+profiles can step max → high → medium. A lower effort on the same model is tried
+first. A configured model order can describe other pool-specific ladders, but
+same-pool, subscription, default-gate, placed-grade and normal admission checks
+remain mandatory. An unplaced/retired intermediate model is never skipped.
+
+Supply `--task KEY --grade FLOOR` to `policy launch`, or `--task KEY` alongside
+`--recommend GRADE`. Missing attribution, unknown/stale weekly pace, pace ≥1.0,
+or a missing sufficient placement keeps the baseline. Paid credit pools need an
+actual weekly observation to prove pace; a credit balance alone is insufficient.
+The policy does not infer extra headroom from an unknown reset.
+
+See [experiments](experiments.md) for labels, PR outcome fields and grading.

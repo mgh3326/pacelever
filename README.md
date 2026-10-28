@@ -40,6 +40,12 @@ Credit profiles require an explicit effort and seat. A placed, default-gate
 credit rungs permit worker/tester seats under their existing gate restrictions.
 An omitted seat is refused.
 
+Optional per-pool exploration offers a deterministic one-step downshift only
+under headroom and a sufficient placed grade. It defaults off. Every launch
+includes a `label` with profile, effort, `baseline|downshift`, and a nullable
+experiment ID. [Exploration and PR outcomes](docs/experiments.md) describes the
+policy, labels and outcome evidence.
+
 Existing `~/.config/scopefuel/config.toml`, JSON observations and read-only
 SQLite bench data are recognized automatically. New writes belong to pacelever.
 Unknown pool sections produce a warning. See [configuration](docs/config.md),
@@ -59,7 +65,9 @@ rows := pacelever.Recommend(inputs, "A", "builder", "")
 ```
 
 `Gate`, `ResolveLaunch` and `Recommend` do no I/O. `Collector`, provider interfaces,
-`BenchClient` and the observation stores supply the runtime boundary. Callers own
+`BenchClient` and the observation stores supply the runtime boundary.
+Use `ResolveLaunchWithInputs(inputs, request)` and `RecommendFor` when enabling
+exploration; the baseline resolver has no observations to prove headroom. Callers own
 the observation freshness and cancellation context.
 
 Release tags publish standalone binaries for Linux and macOS, each on amd64 and
@@ -68,7 +76,8 @@ probe tests. Development uses focused tests; `scripts/check.sh` is the final
 verification command. No external database server is needed.
 
 The compatibility suite records 59 installed-scopefuel gate cases and 56 launch
-cases, including 39 successful launch JSONs. Three credit builder-seat cases
+cases, including 39 successful reference launch JSONs. Their existing fields remain
+identical; the new mandatory label is checked separately. Three credit builder-seat cases
 intentionally implement the newer seat rule. Regenerate only with the read-only
 fixture procedure in [DESIGN.md](DESIGN.md).
 

@@ -21,16 +21,18 @@ type GradeChange struct {
 	Blocked  bool     `json:"blocked"`
 }
 type GradeProposal struct {
-	Schema        string        `json:"schema"`
-	Rule          string        `json:"rule"`
-	Fingerprint   string        `json:"fingerprint"`
-	CatalogSource string        `json:"catalog_source"`
-	RepsSource    string        `json:"reps_source"`
-	MinPasses     int           `json:"min_passes"`
-	DemoteWindow  int           `json:"demote_window"`
-	DemoteRate    float64       `json:"demote_rate"`
-	Changes       []GradeChange `json:"changes"`
-	Excluded      []string      `json:"excluded"`
+	OutcomeRule   string               `json:"outcome_rule"`
+	Outcomes      []RungOutcomeMetrics `json:"outcomes"`
+	Schema        string               `json:"schema"`
+	Rule          string               `json:"rule"`
+	Fingerprint   string               `json:"fingerprint"`
+	CatalogSource string               `json:"catalog_source"`
+	RepsSource    string               `json:"reps_source"`
+	MinPasses     int                  `json:"min_passes"`
+	DemoteWindow  int                  `json:"demote_window"`
+	DemoteRate    float64              `json:"demote_rate"`
+	Changes       []GradeChange        `json:"changes"`
+	Excluded      []string             `json:"excluded"`
 }
 
 func EvidenceFingerprint(c Catalog, reps []Rep) string {
@@ -43,6 +45,13 @@ func EvidenceFingerprint(c Catalog, reps []Rep) string {
 		return a.Effort < b.Effort
 	})
 	rr := append([]Rep(nil), reps...)
+	for i := range rr {
+		if e := HydrateRepOutcomes(&rr[i]); e != nil {
+			rr[i].Pending = true
+		} else {
+			rr[i].Notes = NotesForWire(rr[i])
+		}
+	}
 	sort.Slice(rr, func(i, j int) bool {
 		if rr[i].Profile != rr[j].Profile {
 			return rr[i].Profile < rr[j].Profile
@@ -63,6 +72,15 @@ func EvidenceFingerprint(c Catalog, reps []Rep) string {
 // ProposeGrades uses exact model/effort evidence and the latest counted rep per
 // task. It produces an artifact only; it never mutates a catalog.
 func ProposeGrades(c Catalog, reps []Rep, source string, minPasses, window int, rate float64) GradeProposal {
+	normalized := append([]Rep(nil), reps...)
+	hydrationErrors := []string{}
+	for i := range normalized {
+		if e := HydrateRepOutcomes(&normalized[i]); e != nil {
+			normalized[i].Pending = true
+			hydrationErrors = append(hydrationErrors, RepRef(normalized[i])+": invalid outcome fields")
+		}
+	}
+	reps = normalized
 	if minPasses <= 0 {
 		minPasses = 2
 	}
@@ -72,7 +90,7 @@ func ProposeGrades(c Catalog, reps []Rep, source string, minPasses, window int, 
 	if rate <= 0 || rate > 1 {
 		rate = 0.4
 	}
-	p := GradeProposal{Schema: "pacelever.grades.v1", Rule: "1.2", Fingerprint: EvidenceFingerprint(c, reps), CatalogSource: c.Info.Source, RepsSource: source, MinPasses: minPasses, DemoteWindow: window, DemoteRate: rate, Changes: []GradeChange{}, Excluded: []string{}}
+	p := GradeProposal{Schema: "pacelever.grades.v1", Rule: "1.3", OutcomeRule: OutcomeRule, Outcomes: []RungOutcomeMetrics{}, Fingerprint: EvidenceFingerprint(c, reps), CatalogSource: c.Info.Source, RepsSource: source, MinPasses: minPasses, DemoteWindow: window, DemoteRate: rate, Changes: []GradeChange{}, Excluded: hydrationErrors}
 	resolvedProfiles, resolvedEfforts := make([]string, len(reps)), make([]string, len(reps))
 	for i, r := range reps {
 		resolvedProfiles[i], resolvedEfforts[i], _ = ResolveRepRung(c, r)
@@ -94,7 +112,7 @@ func ProposeGrades(c Catalog, reps []Rep, source string, minPasses, window int, 
 				p.Excluded = append(p.Excluded, RepRef(r)+": pending write")
 				continue
 			}
-			if r.Completed == nil || (r.Completed != nil && *r.Completed == 0 && r.BlockersFound == 0) || r.Rounds == 0 {
+			if !HasOutcomeFields(r) && (r.Completed == nil || (r.Completed != nil && *r.Completed == 0 && r.BlockersFound == 0) || r.Rounds == 0) {
 				p.Excluded = append(p.Excluded, RepRef(r)+": anomalous evidence")
 				continue
 			}
@@ -129,13 +147,16 @@ func ProposeGrades(c Catalog, reps []Rep, source string, minPasses, window int, 
 			}
 			return repOrdinal(counted[i]) > repOrdinal(counted[j])
 		})
+		if metrics := summarizeOutcomes(row, counted); metrics.Records > 0 {
+			p.Outcomes = append(p.Outcomes, metrics)
+		}
 		passes := map[string]int{}
 		anyFail := false
 		var evidence []string
 		for _, r := range counted {
 			if RepFailure(r) {
 				anyFail = true
-			} else if r.Completed != nil && *r.Completed == 1 && r.BlockersFound == 0 {
+			} else if repCleanPass(r) {
 				passes[r.Grade]++
 			}
 			evidence = append(evidence, RepRef(r))
@@ -148,7 +169,7 @@ func ProposeGrades(c Catalog, reps []Rep, source string, minPasses, window int, 
 				if passes[g] >= minPasses && gradeRank(g) < gradeRank(to) {
 					to = g
 					action = "promote"
-					reason = "clean exact-model task passes without failure evidence"
+					reason = "qualifying exact-model task passes without failure evidence (PR outcomes take precedence when present)"
 				}
 			}
 		}
@@ -165,7 +186,7 @@ func ProposeGrades(c Catalog, reps []Rep, source string, minPasses, window int, 
 				if gradeRank(r.Grade) > gradeRank(worst) {
 					worst = r.Grade
 				}
-				if strings.Contains(strings.ToLower(r.Notes), "[rollback]") || strings.Contains(strings.ToLower(r.Notes), "[post-merge-blocker]") {
+				if repPostMergeFailure(r) {
 					postMerge = true
 				}
 			}
@@ -200,10 +221,10 @@ func ProposeGrades(c Catalog, reps []Rep, source string, minPasses, window int, 
 	return p
 }
 func ApplyGrades(p GradeProposal, c Catalog, reps []Rep, only map[string]bool, decidedBy, ref, allowDegraded string, now time.Time) ([]CatalogRow, error) {
-	if p.Schema != "pacelever.grades.v1" || p.Fingerprint != EvidenceFingerprint(c, reps) {
+	if p.Schema != "pacelever.grades.v1" || p.Rule != "1.3" || p.OutcomeRule != OutcomeRule || p.Fingerprint != EvidenceFingerprint(c, reps) {
 		return nil, fmt.Errorf("proposal evidence changed; regenerate proposal")
 	}
-	if (c.Info.Stale || c.Info.Source == "snapshot" || p.RepsSource == "local" || p.RepsSource == "cache-stale") && strings.TrimSpace(allowDegraded) == "" {
+	if (c.Info.Stale || c.Info.Source == "snapshot" || p.RepsSource == "local" || p.RepsSource == "cache-stale" || strings.Contains(p.RepsSource, "truncated")) && strings.TrimSpace(allowDegraded) == "" {
 		return nil, fmt.Errorf("degraded evidence requires --allow-degraded reason")
 	}
 	if decidedBy == "" || !validRef(ref) {
@@ -214,6 +235,11 @@ func ApplyGrades(p GradeProposal, c Catalog, reps []Rep, only map[string]bool, d
 	b, _ := json.Marshal(p.Changes)
 	if string(a) != string(b) {
 		return nil, fmt.Errorf("proposal changes differ from recomputed evidence")
+	}
+	a, _ = json.Marshal(verified.Outcomes)
+	b, _ = json.Marshal(p.Outcomes)
+	if string(a) != string(b) {
+		return nil, fmt.Errorf("proposal outcome metrics differ from recomputed evidence")
 	}
 	rows := append([]CatalogRow(nil), c.Rows...)
 	selected := map[string]bool{}

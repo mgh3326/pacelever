@@ -1,6 +1,7 @@
 package pacelever
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -75,7 +76,9 @@ func ReadJSON(path string, v any) error {
 	if len(b) > 32<<20 {
 		return fmt.Errorf("state file too large")
 	}
-	if e = json.Unmarshal(b, v); e != nil {
+	decoder := json.NewDecoder(bytes.NewReader(b))
+	decoder.UseNumber()
+	if e = decoder.Decode(v); e != nil {
 		return fmt.Errorf("invalid JSON state")
 	}
 	return nil
