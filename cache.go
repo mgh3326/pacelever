@@ -24,9 +24,11 @@ type CacheEntry struct {
 	NegativeUntil float64      `json:"negative_until,omitempty"`
 }
 type Collector struct {
-	Config    Config
-	Providers map[string]Provider
-	Now       func() time.Time
+	CachePath       string
+	LegacyCachePath string
+	Config          Config
+	Providers       map[string]Provider
+	Now             func() time.Time
 	// DeferredRefresh starts an independent, bounded worker. Used for slow PTY
 	// probes so short-lived display/gate callers cannot starve collection.
 	DeferredRefresh func(string) error
@@ -36,9 +38,17 @@ type Collector struct {
 }
 
 func LoadSnapshots() (map[string]CacheEntry, error) {
+	return loadSnapshots(CachePath(), legacyCachePath())
+}
+func loadSnapshots(ownPath, legacyPath string) (map[string]CacheEntry, error) {
 	merged := map[string]CacheEntry{}
 	var legacy map[string]CacheEntry
-	if e := ReadJSON(legacyCachePath(), &legacy); e != nil && !os.IsNotExist(e) {
+	if e := func() error {
+		if legacyPath == "" {
+			return nil
+		}
+		return ReadJSON(legacyPath, &legacy)
+	}(); e != nil && !os.IsNotExist(e) {
 		return nil, e
 	}
 	for k, v := range legacy {
@@ -47,7 +57,7 @@ func LoadSnapshots() (map[string]CacheEntry, error) {
 		}
 	}
 	var own map[string]CacheEntry
-	if e := ReadJSON(CachePath(), &own); e != nil && !os.IsNotExist(e) {
+	if e := ReadJSON(ownPath, &own); e != nil && !os.IsNotExist(e) {
 		return nil, e
 	}
 	for k, v := range own {
@@ -55,10 +65,10 @@ func LoadSnapshots() (map[string]CacheEntry, error) {
 	}
 	return merged, nil
 }
-func updateSnapshot(pool string, obs Observation, now time.Time) error {
-	return WithFileLock(filepath.Join(CacheDir(), "snapshots.lock"), false, func() error {
+func updateSnapshot(ownPath, pool string, obs Observation, now time.Time) error {
+	return WithFileLock(ownPath+".lock", false, func() error {
 		entries := map[string]CacheEntry{}
-		if e := ReadJSON(CachePath(), &entries); e != nil && !os.IsNotExist(e) {
+		if e := ReadJSON(ownPath, &entries); e != nil && !os.IsNotExist(e) {
 			return e
 		}
 		entry := entries[pool]
@@ -73,7 +83,7 @@ func updateSnapshot(pool string, obs Observation, now time.Time) error {
 			}
 		}
 		entries[pool] = entry
-		return WriteJSON(CachePath(), entries)
+		return WriteJSON(ownPath, entries)
 	})
 }
 func ttlFor(pool string) time.Duration {
@@ -84,7 +94,12 @@ func ttlFor(pool string) time.Duration {
 	return 60 * time.Second
 }
 func (c Collector) Collect(ctx context.Context, pools []string) ([]Observation, error) {
-	entries, e := LoadSnapshots()
+	own, legacy := c.CachePath, c.LegacyCachePath
+	if own == "" {
+		own = CachePath()
+		legacy = legacyCachePath()
+	}
+	entries, e := loadSnapshots(own, legacy)
 	if e != nil {
 		return nil, e
 	}
@@ -174,11 +189,11 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		return fallback("credentials", "provider not configured")
 	}
 	var obs Observation
-	e := WithFileLock(filepath.Join(CacheDir(), "collect-"+pool+".lock"), true, func() error {
+	e := WithFileLock(filepath.Join(c.cacheDir(), "collect-"+pool+".lock"), true, func() error {
 		obs = provider.Fetch(ctx)
 		obs.ID = pool
 		obs.PoolClass = p.Class
-		return updateSnapshot(pool, obs, now)
+		return updateSnapshot(c.cacheFile(), pool, obs, now)
 	})
 	if e == ErrBusy {
 		return fallback("probe_in_progress", "probe already in progress")
@@ -208,3 +223,11 @@ func (c Collector) Refresh(ctx context.Context, pool string) (Observation, error
 	}
 	return r[0], nil
 }
+
+func (c Collector) cacheFile() string {
+	if c.CachePath != "" {
+		return c.CachePath
+	}
+	return CachePath()
+}
+func (c Collector) cacheDir() string { return filepath.Dir(c.cacheFile()) }

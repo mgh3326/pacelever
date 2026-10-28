@@ -1,0 +1,214 @@
+{
+  "codex": [
+    "codex-sol",
+    "high"
+  ],
+  "codex-sol56": [
+    "codex-sol",
+    "max"
+  ],
+  "codex-sol6": [
+    "codex-sol",
+    "max"
+  ],
+  "codex-luna-hi": [
+    "codex-luna",
+    "high"
+  ],
+  "sonnet-med": [
+    "sonnet",
+    ""
+  ],
+  "grok": [
+    "grok-hi",
+    ""
+  ],
+  "grok-med": [
+    "grok",
+    "medium"
+  ],
+  "kiro-opus-xhigh": [
+    "kiro-opus",
+    "xhigh"
+  ],
+  "kiro-opus-max": [
+    "kiro-opus",
+    "max"
+  ],
+  "kiro-sol-xhigh": [
+    "kiro-sol",
+    "xhigh"
+  ],
+  "kiro-sol-max": [
+    "kiro-sol",
+    "max"
+  ],
+  "claude-opus": [
+    "opus",
+    ""
+  ],
+  "claude-opus-5": [
+    "opus",
+    ""
+  ],
+  "claude-opus5-verify": [
+    "opus",
+    ""
+  ],
+  "sonnet-medium": [
+    "sonnet",
+    ""
+  ],
+  "kimi-code": [
+    "kimi-k3",
+    ""
+  ],
+  "agy-flash37": [
+    "agy-flash",
+    ""
+  ],
+  "builder-opus": [
+    "opus",
+    ""
+  ],
+  "captain-opus": [
+    "opus",
+    ""
+  ],
+  "builder-opus-low": [
+    "opus",
+    "low"
+  ],
+  "builder-opus-medium": [
+    "opus",
+    "medium"
+  ],
+  "builder-sonnet-xhigh": [
+    "sonnet",
+    "xhigh"
+  ],
+  "builder-sonnet-max": [
+    "sonnet",
+    "max"
+  ],
+  "builder-sonnet-medium": [
+    "sonnet",
+    "medium"
+  ],
+  "builder-sonnet-low": [
+    "sonnet",
+    "low"
+  ],
+  "builder-sonnet": [
+    "sonnet",
+    "xhigh"
+  ],
+  "builder-sol": [
+    "codex-sol",
+    "high"
+  ],
+  "captain-sol": [
+    "codex-sol",
+    "high"
+  ],
+  "builder-sol-high": [
+    "codex-sol",
+    "high"
+  ],
+  "builder-sol-max": [
+    "codex-sol",
+    "max"
+  ],
+  "builder-sol-medium": [
+    "codex-sol",
+    "medium"
+  ],
+  "builder-sol-low": [
+    "codex-sol",
+    "low"
+  ],
+  "builder-sol6": [
+    "codex-sol",
+    "high"
+  ],
+  "builder-luna": [
+    "codex-luna",
+    "xhigh"
+  ],
+  "builder-luna-max": [
+    "codex-luna",
+    "max"
+  ],
+  "builder-luna-low": [
+    "codex-luna",
+    "low"
+  ],
+  "builder-luna-medium": [
+    "codex-luna",
+    "medium"
+  ],
+  "builder-haiku-low": [
+    "haiku",
+    "low"
+  ],
+  "builder-haiku-high": [
+    "haiku",
+    "high"
+  ],
+  "builder-haiku-xhigh": [
+    "haiku",
+    "xhigh"
+  ],
+  "builder-haiku-max": [
+    "haiku",
+    "max"
+  ],
+  "builder-grok": [
+    "grok-hi",
+    "xhigh"
+  ],
+  "builder-grok-low": [
+    "grok-hi",
+    "low"
+  ],
+  "builder-grok-medium": [
+    "grok-hi",
+    "medium"
+  ],
+  "builder-grok-xhigh": [
+    "grok-hi",
+    "xhigh"
+  ],
+  "builder-devin": [
+    "devin-swe2",
+    ""
+  ],
+  "builder-devin-medium": [
+    "devin-swe2-medium",
+    ""
+  ],
+  "builder-devin-max": [
+    "devin-swe2-max",
+    ""
+  ],
+  "builder-ds41": [
+    "devin-ds41",
+    ""
+  ],
+  "builder-ds41-max": [
+    "devin-ds41-max",
+    ""
+  ],
+  "builder-kimi": [
+    "kimi-k3",
+    ""
+  ],
+  "builder-kimi-high": [
+    "kimi-k3",
+    "high"
+  ],
+  "builder-kimi-max": [
+    "kimi-k3",
+    "max"
+  ]
+}

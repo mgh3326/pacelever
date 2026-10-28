@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 type HTTPDoer interface {
@@ -200,28 +202,20 @@ func fingerprint(prefix, value string) string {
 	b := sha256.Sum256([]byte(prefix + "|" + value))
 	return hex.EncodeToString(b[:8])
 }
-func DefaultProviders(cfg Config) map[string]Provider {
+func DefaultProviders(cfg Config) map[string]Provider { return DefaultProvidersFor(cfg, nil) }
+func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Provider {
 	home, _ := os.UserHomeDir()
 	result := map[string]Provider{}
 	result["claude"] = ProviderFunc(func(ctx context.Context) Observation {
-		dir := os.Getenv("CLAUDE_CONFIG_DIR")
-		if dir == "" {
-			dir = filepath.Join(home, ".claude")
-		}
-		auth := readObject(filepath.Join(dir, ".credentials.json"))
-		oauth := object(auth["claudeAiOauth"])
-		// Keychain access is read-only; security never receives a token argument.
-		if str(oauth["accessToken"]) == "" && runtime.GOOS == "darwin" {
-			service := "Claude Code-credentials"
-			if dir != filepath.Join(home, ".claude") {
-				b := sha256.Sum256([]byte(dir))
-				service += "-" + hex.EncodeToString(b[:4])
-			}
+
+		credentialPath, identityPath, service, shareable := claudeLocations(home, selectors)
+		oauth := object(readObject(credentialPath)["claudeAiOauth"])
+		if runtime.GOOS == "darwin" {
 			out, e := exec.CommandContext(ctx, "security", "find-generic-password", "-s", service, "-w").Output()
 			if e == nil {
 				var data map[string]any
 				if json.Unmarshal(out, &data) == nil {
-					oauth = object(data["claudeAiOauth"])
+					oauth = chooseOAuth(oauth, object(data["claudeAiOauth"]), time.Now())
 				}
 			}
 		}
@@ -233,16 +227,19 @@ func DefaultProviders(cfg Config) map[string]Provider {
 			return Observation{ID: "claude", Error: "token expired", ErrorKind: "token_expired"}
 		}
 		o := (HTTPProvider{ID: "claude", URL: "https://api.anthropic.com/api/oauth/usage", Headers: map[string]string{"Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20"}}).Fetch(ctx)
-		acct := object(readObject(filepath.Join(home, ".claude.json"))["oauthAccount"])
+		acct := object(readObject(identityPath)["oauthAccount"])
 		id := str(acct["accountUuid"])
-		if id != "" {
+		if id != "" && shareable {
 			o.AccountFP = fingerprint("claude-account", id)
 			o.AccountFPKind = "account"
 		}
 		return o
 	})
 	result["codex"] = ProviderFunc(func(ctx context.Context) Observation {
-		dir := os.Getenv("CODEX_HOME")
+		dir := selectors["CODEX_HOME"]
+		if dir == "" {
+			dir = os.Getenv("CODEX_HOME")
+		}
 		if dir == "" {
 			dir = filepath.Join(home, ".codex")
 		}
@@ -278,7 +275,60 @@ func DefaultProviders(cfg Config) map[string]Provider {
 		return (HTTPProvider{ID: "clinepass", URL: "https://api.cline.bot/api/v1/users/me/plan/usage-limits", Headers: map[string]string{"Authorization": "Bearer " + token}}).Fetch(ctx)
 	})
 	for _, pool := range []string{"devin", "grok", "kimi", "kiro", "commandcode"} {
-		result[pool] = PTYProvider{ID: pool, Binary: ResolveBinary(pool, cfg), Timeout: 35 * time.Second}
+		result[pool] = PTYProvider{ID: pool, Binary: ResolveBinary(pool, cfg), Timeout: 35 * time.Second, Env: selectors}
 	}
 	return result
+}
+
+func claudeLocations(home string, selectors map[string]string) (credential, identity, service string, shareable bool) {
+	ccd := selectors["CLAUDE_CONFIG_DIR"]
+	if ccd == "" {
+		ccd = os.Getenv("CLAUDE_CONFIG_DIR")
+	}
+	secure, hasSecure := os.LookupEnv("CLAUDE_SECURESTORAGE_CONFIG_DIR")
+	dir := ccd
+	if hasSecure {
+		dir = secure
+	}
+	if dir == "" {
+		dir = filepath.Join(home, ".claude")
+	}
+	credential = filepath.Join(dir, ".credentials.json")
+	identity = filepath.Join(home, ".claude.json")
+	if ccd != "" {
+		identity = filepath.Join(ccd, ".claude.json")
+	}
+	contextName := ccd
+	if hasSecure {
+		contextName = secure
+	}
+	service = "Claude Code-credentials"
+	if contextName != "" {
+		sum := sha256.Sum256([]byte(norm.NFC.String(contextName)))
+		service += "-" + hex.EncodeToString(sum[:4])
+	}
+	shareable = !hasSecure || secure == ccd
+	return
+}
+func chooseOAuth(file, keychain map[string]any, now time.Time) map[string]any {
+	if str(file["accessToken"]) == "" {
+		return keychain
+	}
+	if str(keychain["accessToken"]) == "" {
+		return file
+	}
+	f, fok := file["expiresAt"].(float64)
+	k, kok := keychain["expiresAt"].(float64)
+	expiredF := fok && f/1000 <= float64(now.Unix())
+	expiredK := kok && k/1000 <= float64(now.Unix())
+	if expiredF != expiredK {
+		if expiredF {
+			return keychain
+		}
+		return file
+	}
+	if fok && kok && k > f {
+		return keychain
+	}
+	return file
 }

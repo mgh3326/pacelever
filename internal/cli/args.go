@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -80,8 +81,8 @@ func (a args) float(k string, def float64) (float64, error) {
 		return def, nil
 	}
 	v, e := strconv.ParseFloat(a.get(k), 64)
-	if e != nil {
-		return 0, fmt.Errorf("--%s requires a number", k)
+	if e != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, fmt.Errorf("--%s requires a finite number", k)
 	}
 	return v, nil
 }

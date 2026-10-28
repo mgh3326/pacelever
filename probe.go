@@ -16,6 +16,7 @@ import (
 )
 
 type PTYProvider struct {
+	Env     map[string]string
 	ID      string
 	Binary  string
 	Timeout time.Duration
@@ -127,7 +128,16 @@ func (p PTYProvider) screen(ctx context.Context) (string, error) {
 	}
 	defer os.RemoveAll(dir)
 	// Isolated empty repository prevents probes from reading a caller's project.
-	if e = os.Mkdir(filepath.Join(dir, ".git"), 0700); e != nil {
+	gitDir := filepath.Join(dir, ".git")
+	for _, sub := range []string{"objects", "refs/heads"} {
+		if e = os.MkdirAll(filepath.Join(gitDir, sub), 0700); e != nil {
+			return "", fmt.Errorf("probe repository unavailable")
+		}
+	}
+	if e = os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0600); e != nil {
+		return "", fmt.Errorf("probe repository unavailable")
+	}
+	if e = os.WriteFile(filepath.Join(gitDir, "config"), []byte("[core]\nrepositoryformatversion = 0\nbare = false\n"), 0600); e != nil {
 		return "", fmt.Errorf("probe repository unavailable")
 	}
 	args := []string{}
@@ -140,6 +150,11 @@ func (p PTYProvider) screen(ctx context.Context) (string, error) {
 	cmd := exec.Command(binary, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "NO_COLOR=1")
+	for _, key := range []string{"GROK_HOME", "KIMI_CODE_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"} {
+		if value := p.Env[key]; value != "" {
+			cmd.Env = append(cmd.Env, key+"="+value)
+		}
+	}
 	terminal, e := pty.StartWithSize(cmd, &pty.Winsize{Rows: 50, Cols: 200})
 	if e != nil {
 		return "", fmt.Errorf("cannot start PTY probe")

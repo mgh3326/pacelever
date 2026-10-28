@@ -3,6 +3,7 @@ package pacelever
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,21 +12,22 @@ import (
 )
 
 type ManualObservation struct {
-	ID                 string   `json:"manual_observation_id"`
-	Event              string   `json:"event"`
-	Pool               string   `json:"pool"`
-	Window             string   `json:"window"`
-	UsedPct            *float64 `json:"used_pct"`
-	ResetsAt           string   `json:"resets_at,omitempty"`
-	MeasuredAt         string   `json:"measured_at"`
-	EnteredAt          string   `json:"entered_at"`
-	ExpiresAt          string   `json:"expires_at"`
-	Reason             string   `json:"reason"`
-	Source             string   `json:"source"`
-	SourceVerification string   `json:"source_verification"`
-	SourceLabel        string   `json:"source_label"`
-	SupersedesRef      *string  `json:"supersedes_ref"`
-	Credit             *Credit  `json:"credit,omitempty"`
+	Extra              map[string]json.RawMessage `json:"-"`
+	ID                 string                     `json:"manual_observation_id"`
+	Event              string                     `json:"event"`
+	Pool               string                     `json:"pool"`
+	Window             string                     `json:"window"`
+	UsedPct            *float64                   `json:"used_pct"`
+	ResetsAt           string                     `json:"resets_at,omitempty"`
+	MeasuredAt         string                     `json:"measured_at"`
+	EnteredAt          string                     `json:"entered_at"`
+	ExpiresAt          string                     `json:"expires_at"`
+	Reason             string                     `json:"reason"`
+	Source             string                     `json:"source"`
+	SourceVerification string                     `json:"source_verification"`
+	SourceLabel        string                     `json:"source_label"`
+	SupersedesRef      *string                    `json:"supersedes_ref"`
+	Credit             *Credit                    `json:"credit,omitempty"`
 }
 type Credit struct {
 	RemainingUSD float64 `json:"remaining_usd"`
@@ -202,4 +204,34 @@ func RequiredWindows(pool, plan string, manual bool) []string {
 		return []string{"credit"}
 	}
 	return nil
+}
+
+// Preserve legacy audit fields when copying history into the native store.
+func (m *ManualObservation) UnmarshalJSON(data []byte) error {
+	type plain ManualObservation
+	var decoded plain
+	if e := json.Unmarshal(data, &decoded); e != nil {
+		return e
+	}
+	*m = ManualObservation(decoded)
+	return json.Unmarshal(data, &m.Extra)
+}
+func (m ManualObservation) MarshalJSON() ([]byte, error) {
+	type plain ManualObservation
+	b, e := json.Marshal(plain(m))
+	if e != nil {
+		return nil, e
+	}
+	var known map[string]json.RawMessage
+	if e = json.Unmarshal(b, &known); e != nil {
+		return nil, e
+	}
+	out := map[string]json.RawMessage{}
+	for k, v := range m.Extra {
+		out[k] = v
+	}
+	for k, v := range known {
+		out[k] = v
+	}
+	return json.Marshal(out)
 }

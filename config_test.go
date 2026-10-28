@@ -63,3 +63,23 @@ func TestConfigMalformedDoesNotLeak(t *testing.T) {
 		t.Fatalf("unsafe error: %v", e)
 	}
 }
+
+func TestLegacyManualAuditPreserved(t *testing.T) {
+	isolate(t)
+	path := filepath.Join(filepath.Dir(legacyCachePath()), "manual.json")
+	data := `{"schema":"scopefuel.manual.v1","latest":{"claude:5h":"old"},"history":[{"event":"set","manual_observation_id":"old","pool":"claude","window":"5h","used_pct":10,"measured_at":"2026-10-28T00:00:00Z","expires_at":"2026-10-28T01:00:00Z","account_ref":{"verification":"unverified","local_only":true},"execution_context":{"kind":"fixture"}}]}`
+	if e := AtomicWrite(path, []byte(data)); e != nil {
+		t.Fatal(e)
+	}
+	s, e := LoadManual()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = WriteJSON(filepath.Join(CacheDir(), "manual.json"), s); e != nil {
+		t.Fatal(e)
+	}
+	after, _ := os.ReadFile(filepath.Join(CacheDir(), "manual.json"))
+	if !strings.Contains(string(after), "execution_context") || !strings.Contains(string(after), "account_ref") {
+		t.Fatal("legacy audit fields lost")
+	}
+}

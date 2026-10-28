@@ -195,24 +195,21 @@ func (a *App) reps(ctx context.Context, v args) (int, error) {
 		}
 		return 0, a.json(map[string]any{"reps": filtered, "source": source})
 	case "pending":
-		rows, _, e := a.Bench.ReadReps(ctx, "")
+		pending, e := pl.PendingReps()
 		if e != nil {
 			return 2, e
-		}
-		pending := []pl.Rep{}
-		for _, r := range rows {
-			if r.ID == 0 && r.LocalID == 0 {
-				pending = append(pending, r)
-			}
 		}
 		if v.at(2) == "list" {
 			return 0, a.json(pending)
 		}
+		id, e := strconv.ParseInt(strings.TrimPrefix(v.at(3), "origin:"), 10, 64)
+		if e != nil {
+			return 2, fmt.Errorf("pending origin id required")
+		}
+		if v.at(2) == "drop" {
+			return 0, pl.DropPendingRep(id)
+		}
 		if v.at(2) == "retry" {
-			id, e := strconv.ParseInt(strings.TrimPrefix(v.at(3), "origin:"), 10, 64)
-			if e != nil {
-				return 2, e
-			}
 			for _, r := range pending {
 				if r.OriginID == id {
 					record, e := a.Bench.RetryRep(ctx, r)
@@ -224,6 +221,7 @@ func (a *App) reps(ctx context.Context, v args) (int, error) {
 			}
 			return 2, fmt.Errorf("pending origin not found")
 		}
+
 	}
 	return 2, fmt.Errorf("unknown reps command")
 }

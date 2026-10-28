@@ -2,11 +2,14 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -63,11 +66,14 @@ func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader
 	}
 	if a.get("cache-ttl") != "" {
 		v, e := a.float("cache-ttl", 0)
-		if e != nil || v < 0 {
+		if e != nil || v < 0 || v > 1e7 {
 			fmt.Fprintln(errOut, "invalid --cache-ttl")
 			return 2
 		}
 		app.Collector.TTL = time.Duration(v * float64(time.Second))
+		if v == 0 {
+			app.Collector.NoCache = true
+		}
 	}
 	code, e := app.run(ctx, a)
 	if e != nil {
@@ -125,6 +131,9 @@ func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inpu
 			local, e := pl.LocalInflight(ctx, o.ID, now)
 			read := a.Bench.Inflight(ctx, o.ID, fp, local, e == nil)
 			in.Inflight[o.ID] = read.N
+			if e == nil && (o.AccountFPKind == "account" || o.PublishFPKind == "account") {
+				_ = a.Bench.PublishInflight(ctx, o.ID, fp, local)
+			}
 		}
 	}
 	// Fusion lead billing uses the configured account independently of the
@@ -304,7 +313,7 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 			return statusExit(in, v.get("exit-code-on")), nil
 		}
 		seconds, e := v.float("watch", 60)
-		if e != nil || seconds < 1 {
+		if e != nil || seconds < 1 || seconds > 86400 {
 			return 2, fmt.Errorf("watch interval must be at least one second")
 		}
 		timer := time.NewTimer(time.Duration(seconds * float64(time.Second)))
@@ -416,6 +425,14 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 		record["purpose"] = req.Purpose
 	}
 	record["exhaust_notice"] = nil
+	for _, o := range in.Observations {
+		if o.ID == d.ProviderID {
+			if notice := pl.ExhaustionNotice(ctx, a.Config, o, "", in.Now, nil); notice != "" {
+				record["exhaust_notice"] = notice
+				d.Reason += " [" + notice + "]"
+			}
+		}
+	}
 	if path := v.get("gate-output"); path != "" {
 		if e = pl.WriteJSON(path, record); e != nil {
 			return 2, fmt.Errorf("cannot write --gate-output")
@@ -467,42 +484,65 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 	return d.ExitCode, nil
 }
 func (a *App) herdr(ctx context.Context) (int, error) {
-	var event struct {
-		PaneID   string `json:"pane_id"`
-		Provider string `json:"provider"`
-		Agent    string `json:"agent"`
-	}
-	data := os.Getenv("HERDR_PLUGIN_EVENT_JSON")
-	if data == "" {
-		return 2, fmt.Errorf("HERDR_PLUGIN_EVENT_JSON required")
-	}
-	if json.Unmarshal([]byte(data), &event) != nil {
-		return 2, fmt.Errorf("invalid herdr event")
-	}
-	if event.Provider == "" {
-		event.Provider = event.Agent
-	}
-	if event.PaneID == "" || a.Collector.Providers[event.Provider] == nil {
-		return 0, nil
-	}
-	in, e := a.inputs(ctx, pl.BundledCatalog(), []string{event.Provider})
+	event, e := pl.ParseHerdrEvent(os.Getenv("HERDR_PLUGIN_EVENT_JSON"))
 	if e != nil {
 		return 2, e
 	}
-	label := event.Provider
-	for _, b := range in.Observations[0].Buckets {
-		if b.Scope.Kind == "account" {
-			label += " " + b.Window + "=" + percentText(b.UsedPct) + "%"
-		}
+	if event.PaneID == "" || event.Provider == "" {
+		return 0, nil
 	}
-	if len(label) > 80 {
-		label = label[:80]
+	base := os.Getenv("HERDR_PLUGIN_STATE_DIR")
+	if base == "" {
+		base = filepath.Join(pl.CacheDir(), "herdr")
+	}
+	hash := sha256.Sum256([]byte(event.PaneID + "|" + event.Provider + "|" + event.Credential))
+	path := filepath.Join(base, hex.EncodeToString(hash[:8])+".json")
+	label := ""
+	err := pl.WithFileLock(path+".lock", true, func() error {
+		var state struct {
+			At    string `json:"at"`
+			Label string `json:"label"`
+		}
+		if pl.ReadJSON(path, &state) == nil {
+			if at, e := pl.ParseTime(state.At); e == nil && time.Since(at) >= 0 && time.Since(at) < time.Minute {
+				label = state.Label
+				return nil
+			}
+		}
+		collector := a.Collector
+		collector.TTL = time.Minute
+		if event.Credential != "default" {
+			collector.CachePath = filepath.Join(base, "snapshot-"+event.Provider+"-"+event.Credential+".json")
+			collector.LegacyCachePath = ""
+			collector.Providers = pl.DefaultProvidersFor(a.Config, event.Selectors)
+			for key, p := range collector.Providers {
+				if probe, ok := p.(pl.PTYProvider); ok {
+					probe.Guard = pl.GuardProcess
+					collector.Providers[key] = probe
+				}
+			}
+		}
+		rows, e := collector.Collect(ctx, []string{event.Provider})
+		if e != nil {
+			return e
+		}
+		label = pl.HerdrLabel(rows[0], event.Credential)
+		state.At = time.Now().UTC().Format(time.RFC3339Nano)
+		state.Label = label
+		_ = pl.ExhaustionNotice(ctx, a.Config, rows[0], event.Credential, time.Now().UTC(), nil)
+		return pl.WriteJSON(path, state)
+	})
+	if err == pl.ErrBusy {
+		return 0, nil
+	}
+	if err != nil {
+		return 2, err
 	}
 	binary := os.Getenv("HERDR_BIN_PATH")
 	if binary == "" {
 		binary = "herdr"
 	}
-	cmd := exec.CommandContext(ctx, binary, "pane", "report-metadata", "--source", "pacelever", event.PaneID, "--token", "quota="+label, "--ttl-ms", "30000")
+	cmd := exec.CommandContext(ctx, binary, "pane", "report-metadata", "--source", "scopefuel.gauge", event.PaneID, "--token", "scopefuel_quota="+label, "--ttl-ms", "60000")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	return 0, cmd.Run()

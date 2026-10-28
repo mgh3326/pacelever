@@ -31,7 +31,7 @@ type Rep struct {
 	Effort        string `json:"effort"`
 	Grade         string `json:"grade"`
 	TableGrade    string `json:"table_grade"`
-	Pending       bool   `json:"-"`
+	Pending       bool   `json:"pending,omitempty"`
 }
 
 func repsPath() string { return filepath.Join(CacheDir(), "reps.json") }
@@ -97,6 +97,7 @@ func (b BenchClient) AddRep(ctx context.Context, r Rep) (Rep, error) {
 	if _, e := ParseTime(r.RecordedAt); e != nil {
 		return r, fmt.Errorf("invalid rep timestamp")
 	}
+	r.Pending = b.remote("reps") || b.Config.Bench.Backend == "handoffkeep"
 	if e := saveRep(r); e != nil {
 		return r, e
 	}
@@ -120,6 +121,7 @@ func (b BenchClient) RetryRep(ctx context.Context, r Rep) (Rep, error) {
 		return r, fmt.Errorf("rep saved pending: server id missing")
 	}
 	r.ID = result.IDs[0]
+	r.Pending = false
 	if e = saveRep(r); e != nil {
 		return r, e
 	}
@@ -171,4 +173,39 @@ func RepRef(r Rep) string {
 }
 func RepFailure(r Rep) bool {
 	return r.Completed != nil && *r.Completed == 0 || strings.Contains(strings.ToLower(r.Notes), "[rollback]") || strings.Contains(strings.ToLower(r.Notes), "[post-merge-blocker]")
+}
+
+func PendingReps() ([]Rep, error) {
+	rows, e := localReps()
+	if e != nil {
+		return nil, e
+	}
+	out := []Rep{}
+	for _, r := range rows {
+		if r.Pending && r.ID == 0 {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+func DropPendingRep(origin int64) error {
+	return WithFileLock(repsPath()+".lock", false, func() error {
+		rows, e := localReps()
+		if e != nil {
+			return e
+		}
+		out := []Rep{}
+		found := false
+		for _, r := range rows {
+			if r.OriginID == origin && r.Pending && r.ID == 0 {
+				found = true
+				continue
+			}
+			out = append(out, r)
+		}
+		if !found {
+			return fmt.Errorf("pending origin not found")
+		}
+		return WriteJSON(repsPath(), out)
+	})
 }

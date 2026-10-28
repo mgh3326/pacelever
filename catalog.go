@@ -213,7 +213,15 @@ func resolveRow(c Catalog, req Request) (CatalogRow, string, string, error) {
 		return CatalogRow{}, "", "", deny(Blocked, "explicit --effort required for credit profile")
 	}
 	if requested != "" && effortRank(requested) == 99 {
-		return CatalogRow{}, "", "", deny(Blocked, "unknown effort rung")
+		known := false
+		for _, row := range c.Rows {
+			if row.Profile == profile && row.Effort == requested {
+				known = true
+			}
+		}
+		if !known {
+			return CatalogRow{}, "", "", deny(Blocked, "unknown effort rung")
+		}
 	}
 	if credit(profile) {
 		allowed := requested == "low" || requested == "high" || requested == "max"

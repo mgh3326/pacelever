@@ -66,3 +66,31 @@ func TestGradeDegradedAndMonotonicity(t *testing.T) {
 		t.Fatal("nonmonotonic move offered")
 	}
 }
+
+func TestGradeBuilderAliasPin(t *testing.T) {
+	c := BundledCatalog()
+	rows := gradeReps()
+	for i := range rows {
+		rows[i].Profile = "builder-sonnet"
+		rows[i].Effort = ""
+		rows[i].ModelID = "claude-sonnet-5-5"
+	}
+	profile, effort, inferred := ResolveRepRung(c, rows[0])
+	if profile != "sonnet" || effort != "xhigh" || inferred {
+		t.Fatal("builder pin lost")
+	}
+	rows[0].Effort = "high"
+	_, effort, _ = ResolveRepRung(c, rows[0])
+	if effort != "high" {
+		t.Fatal("recorded effort overwritten by pin")
+	}
+}
+
+func TestGradeTaskReferenceDedup(t *testing.T) {
+	c := gradeCatalog()
+	reps := gradeReps()
+	reps[1].TaskRef = "hk1"
+	if p := ProposeGrades(c, reps, "server", 2, 5, 0.4); len(p.Changes) != 0 {
+		t.Fatal("same task counted through two spellings")
+	}
+}

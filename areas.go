@@ -157,7 +157,7 @@ func GradeAreas(reps []Rep, lookup TaskAreaLookup) []AreaCell {
 	}
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
-		return a.Band+"/"+a.Role+"/"+a.Area+"/"+a.Profile+"/"+a.Effort < b.Band+"/"+b.Role+"/"+b.Area+"/"+b.Profile+"/"+b.Effort
+		return a.Band+"/"+a.Role+"/"+a.Area+"/"+a.Profile+"/"+a.Effort+"/"+a.ModelID < b.Band+"/"+b.Role+"/"+b.Area+"/"+b.Profile+"/"+b.Effort+"/"+b.ModelID
 	})
 	return out
 }

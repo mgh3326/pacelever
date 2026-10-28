@@ -1,0 +1,26 @@
+id = "pacelever.gauge"
+name = "pacelever"
+version = "0.1.0"
+min_herdr_version = "0.8.2"
+description = "Quota and sustainable model admission gauge"
+platforms = ["macos", "linux"]
+
+[[actions]]
+id = "check"
+title = "Quota summary"
+command = ["pacelever", "--brief"]
+
+[[actions]]
+id = "check-now"
+title = "Current quota windows"
+command = ["pacelever", "--brief", "--horizon", "now"]
+
+[[panes]]
+id = "gauge"
+title = "pacelever"
+placement = "overlay"
+command = ["pacelever", "--watch", "60"]
+
+[[events]]
+on = "pane.agent_detected"
+command = ["pacelever", "herdr-event"]

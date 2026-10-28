@@ -73,16 +73,21 @@ func ProposeGrades(c Catalog, reps []Rep, source string, minPasses, window int, 
 		rate = 0.4
 	}
 	p := GradeProposal{Schema: "pacelever.grades.v1", Rule: "1.2", Fingerprint: EvidenceFingerprint(c, reps), CatalogSource: c.Info.Source, RepsSource: source, MinPasses: minPasses, DemoteWindow: window, DemoteRate: rate, Changes: []GradeChange{}, Excluded: []string{}}
+	resolvedProfiles, resolvedEfforts := make([]string, len(reps)), make([]string, len(reps))
+	for i, r := range reps {
+		resolvedProfiles[i], resolvedEfforts[i], _ = ResolveRepRung(c, r)
+	}
 	for _, row := range c.Rows {
 		if row.RetiredAt != nil || row.Gate != "default" {
 			continue
 		}
 		latest := map[string]Rep{}
-		for _, r := range reps {
-			if r.Profile != row.Profile {
+		for i, r := range reps {
+			profile, effort := resolvedProfiles[i], resolvedEfforts[i]
+			if profile != row.Profile {
 				continue
 			}
-			if r.ModelID != row.ModelID || r.Effort != row.Effort {
+			if r.ModelID != row.ModelID || effort != row.Effort {
 				continue
 			}
 			if r.Pending {
@@ -105,16 +110,25 @@ func ProposeGrades(c Catalog, reps []Rep, source string, minPasses, window int, 
 				p.Excluded = append(p.Excluded, RepRef(r)+": non-coding task")
 				continue
 			}
-			old, ok := latest[r.TaskRef]
-			if !ok || r.RecordedAt > old.RecordedAt || (r.RecordedAt == old.RecordedAt && RepRef(r) > RepRef(old)) {
-				latest[r.TaskRef] = r
+			taskKey := r.TaskRef
+			if id := TaskID(r.TaskRef); id > 0 {
+				taskKey = fmt.Sprintf("hk:%d", id)
+			}
+			old, ok := latest[taskKey]
+			if !ok || r.RecordedAt > old.RecordedAt || (r.RecordedAt == old.RecordedAt && repOrdinal(r) > repOrdinal(old)) {
+				latest[taskKey] = r
 			}
 		}
 		var counted []Rep
 		for _, r := range latest {
 			counted = append(counted, r)
 		}
-		sort.Slice(counted, func(i, j int) bool { return counted[i].RecordedAt > counted[j].RecordedAt })
+		sort.Slice(counted, func(i, j int) bool {
+			if counted[i].RecordedAt != counted[j].RecordedAt {
+				return counted[i].RecordedAt > counted[j].RecordedAt
+			}
+			return repOrdinal(counted[i]) > repOrdinal(counted[j])
+		})
 		passes := map[string]int{}
 		anyFail := false
 		var evidence []string
@@ -231,4 +245,14 @@ func ApplyGrades(p GradeProposal, c Catalog, reps []Rep, only map[string]bool, d
 		return nil, e
 	}
 	return rows, nil
+}
+
+func repOrdinal(r Rep) int64 {
+	if r.ID > 0 {
+		return r.ID
+	}
+	if r.LocalID > 0 {
+		return r.LocalID
+	}
+	return r.OriginID
 }

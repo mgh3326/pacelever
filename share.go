@@ -187,7 +187,7 @@ func (b BenchClient) Inflight(ctx context.Context, pool, fp string, local []Infl
 			result.Jobs = append(result.Jobs, j)
 		}
 	}
-	if fp == "" || !b.remote("quota_share") {
+	if !quotaEnabled() || fp == "" || !b.remote("quota_share") {
 		return result
 	}
 	host, _ := os.Hostname()
@@ -227,7 +227,7 @@ func (b BenchClient) Inflight(ctx context.Context, pool, fp string, local []Infl
 	return result
 }
 func (b BenchClient) PublishInflight(ctx context.Context, pool, fp string, jobs []InflightJob) error {
-	if fp == "" || !b.remote("quota_share") {
+	if !quotaEnabled() || fp == "" || !b.remote("quota_share") {
 		return nil
 	}
 	host, _ := os.Hostname()

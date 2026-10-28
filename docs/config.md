@@ -1,0 +1,128 @@
+# Configuration
+
+pacelever reads `PACELEVER_CONFIG` when set. Otherwise it tries
+`$XDG_CONFIG_HOME/pacelever/config.toml`, then the corresponding scopefuel file;
+`XDG_CONFIG_HOME` defaults to `~/.config`. It never edits the legacy file.
+The first policy edit copies all parsed keys into the pacelever file and changes
+only the requested values. Comments and formatting may be rewritten.
+
+Unknown pool sections are ignored with a warning naming the section. A malformed
+configuration is reported without echoing values. Retained automatic pools are
+`claude`, `codex`, `devin`, `kimi`, `grok`, `kiro`, `clinepass`, `commandcode`.
+`anthropic-api` is a manual credit pool for `pi-*` profiles.
+
+```toml
+[pools.claude]
+class = "spend"                 # spend | preserve | exclude
+until = "2027-01-01"            # expiry for class and boost
+boost = 10
+subscribed = true
+cutoff = 99.0
+capacity_weight = 1.0
+price_usd = 0.0
+plan = "example-plan"
+on_exhaust = "block"            # block | operator-switch
+
+[pools.codex.inflight_reserve_pct]
+"5h" = 2.0
+"7d" = 1.0
+
+[pools.commandcode]
+bin = "/path/to/cmd"
+
+[profiles.sonnet]
+subscribed = true              # overrides the pool flag in either direction
+
+[settings]
+altlane_pace_multiple = 1.2
+
+[bench]
+backend = "auto"               # auto | handoffkeep | local
+catalog_ttl_s = 3600
+catalog_stale_max_s = 86400
+cache_ttl_s = 86400
+allow_plaintext_catalog = false
+allow_plaintext_reps = false
+allow_plaintext_quota_share = false
+```
+
+Class and boost expire with `until`; subscription flags do not. Cutoff defaults
+to 99% for spend or 90% for preserve. The weekly pace threshold never blocks a
+launch. `exclude` and `subscribed = false` skip automatic probes. A subscribed
+profile override can re-enable that profile on an unsubscribed pool.
+`fusion_billing_fp` optionally selects the billing account for a Fusion lead;
+its value is not printed by policy list.
+
+```sh
+pacelever policy set claude spend --until 2027-01-01 --boost 10
+pacelever policy set codex --inflight-reserve 5h=2 --inflight-reserve 7d=1
+pacelever policy profile sonnet on
+pacelever policy setting altlane_pace_multiple 1.4
+pacelever policy clear claude
+```
+
+Use `none` to remove boost, subscribed, billing-fingerprint or reserve keys;
+`policy profile NAME clear` removes the profile override. Read-only policy
+metadata such as plan, price, capacity and cutoff can be edited in TOML.
+
+## Credentials and probe paths
+
+Claude reads the existing credentials under `CLAUDE_CONFIG_DIR` or the default
+Claude directory, with a read-only macOS Keychain fallback. Codex reads
+`$CODEX_HOME/auth.json` or its default directory. ClinePass uses `CLINE_API_KEY`,
+the existing opencode credential store, or its API-key file. Credentials remain
+in memory and request headers; errors never include their values or HTTP bodies.
+
+PTY providers use existing authenticated CLIs. Set `PACELEVER_<POOL>_BIN` to an
+explicit executable; the corresponding `SCOPEFUEL_<POOL>_BIN` remains supported.
+Command Code also reads `pools.commandcode.bin`, then searches PATH and known
+installation directories. Kimi and Grok respect their existing location selectors.
+The tool does not install CLIs or initiate login flows.
+
+Catalog credentials come from `HANDOFFKEEP_URL` plus `HANDOFFKEEP_TOKEN`, or the
+existing handoffkeep `config.env` file. `HANDOFFKEEP_CONFIG` can select that file.
+An environment override is an entire credential context: a half-specified pair
+never borrows the stored token or stored CF Access credentials. Optional CF Access
+credentials use the `HANDOFFKEEP_CF_ACCESS_CLIENT_ID` and
+`HANDOFFKEEP_CF_ACCESS_CLIENT_SECRET` pair. Credentials are never CLI arguments.
+
+HTTPS is required by default. The three per-use plaintext opt-ins are independent.
+The legacy `allow_plaintext_url` alias remains readable. `--allow-plaintext-http`
+is a one-command opt-in for bench/reps operations. Redirects never receive a
+forwarded bearer token.
+
+## State and manual evidence
+
+New state lives under `$XDG_CACHE_HOME/pacelever` (default `~/.cache/pacelever`).
+`PACELEVER_CACHE` selects a snapshot file. Existing `SCOPEFUEL_CACHE` or legacy
+snapshot/manual/limit files are read as a fallback. Native snapshot entries win.
+Historical bench data is read from `$XDG_DATA_HOME/scopefuel/bench.db`; the default
+is `~/.local/share/scopefuel/bench.db`. `SCOPEFUEL_BENCH_DB` can select a read-only
+copy. No database server, SQL service or CGO driver is required.
+
+New files use mode 0600, atomic rename and stable kernel-lock inodes. A killed
+owner releases its lock. Provider errors retain the last successful snapshot and
+apply a bounded retry backoff. A fresh snapshot suppresses a new probe; Command
+Code collection queues a bounded independent worker when refresh is needed.
+
+```sh
+pacelever manual set claude --window 5h --used 20 \
+  --measured-at '<RFC3339_TIME>' --ttl 30m --reason 'operator observation'
+pacelever manual set claude --window 7d --used 30 \
+  --measured-at '<RFC3339_TIME>' --ttl 30m --reason 'operator observation'
+pacelever manual set anthropic-api --window credit --remaining 75 --total 100 \
+  --expires-on 2027-01-01 --measured-at '<RFC3339_TIME>' --reason 'balance observed'
+pacelever manual list
+```
+
+Non-credit observations default to 30 minutes and are limited to two hours.
+Credit observations last until their recorded expiry. Reset timestamps cap the
+observation's effective life. Required-window coverage must be complete for a
+manual fallback. It is visibly self-reported and unverified; it cannot hide a
+confirmed automatic cutoff or prove a SWE-2 Free tag.
+
+`PACELEVER_QUOTA_SHARE=0` disables peer snapshot exchange. `PACELEVER_NOTIFY=0`
+disables exhaustion notices. `PACELEVER_STALE_WARN=0` disables stale-build checks.
+The legacy quota-share and stale-warning switches remain supported. Use these
+controls while comparing shadow verdicts. `operator-switch` is an explicit
+notification policy; it changes neither the quota verdict nor the login account.
