@@ -115,6 +115,17 @@ func (a *App) localManual() (pl.ManualStore, error) {
 	return pl.LoadManual()
 }
 func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inputs, error) {
+	if a.Config.Quota.URL != "" {
+		found := false
+		for _, pool := range pools {
+			if pool == "anthropic-api" {
+				found = true
+			}
+		}
+		if !found {
+			pools = append(append([]string(nil), pools...), "anthropic-api")
+		}
+	}
 	observations, e := a.Collector.Collect(ctx, pools)
 	if e != nil {
 		return pl.Inputs{}, e

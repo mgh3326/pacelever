@@ -277,6 +277,9 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		o.SharedManual = sharedManual(latest.Manual, pool)
 		return o
 	}
+	if pool == "anthropic-api" {
+		return finish(fail("manual_only"))
+	}
 	if o, ok := sharedAuto(latest.Observation, pool, key, now, c.Config.Quota.freshTTL()); ok {
 		_ = updateSnapshot(c.cacheFile(), pool, o, time.UnixMilli(int64(o.FetchedAt*1000)), entry)
 		return finish(o)
