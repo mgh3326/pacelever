@@ -20,6 +20,10 @@ type PTYProvider struct {
 	ID      string
 	Binary  string
 	Timeout time.Duration
+	// Preferred is a strictly safer source tried before the interactive probe
+	// (for example a read-only HTTP endpoint). Only its successful observation
+	// is kept; any failure falls through to the existing CLI probe.
+	Preferred Provider
 	// Guard supplies a parent-death watchdog. The CLI provides GuardProcess.
 	Guard func(int) (func(), error)
 }
@@ -49,6 +53,11 @@ func expandHome(path string) string {
 	return path
 }
 func (p PTYProvider) Fetch(ctx context.Context) Observation {
+	if p.Preferred != nil {
+		if o := p.Preferred.Fetch(ctx); o.Error == "" && o.Warning == "" && len(o.Buckets) > 0 {
+			return o
+		}
+	}
 	result := Observation{ID: p.ID, Source: "cli:/usage"}
 	timeout := p.Timeout
 	if timeout <= 0 {

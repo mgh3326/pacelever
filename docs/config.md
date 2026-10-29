@@ -89,7 +89,21 @@ running `agy models` when the `agy` CLI is installed. ClinePass uses
 the existing opencode credential store, or its API-key file. Credentials remain
 in memory and request headers; errors never include their values or HTTP bodies.
 
-Devin, Kimi and Kiro still read the existing authenticated CLIs. Set
+Devin tries a read-only organization quota endpoint first when
+`DEVIN_BEARER_TOKEN` and `pools.devin.org_id` are both set: it requests
+`app.devin.ai/api/<org_id>/billing/quota/usage` with a Bearer token and
+`x-cog-org-id`, and maps the daily and weekly usage from either the flat or
+nested response shape. Any missing credential, malformed organization id or
+unrecognized answer falls through to the existing CLI probe, which still
+supplies the per-model Free tags. No browser storage is read and no credential
+is written back.
+
+```toml
+[pools.devin]
+org_id = "org-example"          # with DEVIN_BEARER_TOKEN in the environment
+```
+
+Kimi and Kiro still read the existing authenticated CLIs. Set
 `PACELEVER_<POOL>_BIN` to an explicit executable; the corresponding
 `SCOPEFUEL_<POOL>_BIN` remains supported. Kimi respects its existing location
 selector. The tool does not install CLIs or initiate login flows.

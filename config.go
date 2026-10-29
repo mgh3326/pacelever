@@ -28,6 +28,9 @@ type PoolPolicy struct {
 	CreditMaxAgeS      float64            `toml:"credit_max_age_s" json:"credit_max_age_s,omitempty"`
 	OnExhaust          string             `toml:"on_exhaust" json:"on_exhaust,omitempty"`
 	Bin                string             `toml:"bin" json:"bin,omitempty"`
+	// OrgID is Devin's organization id for its read-only web quota endpoint.
+	// It is only used when DEVIN_BEARER_TOKEN is also set.
+	OrgID string `toml:"org_id" json:"org_id,omitempty"`
 }
 type ProfilePolicy struct {
 	Subscribed *bool `toml:"subscribed" json:"subscribed,omitempty"`
