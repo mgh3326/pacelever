@@ -39,6 +39,24 @@ type Bucket struct {
 	// use: the window restarted, so the reading is 0% and unmeasured.
 	RolledOver bool `json:"rolled_over,omitempty"`
 }
+
+// accountBucket is an account-wide bucket labelled by its window.
+func accountBucket(window string, used *float64, reset string) Bucket {
+	return windowBucket(Scope{Kind: ScopeAccount}, window, used, reset)
+}
+
+// modelBucket is one model's own limit, labelled by the model name.
+func modelBucket(name, window string, used *float64, reset string) Bucket {
+	b := windowBucket(Scope{Kind: ScopeModel, Name: name}, window, used, reset)
+	b.Label = name
+	return b
+}
+
+// windowBucket labels a bucket by its window and derives the horizon from it.
+func windowBucket(scope Scope, window string, used *float64, reset string) Bucket {
+	return Bucket{Label: window, Window: window, UsedPct: used, ResetsAt: reset, Scope: scope, Horizon: horizon(window)}
+}
+
 type Observation struct {
 	Degraded       bool                `json:"degraded,omitempty"`
 	FreeBucket     *FreeBucketState    `json:"free_bucket,omitempty"`
@@ -133,6 +151,16 @@ func ExitCode(err error) int {
 	return Invalid
 }
 func ptr[T any](v T) *T { return &v }
+
+// ClockNow is the single clock rule: an injected clock wins, otherwise the
+// wall clock in UTC. Code that measures or stamps time takes a func() time.Time
+// and reads it here, so a fixed clock gives repeatable results.
+func ClockNow(now func() time.Time) time.Time {
+	if now != nil {
+		return now()
+	}
+	return time.Now().UTC()
+}
 func validPct(p *float64) bool {
 	return p != nil && !math.IsNaN(*p) && !math.IsInf(*p, 0) && *p >= 0 && *p <= 100
 }
@@ -258,7 +286,7 @@ func DisplayObservation(o Observation, cfg Config, manual ManualStore, now time.
 	out.Source = "operator"
 	out.Buckets = nil
 	for _, m := range valid {
-		out.Buckets = append(out.Buckets, Bucket{Label: m.Window, Window: m.Window, UsedPct: m.UsedPct, ResetsAt: m.ResetsAt, Scope: Scope{Kind: "account"}, Horizon: horizon(m.Window)})
+		out.Buckets = append(out.Buckets, accountBucket(m.Window, m.UsedPct, m.ResetsAt))
 	}
 	return out
 }

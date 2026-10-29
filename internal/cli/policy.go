@@ -3,8 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"math"
-	"strconv"
 	"strings"
 	"time"
 
@@ -32,7 +30,7 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 		catalog := a.catalog(ctx)
 		d, e := pl.ResolveLaunch(catalog, a.Config, req)
 		if e == nil && a.Config.Pools[d.Pool].Exploration.Active() {
-			inputs := pl.Inputs{Catalog: catalog, Config: a.Config, Now: time.Now().UTC()}
+			inputs := pl.Inputs{Catalog: catalog, Config: a.Config, Now: a.now()}
 			inputs.FreeLimit = pl.ActiveFreeLimit(inputs.Now)
 			if strings.TrimSpace(req.TaskID) != "" && req.RequiredGrade != "" {
 				var inputErr error
@@ -57,7 +55,7 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 			return 0, a.json(map[string]any{"pools": a.Config.Pools, "profiles": a.Config.Profiles, "settings": a.Config.Settings})
 		}
 		for _, p := range append(append([]string{}, pl.ProviderIDs...), "anthropic-api") {
-			policy := a.Config.Pool(p, time.Now().UTC())
+			policy := a.Config.Pool(p, a.now())
 			fmt.Fprintf(a.Out, "%s class=%s boost=%g cutoff=%g subscribed=%t\n", p, policy.Class, policy.Boost, policy.Cutoff, a.Config.Subscribed("", p))
 		}
 		return 0, nil
@@ -104,8 +102,8 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 				if value == "none" {
 					delete(entry, "boost")
 				} else {
-					boost, e := strconv.ParseFloat(value, 64)
-					if e != nil || math.IsNaN(boost) || math.IsInf(boost, 0) || boost < 0 {
+					boost, ok := pl.ParseFinite(value)
+					if !ok || boost < 0 {
 						return fmt.Errorf("invalid boost")
 					}
 					entry["boost"] = boost
@@ -140,8 +138,8 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 					r := map[string]any{}
 					for _, item := range reserve {
 						window, pct, ok := strings.Cut(item, "=")
-						n, e := strconv.ParseFloat(pct, 64)
-						if !ok || e != nil || n < 0 || n > 100 || math.IsNaN(n) || math.IsInf(n, 0) {
+						n, finite := pl.ParseFinite(pct)
+						if !ok || !finite || n < 0 || n > 100 {
 							return fmt.Errorf("invalid WINDOW=PCT reserve")
 						}
 						r[window] = n
@@ -199,8 +197,8 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 				delete(settings, name)
 				return nil
 			}
-			n, e := strconv.ParseFloat(value, 64)
-			if e != nil || n <= 0 || math.IsNaN(n) || math.IsInf(n, 0) {
+			n, ok := pl.ParseFinite(value)
+			if !ok || n <= 0 {
 				return fmt.Errorf("setting must be a finite positive number")
 			}
 			settings[name] = n
@@ -223,7 +221,7 @@ func (a *App) manual(ctx context.Context, v args) (int, error) {
 		if pool == "" {
 			return 0, a.json(s)
 		}
-		return 0, a.json(s.Valid(pool, time.Now().UTC()))
+		return 0, a.json(s.Valid(pool, a.now()))
 	case "clear":
 		if pool == "" {
 			return 2, fmt.Errorf("pool required")
@@ -241,7 +239,7 @@ func (a *App) manual(ctx context.Context, v args) (int, error) {
 		measured, reason := v.get("measured-at"), v.get("reason")
 		if creditForm {
 			if measured == "" {
-				measured = time.Now().UTC().Format(time.RFC3339Nano)
+				measured = a.now().Format(time.RFC3339Nano)
 			}
 			if reason == "" {
 				reason = "credit balance observed"
@@ -299,7 +297,7 @@ func (a *App) manual(ctx context.Context, v args) (int, error) {
 			}
 			m.ResetsAt = at.Add(duration).Format(time.RFC3339Nano)
 		}
-		r, e := a.Collector.AddManual(ctx, m, ttl, time.Now().UTC())
+		r, e := a.Collector.AddManual(ctx, m, ttl, a.now())
 		if e != nil {
 			return 2, e
 		}

@@ -47,7 +47,7 @@ func TestExplorationModelLadders(t *testing.T) {
 		t.Run(tt.pool+"/"+tt.from, func(t *testing.T) {
 			in := explorationInput(tt.pool, []CatalogRow{explorerRow(tt.from, "high", tt.from+"-model", tt.pool, "A"), explorerRow(tt.to, "high", tt.to+"-model", tt.pool, "A")})
 			if tt.pool == "anthropic-api" {
-				in.Observations[0].Buckets = append(in.Observations[0].Buckets, screenBucket("credit", 10, ""))
+				in.Observations[0].Buckets = append(in.Observations[0].Buckets, accountBucket("credit", Pct(10), ""))
 			}
 			d, e := ResolveLaunchWithInputs(in, Request{Profile: tt.from, Effort: "high", Role: "worker", RequiredGrade: "A", TaskID: "hk:task/1"})
 			if e != nil || d.Profile != tt.to || d.Label.Arm != "downshift" {

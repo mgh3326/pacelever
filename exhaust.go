@@ -40,7 +40,7 @@ func ExhaustionNotice(ctx context.Context, cfg Config, o Observation, scope stri
 	}
 	var over *Bucket
 	for i, b := range o.Buckets {
-		if b.Scope.Kind != "account" || !validPct(b.UsedPct) {
+		if b.Scope.Kind != ScopeAccount || !validPct(b.UsedPct) {
 			continue
 		}
 		if reset, e := ParseTime(b.ResetsAt); e == nil && !reset.After(now) {

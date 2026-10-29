@@ -145,7 +145,7 @@ func StaleBuildWarning(ctx context.Context, commit string, client HTTPDoer) stri
 			warning = fmt.Sprintf("pacelever build is %d commits behind main; review a newer release", v.AheadBy)
 		}
 	}
-	_ = WriteJSON(path, staleState{CheckedAt: time.Now().UTC().Format(time.RFC3339Nano), Commit: commit, Warning: warning})
+	_ = WriteJSON(path, staleState{CheckedAt: ClockNow(nil).Format(time.RFC3339Nano), Commit: commit, Warning: warning})
 	return warning
 }
 func urlCommit(s string) string {

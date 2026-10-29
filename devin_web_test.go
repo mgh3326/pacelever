@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDevinWebFlatShape(t *testing.T) {
@@ -219,6 +220,30 @@ func TestDefaultProvidersWiresDevinWeb(t *testing.T) {
 	provider, ok := DefaultProviders(cfg)["devin"].(PTYProvider)
 	if !ok || provider.Preferred == nil {
 		t.Fatal("devin web source is not wired ahead of the CLI probe")
+	}
+}
+
+func TestDefaultProvidersAtSharesClock(t *testing.T) {
+	fixed := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	providers := DefaultProvidersAt(Config{}, nil, func() time.Time { return fixed })
+	for _, pool := range []string{"devin", "kimi", "kiro"} {
+		p, ok := providers[pool].(PTYProvider)
+		if !ok || p.Now == nil || !p.Now().Equal(fixed) {
+			t.Fatalf("%s probe does not use the injected clock", pool)
+		}
+	}
+	if agy, ok := providers["agy"].(agyProvider); !ok || !agy.now().Equal(fixed) {
+		t.Fatal("agy does not use the injected clock")
+	}
+}
+
+func TestClockNowDefaultsToUTC(t *testing.T) {
+	if ClockNow(nil).Location() != time.UTC {
+		t.Fatal("default clock is not UTC")
+	}
+	fixed := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if !ClockNow(func() time.Time { return fixed }).Equal(fixed) {
+		t.Fatal("injected clock ignored")
 	}
 }
 

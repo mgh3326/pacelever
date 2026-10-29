@@ -511,19 +511,14 @@ func sharedManual(xs []SharedObservation, pool string) []ManualObservation {
 	}
 	return out
 }
-func (c Collector) quotaNow() time.Time {
-	if c.Now != nil {
-		return c.Now()
-	}
-	return time.Now().UTC()
-}
+func (c Collector) quotaNow() time.Time { return ClockNow(c.Now) }
 
 // ClaudeBar keeps a rate limiter per account: a 429 suppresses another fetch
 // for Retry-After (or a five-minute default), while the last good reading stays
 // available as stale evidence. A legacy scopefuel backoff does not transfer to
 // shared mode because it was not recorded against this account key.
 func sharedRateLimitBackoffActive(entry CacheEntry, pool, key string, now time.Time) bool {
-	if entry.legacy || entry.NegativeUntil <= float64(now.UnixMilli())/1000 || entry.LastError == nil || entry.LastError.ErrorKind != "rate_limited" {
+	if entry.legacy || entry.NegativeUntil <= float64(now.UnixMilli())/1000 || entry.LastError == nil || entry.LastError.ErrorKind != ErrKindRateLimited {
 		return false
 	}
 	fp, kind := identity(*entry.LastError)
@@ -545,20 +540,20 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 			o.Error = message
 			return o
 		}
-		if kind == "rate_limited" {
+		if kind == ErrKindRateLimited {
 			return c.sharedLocalFallback(pool, key, kind, message, entry, now, false)
 		}
 		return Observation{ID: pool, Stale: true, ErrorKind: kind, Error: message}
 	}
 	fail := func(kind string) Observation { return failWith(kind, "shared measurement pending") }
 	if key == "" {
-		return fail("account_unknown")
+		return fail(ErrKindAccountUnknown)
 	}
 	var err error
 	latest, err = source.Latest(ctx, key)
 	if err != nil {
 		reachable = false
-		return fail("shared_unavailable")
+		return fail(ErrKindSharedUnavailable)
 	}
 	reachable = true
 	finish := func(o Observation) Observation {
@@ -576,7 +571,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		return o, ok
 	}
 	if pool == "anthropic-api" {
-		return finish(fail("manual_only"))
+		return finish(fail(ErrKindManualOnly))
 	}
 	if o, ok := fresh(); ok {
 		_ = updateSnapshot(c.cacheFile(), pool, o, time.UnixMilli(int64(o.FetchedAt*1000)), entry)
@@ -588,12 +583,12 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	if allowed && (!backingOff || pool == "devin") {
 		holder, err = holderToken()
 		if err != nil {
-			return fail("shared_unavailable")
+			return fail(ErrKindSharedUnavailable)
 		}
 		lease, e := source.Lease(ctx, key, holder, c.Config.Quota.leaseTTL())
 		if e != nil {
 			reachable = false
-			return fail("shared_unavailable")
+			return fail(ErrKindSharedUnavailable)
 		}
 		if !lease.Acquired || lease.Holder != holder {
 			holder = ""
@@ -601,20 +596,20 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	}
 	if holder == "" {
 		if waitQuota(ctx, c.Config.Quota.waitTime()) != nil {
-			return fail("shared_wait")
+			return fail(ErrKindSharedWait)
 		}
 		latest, err = source.Latest(ctx, key)
 		if err != nil {
 			reachable = false
-			return fail("shared_unavailable")
+			return fail(ErrKindSharedUnavailable)
 		}
 		if o, ok := fresh(); ok {
 			return finish(o)
 		}
 		if backingOff {
-			return finish(failWith("rate_limited", "provider backoff active"))
+			return finish(failWith(ErrKindRateLimited, "provider backoff active"))
 		}
-		return finish(fail("shared_pending"))
+		return finish(fail(ErrKindSharedPending))
 	}
 	released := false
 	defer func() {
@@ -626,14 +621,14 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	latest, err = source.Latest(ctx, key)
 	if err != nil {
 		reachable = false
-		return fail("shared_unavailable")
+		return fail(ErrKindSharedUnavailable)
 	}
 	if o, ok := fresh(); ok {
 		return finish(o)
 	}
 	provider := c.Providers[pool]
 	if provider == nil && pool != "devin" {
-		return finish(fail("credentials"))
+		return finish(fail(ErrKindCredentials))
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, time.Duration(c.Config.Quota.leaseTTL())*time.Second-200*time.Millisecond)
 	defer cancel()
@@ -648,27 +643,27 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		// is only an additional constraint, not proof of what was measured.
 		configuredFP := fingerprint("devin-account", strings.TrimSpace(c.Config.Pools[pool].OrgID))
 		if fp == "" || kind != "account" || configuredFP != "" && configuredFP != fp {
-			return finish(fail("account_mismatch"))
+			return finish(fail(ErrKindAccountMismatch))
 		}
 	}
 	if (fp != "" && (kind != "account" || pool+":"+fp != key)) || (pool == "codex" || pool == "claude") && fp == "" {
-		return finish(fail("account_mismatch"))
+		return finish(fail(ErrKindAccountMismatch))
 	}
 	if pool == "devin" {
 		if localAccountFP(pool, c.Selectors) != strings.SplitN(key, ":", 2)[1] {
-			return finish(fail("account_mismatch"))
+			return finish(fail(ErrKindAccountMismatch))
 		}
 		// The free bucket is unmeasurable and independent of paid-credit
 		// probes. A failed probe contributes no paid percentage or plan.
 		if observed.Error != "" || observed.Warning != "" || observed.Stale {
-			if observed.ErrorKind == "rate_limited" {
+			if observed.ErrorKind == ErrKindRateLimited {
 				observed.ID = pool
 				observed.PublishFP, observed.PublishFPKind = strings.SplitN(key, ":", 2)[1], "account"
 				if observed.RetryAfterS <= 0 {
 					observed.RetryAfterS = 300
 				}
 				if err := updateSnapshot(c.cacheFile(), pool, observed, c.quotaNow(), entry); err != nil {
-					return finish(fail("cache_error"))
+					return finish(fail(ErrKindCache))
 				}
 			}
 			observed = Observation{}
@@ -683,9 +678,9 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	if observed.Error != "" || observed.Warning != "" || observed.Stale || len(observed.Buckets) == 0 && observed.FreeBucket == nil {
 		kind := observed.ErrorKind
 		if kind == "" {
-			kind = "probe_failed"
+			kind = ErrKindProbeFailed
 		}
-		if kind == "rate_limited" {
+		if kind == ErrKindRateLimited {
 			failedAt := c.quotaNow()
 			if fp == "" {
 				observed.PublishFP = strings.SplitN(key, ":", 2)[1]
@@ -696,7 +691,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 			}
 			observed.ID = pool
 			if e := updateSnapshot(c.cacheFile(), pool, observed, failedAt, entry); e != nil {
-				return finish(fail("cache_error"))
+				return finish(fail(ErrKindCache))
 			}
 			message := observed.Error
 			if message == "" {
@@ -720,13 +715,13 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 			continue
 		}
 		if !validPct(b.UsedPct) {
-			return finish(fail("probe_failed"))
+			return finish(fail(ErrKindProbeFailed))
 		}
 		v := SharedBucket{Window: b.Window, UsedPct: *b.UsedPct, Scope: b.Scope.Kind, Model: b.Scope.Name}
 		if b.ResetsAt != "" {
 			reset, e := ParseTime(b.ResetsAt)
 			if e != nil {
-				return finish(fail("probe_failed"))
+				return finish(fail(ErrKindProbeFailed))
 			}
 			v.ResetsAt = &reset
 		}
@@ -734,15 +729,15 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	}
 	if source.Publish(ctx, key, holder, x) != nil {
 		reachable = false
-		return finish(fail("shared_publish_failed"))
+		return finish(fail(ErrKindSharedPublishFailed))
 	}
 	o, ok := sharedAuto(&x, pool, key, at, c.Config.Quota.freshTTL(pool), false)
 	if !ok {
-		return finish(fail("probe_failed"))
+		return finish(fail(ErrKindProbeFailed))
 	}
 	if releaseQuota(source, key, holder) != nil {
 		reachable = false
-		return finish(fail("shared_release_failed"))
+		return finish(fail(ErrKindSharedReleaseFailed))
 	}
 	released = true
 	_ = updateSnapshot(c.cacheFile(), pool, o, at, entry)
@@ -785,7 +780,7 @@ func (c Collector) AddManual(ctx context.Context, m ManualObservation, ttl time.
 	}
 	expiry, _ := ParseTime(m.ExpiresAt)
 	at, _ := ParseTime(m.MeasuredAt)
-	b := SharedBucket{Window: m.Window, UsedPct: *m.UsedPct, Scope: "account"}
+	b := SharedBucket{Window: m.Window, UsedPct: *m.UsedPct, Scope: ScopeAccount}
 	if m.ResetsAt != "" {
 		reset, _ := ParseTime(m.ResetsAt)
 		b.ResetsAt = &reset

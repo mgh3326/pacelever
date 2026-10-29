@@ -26,6 +26,8 @@ type App struct {
 	Config    pl.Config
 	Bench     pl.BenchClient
 	Collector pl.Collector
+	// Now is the command clock; nil means the wall clock in UTC.
+	Now func() time.Time
 }
 
 func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader, version, commit string) int {
@@ -57,7 +59,7 @@ func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader
 		app.Config.Bench.AllowPlaintextReps = true
 	}
 	app.Bench = pl.NewBenchClient(app.Config)
-	app.Collector = pl.Collector{Config: app.Config, Providers: pl.DefaultProviders(app.Config), NoCache: a.flags["no-cache"]}
+	app.Collector = pl.Collector{Config: app.Config, Providers: pl.DefaultProvidersAt(app.Config, nil, app.Now), Now: app.Now, NoCache: a.flags["no-cache"]}
 	for k, p := range app.Collector.Providers {
 		if probe, ok := p.(pl.PTYProvider); ok {
 			probe.Guard = pl.GuardProcess
@@ -84,6 +86,7 @@ func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader
 	}
 	return code
 }
+func (a *App) now() time.Time { return pl.ClockNow(a.Now) }
 func (a *App) json(v any) error {
 	enc := json.NewEncoder(a.Out)
 	enc.SetIndent("", "  ")
@@ -135,7 +138,7 @@ func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inpu
 		return pl.Inputs{}, e
 	}
 	manual = a.Collector.ManualInputs(observations, manual)
-	now := time.Now().UTC()
+	now := a.now()
 	in := pl.Inputs{Catalog: c, Config: a.Config, Observations: observations, Manual: manual, Now: now, Inflight: map[string]*int{}, FreeLimit: pl.ActiveFreeLimit(now)}
 	for i, o := range in.Observations {
 		if a.Config.Quota.URL == "" && (o.Error != "" || o.Stale) {
@@ -213,7 +216,7 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 			return 2, fmt.Errorf("unknown observation")
 		}
 		r := pl.LimitRecord{ResetAt: v.get("reset"), ObservedAt: v.get("observed"), Rung: v.get("rung"), Source: v.get("source"), Unparsed: v.flags["unparsed"]}
-		now := time.Now().UTC()
+		now := a.now()
 		if r.ResetAt == "" && r.Unparsed && !v.flags["clear"] {
 			// A limit event whose reset time could not be read is held for a
 			// conservative default rather than ignored. A missing observation
@@ -232,7 +235,7 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 			return 2, fmt.Errorf("inflight show --pool required")
 		}
 		pool := v.get("pool")
-		local, e := pl.LocalInflight(ctx, pool, time.Now().UTC())
+		local, e := pl.LocalInflight(ctx, pool, a.now())
 		entries, _ := pl.LoadSnapshots()
 		o := entries[pool].Result
 		fp := o.PublishFP
@@ -465,7 +468,7 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 			return 2, e
 		}
 	}
-	in := pl.Inputs{Catalog: c, Config: a.Config, Manual: manual, Now: time.Now().UTC()}
+	in := pl.Inputs{Catalog: c, Config: a.Config, Manual: manual, Now: a.now()}
 	if key == "" {
 		in.FreeLimit = pl.ActiveFreeLimit(in.Now)
 	}
@@ -615,7 +618,7 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 			Label string `json:"label"`
 		}
 		if pl.ReadJSON(path, &state) == nil {
-			if at, e := pl.ParseTime(state.At); e == nil && time.Since(at) >= 0 && time.Since(at) < time.Minute {
+			if at, e := pl.ParseTime(state.At); e == nil && a.now().Sub(at) >= 0 && a.now().Sub(at) < time.Minute {
 				label = state.Label
 				return nil
 			}
@@ -625,7 +628,7 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 		if event.Credential != "default" {
 			collector.CachePath = filepath.Join(base, "snapshot-"+event.Provider+"-"+event.Credential+".json")
 			collector.LegacyCachePath = ""
-			collector.Providers = pl.DefaultProvidersFor(a.Config, event.Selectors)
+			collector.Providers = pl.DefaultProvidersAt(a.Config, event.Selectors, a.Now)
 			collector.Selectors = event.Selectors
 			for key, p := range collector.Providers {
 				if probe, ok := p.(pl.PTYProvider); ok {
@@ -639,9 +642,10 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 			return e
 		}
 		label = pl.HerdrLabel(rows[0], event.Credential)
-		state.At = time.Now().UTC().Format(time.RFC3339Nano)
+		now := a.now()
+		state.At = now.Format(time.RFC3339Nano)
 		state.Label = label
-		_ = pl.ExhaustionNotice(ctx, a.Config, rows[0], event.Credential, time.Now().UTC(), nil)
+		_ = pl.ExhaustionNotice(ctx, a.Config, rows[0], event.Credential, now, nil)
 		return pl.WriteJSON(path, state)
 	})
 	if err == pl.ErrBusy {

@@ -176,7 +176,7 @@ func (w codexRPCWindow) bucket(scope Scope) Bucket {
 	if w.ResetsAt > 0 {
 		reset = time.Unix(int64(w.ResetsAt), 0).UTC().Format(time.RFC3339Nano)
 	}
-	return Bucket{Label: label, Window: label, UsedPct: validated(w.UsedPct), ResetsAt: reset, Scope: scope, Horizon: horizon(label)}
+	return windowBucket(scope, label, validated(w.UsedPct), reset)
 }
 
 // codexLimitName trims the codex prefix from a per-limit id, matching
@@ -238,7 +238,7 @@ func fetchCodexRPC(ctx context.Context, home string, cfg Config, codexDir string
 	o.Plan = rl.RateLimits.PlanType
 	for _, w := range []*codexRPCWindow{rl.RateLimits.Primary, rl.RateLimits.Secondary} {
 		if w != nil {
-			o.Buckets = append(o.Buckets, w.bucket(Scope{Kind: "account"}))
+			o.Buckets = append(o.Buckets, w.bucket(Scope{Kind: ScopeAccount}))
 		}
 	}
 	var ids []string
@@ -260,7 +260,7 @@ func fetchCodexRPC(ctx context.Context, home string, cfg Config, codexDir string
 		name = codexLimitName(name)
 		for _, w := range []*codexRPCWindow{x.Primary, x.Secondary} {
 			if w != nil {
-				o.Buckets = append(o.Buckets, w.bucket(Scope{Kind: "model", Name: name}))
+				o.Buckets = append(o.Buckets, w.bucket(Scope{Kind: ScopeModel, Name: name}))
 			}
 		}
 	}
@@ -268,7 +268,7 @@ func fetchCodexRPC(ctx context.Context, home string, cfg Config, codexDir string
 		if rl.RateLimits.PlanType != "free" {
 			return o, false
 		}
-		o.Buckets = append(o.Buckets, Bucket{Label: "free", Window: "free", UsedPct: Pct(0), Scope: Scope{Kind: "account"}, Note: "Free plan"})
+		o.Buckets = append(o.Buckets, Bucket{Label: "free", Window: "free", UsedPct: Pct(0), Scope: Scope{Kind: ScopeAccount}, Note: "Free plan"})
 	}
 	// account/read supplies identity for shared mode; its failure does not
 	// discard the limits already read.

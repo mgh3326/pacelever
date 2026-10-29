@@ -96,7 +96,7 @@ func (c *CacheEntry) UnmarshalJSON(data []byte) error {
 	if len(failed) > 0 && string(failed) != "null" {
 		var message string
 		if json.Unmarshal(failed, &message) == nil {
-			value.LastError = &Observation{Error: message, ErrorKind: "legacy_failure"}
+			value.LastError = &Observation{Error: message, ErrorKind: ErrKindLegacyFailure}
 		} else {
 			var observation Observation
 			if json.Unmarshal(failed, &observation) != nil {
@@ -128,15 +128,15 @@ func updateSnapshot(ownPath, pool string, obs Observation, now time.Time, previo
 				obs.AccountFP, obs.AccountFPKind = prior.Result.AccountFP, prior.Result.AccountFPKind
 			}
 			entry = CacheEntry{FetchedAt: float64(now.UnixMilli()) / 1000, Result: obs}
-			if pool == "devin" && obs.FreeBucket != nil && len(obs.Buckets) == 0 && prior.NegativeUntil > entry.FetchedAt && prior.LastError != nil && prior.LastError.ErrorKind == "rate_limited" {
+			if pool == "devin" && obs.FreeBucket != nil && len(obs.Buckets) == 0 && prior.NegativeUntil > entry.FetchedAt && prior.LastError != nil && prior.LastError.ErrorKind == ErrKindRateLimited {
 				// A successful free-state publication does not end paid-probe backoff.
 				entry.LastError, entry.LastErrorAt, entry.NegativeUntil = prior.LastError, prior.LastErrorAt, prior.NegativeUntil
 			}
-		} else if obs.ErrorKind != "probe_in_progress" {
+		} else if obs.ErrorKind != ErrKindProbeInProgress {
 			entry.LastError = &obs
 			entry.LastErrorAt = float64(now.UnixMilli()) / 1000
 			entry.NegativeUntil = entry.LastErrorAt + 30
-			if obs.ErrorKind == "rate_limited" || obs.ErrorKind == "network" {
+			if obs.ErrorKind == ErrKindRateLimited || obs.ErrorKind == ErrKindNetwork {
 				entry.NegativeUntil = entry.LastErrorAt + 60
 				if obs.RetryAfterS > 0 {
 					entry.NegativeUntil = entry.LastErrorAt + obs.RetryAfterS
@@ -182,7 +182,7 @@ func (c Collector) Collect(ctx context.Context, pools []string) ([]Observation, 
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
 			case <-ctx.Done():
-				results[i] = Observation{ID: pool, Error: "collection deadline", ErrorKind: "timeout"}
+				results[i] = Observation{ID: pool, Error: "collection deadline", ErrorKind: ErrKindTimeout}
 				return
 			}
 			results[i] = c.one(ctx, pool, entries[pool])
@@ -192,10 +192,7 @@ func (c Collector) Collect(ctx context.Context, pools []string) ([]Observation, 
 	return results, nil
 }
 func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Observation {
-	now := time.Now().UTC()
-	if c.Now != nil {
-		now = c.Now()
-	}
+	now := c.quotaNow()
 	p := c.Config.Pool(pool, now)
 	fallback := func(kind, text string) Observation {
 		o := entry.Result
@@ -212,7 +209,7 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		return o
 	}
 	if p.Class == "exclude" {
-		return Observation{ID: pool, Error: "pool excluded", ErrorKind: "excluded", PoolClass: p.Class}
+		return Observation{ID: pool, Error: "pool excluded", ErrorKind: ErrKindExcluded, PoolClass: p.Class}
 	}
 	// A profile override may enable one profile on an unsubscribed pool.
 	enabled := c.Config.Subscribed("", pool)
@@ -228,7 +225,7 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		}
 	}
 	if !enabled {
-		return Observation{ID: pool, Error: "pool unsubscribed", ErrorKind: "unsubscribed", PoolClass: p.Class}
+		return Observation{ID: pool, Error: "pool unsubscribed", ErrorKind: ErrKindUnsubscribed, PoolClass: p.Class}
 	}
 	if source := c.sharedSource(); source != nil {
 		return c.sharedOne(ctx, source, pool, entry, now)
@@ -251,7 +248,7 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 	// A legacy scopefuel backoff describes scopefuel's own probe, not
 	// pacelever's; a pool with a native provider fetches through it anyway.
 	if entry.NegativeUntil > float64(now.UnixMilli())/1000 && !(entry.legacy && provider != nil) {
-		kind := "backoff"
+		kind := ErrKindBackoff
 		if entry.LastError != nil && entry.LastError.ErrorKind != "" {
 			kind = entry.LastError.ErrorKind
 		}
@@ -259,7 +256,7 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		return currentFailureIdentity(result, entry.LastError, entry.Result.AccountFP)
 	}
 	if provider == nil {
-		return fallback("credentials", "provider not configured")
+		return fallback(ErrKindCredentials, "provider not configured")
 	}
 	var obs Observation
 	e := WithFileLock(filepath.Join(c.cacheDir(), "collect-"+pool+".lock"), true, func() error {
@@ -269,10 +266,10 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		return updateSnapshot(c.cacheFile(), pool, obs, now, entry)
 	})
 	if e == ErrBusy {
-		return fallback("probe_in_progress", "probe already in progress")
+		return fallback(ErrKindProbeInProgress, "probe already in progress")
 	}
 	if e != nil {
-		return fallback("cache_error", "cannot persist provider observation")
+		return fallback(ErrKindCache, "cannot persist provider observation")
 	}
 	if obs.Error != "" || obs.Warning != "" {
 		result := fallback(obs.ErrorKind, obs.Error)

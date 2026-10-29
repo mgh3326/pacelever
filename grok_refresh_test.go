@@ -318,6 +318,22 @@ func TestGrokRefreshedLoginStillRefused(t *testing.T) {
 	}
 }
 
+func TestGrokRefreshUntrustedIssuer(t *testing.T) {
+	record := grokRecord{Token: "stale-token", RefreshToken: "fixture-refresh", Issuer: "https://issuer.example", HasExpiry: true, Expires: testNow.Add(-time.Hour)}
+	var billingCalls int
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/oauth2/token" {
+			t.Fatalf("refresh token sent to %s", r.URL)
+		}
+		billingCalls++
+		return response(401, `{}`), nil
+	})
+	o := fetchGrokRecord(context.Background(), record, client, fixedNow)
+	if o.ErrorKind != "auth_failed" || billingCalls != 1 {
+		t.Fatalf("untrusted issuer: calls=%d %+v", billingCalls, o)
+	}
+}
+
 func TestGrokExpiredWithoutRefreshToken(t *testing.T) {
 	home := t.TempDir()
 	writeGrokAuth(t, home, `{"https://auth.x.ai::fixture":{"key":"stale-token","expires_at":"2020-01-01T00:00:00Z"}}`)
@@ -343,6 +359,18 @@ func TestGrokRefreshDue(t *testing.T) {
 		{"plain http issuer", func() grokRecord {
 			r := base
 			r.Issuer = "http://auth.x.ai"
+			r.Expires = testNow.Add(-time.Hour)
+			return r
+		}(), false},
+		{"untrusted issuer", func() grokRecord {
+			r := base
+			r.Issuer = "https://issuer.example"
+			r.Expires = testNow.Add(-time.Hour)
+			return r
+		}(), false},
+		{"issuer lookalike host", func() grokRecord {
+			r := base
+			r.Issuer = "https://auth.x.ai.issuer.example"
 			r.Expires = testNow.Add(-time.Hour)
 			return r
 		}(), false},

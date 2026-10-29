@@ -89,7 +89,7 @@ func HerdrLabel(o Observation, credential string) string {
 	label := o.ID
 	var now, week *float64
 	for _, b := range o.Buckets {
-		if b.Scope.Kind != "account" || !validPct(b.UsedPct) {
+		if b.Scope.Kind != ScopeAccount || !validPct(b.UsedPct) {
 			continue
 		}
 		if b.Horizon == "now" && (now == nil || *b.UsedPct > *now) {
