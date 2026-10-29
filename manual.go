@@ -207,8 +207,12 @@ func RequiredWindows(pool, plan string, manual bool) []string {
 		return []string{"5h", "7d"}
 	case "kiro":
 		return []string{"30d"}
-	case "clinepass", "commandcode":
+	case "clinepass":
 		return []string{"5h", "7d", "30d"}
+	case "commandcode":
+		// The HTTP windows are the measurable requirement; credits are
+		// informational for stale acceptance.
+		return []string{"5h", "7d"}
 	case "anthropic-api":
 		return []string{"credit"}
 	}

@@ -242,13 +242,21 @@ func doJSON(ctx context.Context, client HTTPDoer, method, endpoint string, heade
 	}
 	defer resp.Body.Close()
 	out := httpJSON{Status: resp.StatusCode, Header: resp.Header}
-	if resp.StatusCode != 200 {
-		return out, nil
-	}
+	// Decode every status so a caller can tell an API error from an HTML edge
+	// rejection. The body is never retained in an observation or an error.
 	if e = json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&out.Body); e != nil {
 		out.ParseError = true
 	}
 	return out, nil
+}
+
+func commandCodeStatus(status int, header http.Header, parseError bool, now time.Time) Observation {
+	if status == 403 && parseError {
+		o := statusObservation("commandcode", status, header, now, "edge_rejected", "", 0)
+		o.Error = "commandcode edge rejected the request; check the client user agent"
+		return o
+	}
+	return statusObservation("commandcode", status, header, now, "auth_failed", "commandcode authentication failed; run cmd login or set COMMAND_CODE_API_KEY", 0)
 }
 
 func fetchCommandCode(ctx context.Context, token string, client HTTPDoer, now func() time.Time) Observation {
@@ -262,7 +270,7 @@ func fetchCommandCode(ctx context.Context, token string, client HTTPDoer, now fu
 		return Observation{ID: "commandcode", Error: "usage request failed", ErrorKind: "network"}
 	}
 	if who.Status != 200 {
-		return statusObservation("commandcode", who.Status, who.Header, now(), "auth_failed", "commandcode authentication failed; run cmd login or set COMMAND_CODE_API_KEY", 0)
+		return commandCodeStatus(who.Status, who.Header, who.ParseError, now())
 	}
 	if who.ParseError {
 		return Observation{ID: "commandcode", Error: "invalid usage JSON", ErrorKind: "parse_error"}
@@ -284,7 +292,7 @@ func fetchCommandCode(ctx context.Context, token string, client HTTPDoer, now fu
 		return Observation{ID: "commandcode", Error: "usage request failed", ErrorKind: "network"}
 	}
 	if billing.Status != 200 {
-		return statusObservation("commandcode", billing.Status, billing.Header, now(), "auth_failed", "commandcode authentication failed; run cmd login or set COMMAND_CODE_API_KEY", 0)
+		return commandCodeStatus(billing.Status, billing.Header, billing.ParseError, now())
 	}
 	if billing.ParseError {
 		return Observation{ID: "commandcode", Error: "invalid usage JSON", ErrorKind: "parse_error"}
@@ -315,10 +323,8 @@ func parseCommandCode(raw map[string]any) Observation {
 			continue
 		}
 		used, usedOK := finiteNumber(w["used"])
-		if !usedOK {
-			used = 0
-		}
-		if used < 0 {
+		if !usedOK || used < 0 {
+			// A malformed used value must never read as an unused window.
 			continue
 		}
 		pct, locked := 100*used/capacity, false
@@ -332,23 +338,31 @@ func parseCommandCode(raw map[string]any) Observation {
 		o.Buckets = append(o.Buckets, Bucket{Label: axis.window, Window: axis.window, UsedPct: Pct(pct), ResetsAt: resetAtValue(w["resetAt"]), Scope: Scope{Kind: "account"}, Horizon: horizon(axis.window), Locked: locked})
 	}
 	if credits := object(data["credits"]); len(credits) > 0 {
-		monthly := creditAmount(credits["monthlyCredits"])
-		purchased := creditAmount(credits["purchasedCredits"])
-		free := creditAmount(credits["freeCredits"])
-		remaining := monthly + purchased + free
 		o.Plan = str(credits["planId"])
-		if total, ok := commandCodeCreditTotal(o.Plan, monthly, purchased, free); ok && total > 0 {
-			pct := 100 * (total - remaining) / total
-			if pct < 0 {
-				pct = 0
+		monthly, monthlyOK := finiteNumber(credits["monthlyCredits"])
+		if monthlyOK {
+			if monthly < 0 {
+				monthly = 0
 			}
-			if pct > 100 {
-				pct = 100
+			purchased := creditAmount(credits["purchasedCredits"])
+			free := creditAmount(credits["freeCredits"])
+			remaining := monthly + purchased + free
+			if total, ok := commandCodeCreditTotal(o.Plan, monthly, purchased, free); ok && total > 0 {
+				pct := 100 * (total - remaining) / total
+				if pct < 0 {
+					pct = 0
+				}
+				if pct > 100 {
+					pct = 100
+				}
+				o.Buckets = append(o.Buckets, Bucket{Label: "30d", Window: "30d", UsedPct: Pct(pct), Scope: Scope{Kind: "account"}, Horizon: "month", Note: fmt.Sprintf("credits remaining %.2f of %.2f USD", remaining, total)})
+			} else if remaining <= 0 {
+				// An unknown plan with no balance is exhausted, not absent.
+				o.Buckets = append(o.Buckets, Bucket{Label: "credits", Window: "credit", UsedPct: Pct(100), Scope: Scope{Kind: "account"}, Locked: true, Note: "credits exhausted"})
+			} else {
+				// A positive balance with no plan ceiling is money, not a percentage.
+				o.Buckets = append(o.Buckets, Bucket{Label: "credits", Window: "credit", Scope: Scope{Kind: "account"}, Note: fmt.Sprintf("credits remaining %.2f USD", remaining)})
 			}
-			o.Buckets = append(o.Buckets, Bucket{Label: "30d", Window: "30d", UsedPct: Pct(pct), Scope: Scope{Kind: "account"}, Horizon: "month", Note: fmt.Sprintf("credits remaining %.2f of %.2f USD", remaining, total)})
-		} else if remaining > 0 {
-			// A balance with no plan ceiling is money, not a percentage.
-			o.Buckets = append(o.Buckets, Bucket{Label: "credits", Window: "credit", Scope: Scope{Kind: "account"}, Note: fmt.Sprintf("credits remaining %.2f USD", remaining)})
 		}
 	}
 	if len(o.Buckets) == 0 {

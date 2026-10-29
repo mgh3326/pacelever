@@ -120,6 +120,100 @@ func TestCommandCodeHTTPSoftFailure(t *testing.T) {
 	}
 }
 
+func TestCommandCodeHTTPMissingUsed(t *testing.T) {
+	who := `{"success":true}`
+	credits := `{"windowLimits":{"fiveHour":{"cap":40,"resetAt":1770000000},"weekly":{"used":"10","cap":200,"resetAt":1770500000}}}`
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/alpha/whoami" {
+			return response(200, who), nil
+		}
+		return response(200, credits), nil
+	})
+	o := fetchCommandCode(context.Background(), "fixture-key", client, fixedNow)
+	if o.Error == "" || o.ErrorKind != "parse_error" || len(o.Buckets) != 0 {
+		t.Fatalf("malformed used admitted %+v", o)
+	}
+}
+
+func TestCommandCodeHTTPUnknownPlanExhausted(t *testing.T) {
+	who := `{"success":true}`
+	credits := `{"credits":{"monthlyCredits":0,"planId":"mystery-tier"},"windowLimits":{"weekly":{"used":10,"cap":200,"resetAt":1770500000}}}`
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/alpha/whoami" {
+			return response(200, who), nil
+		}
+		return response(200, credits), nil
+	})
+	o := fetchCommandCode(context.Background(), "fixture-key", client, fixedNow)
+	if o.Error != "" || len(o.Buckets) != 2 {
+		t.Fatalf("exhausted unknown plan %+v", o)
+	}
+	credit := o.Buckets[1]
+	if credit.Window != "credit" || credit.UsedPct == nil || *credit.UsedPct != 100 || !credit.Locked {
+		t.Fatalf("exhausted credit bucket %+v", credit)
+	}
+}
+
+func TestCommandCodeHTTPMissingMonthlyCredits(t *testing.T) {
+	who := `{"success":true}`
+	credits := `{"credits":{"purchasedCredits":5,"planId":"individual-go"},"windowLimits":{"weekly":{"used":10,"cap":200,"resetAt":1770500000}}}`
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/alpha/whoami" {
+			return response(200, who), nil
+		}
+		return response(200, credits), nil
+	})
+	o := fetchCommandCode(context.Background(), "fixture-key", client, fixedNow)
+	if o.Error != "" || len(o.Buckets) != 1 || o.Buckets[0].Window != "7d" {
+		t.Fatalf("missing monthlyCredits invented a credit bucket %+v", o)
+	}
+}
+
+func TestCommandCodeHTTPNonJSON403(t *testing.T) {
+	html := `<html><body>error 1010</body></html>`
+	client := doFunc(func(*http.Request) (*http.Response, error) { return response(403, html), nil })
+	o := fetchCommandCode(context.Background(), "fixture-key", client, fixedNow)
+	if o.ErrorKind != "edge_rejected" || !strings.Contains(o.Error, "user agent") {
+		t.Fatalf("non-JSON 403 %+v", o)
+	}
+	jsonBody := `{"error":"invalid token"}`
+	client = doFunc(func(*http.Request) (*http.Response, error) { return response(403, jsonBody), nil })
+	o = fetchCommandCode(context.Background(), "fixture-key", client, fixedNow)
+	if o.ErrorKind != "auth_failed" || !strings.Contains(o.Error, "cmd login") {
+		t.Fatalf("JSON 403 %+v", o)
+	}
+}
+
+func TestCommandCodeRequiredWindows(t *testing.T) {
+	windows := RequiredWindows("commandcode", "", false)
+	if len(windows) != 2 || windows[0] != "5h" || windows[1] != "7d" {
+		t.Fatalf("automatic windows %v", windows)
+	}
+	if manual := RequiredWindows("commandcode", "", true); len(manual) != 1 || manual[0] != "credit" {
+		t.Fatalf("manual windows %v", manual)
+	}
+}
+
+func TestCommandCodeStaleAcceptanceWithoutCreditReset(t *testing.T) {
+	o := observation("commandcode", 10)
+	o.Buckets = append(o.Buckets, Bucket{Label: "credits", Window: "credit", UsedPct: Pct(50), Scope: Scope{Kind: "account"}})
+	o.Stale = true
+	o.Error = "usage HTTP 429"
+	o.ErrorKind = "rate_limited"
+	o.AccountFPMatch = ptr(true)
+	o.AgeS = ptr(60.0)
+	o.FetchedAt = float64(testNow.Add(-time.Minute).Unix())
+	d := Gate(Inputs{Now: testNow, Observations: []Observation{o}}, Request{Profile: "cmd-dsflash41", Effort: "high", Role: "worker"})
+	if !d.OK || !d.StaleAccepted {
+		t.Fatalf("stale command code rejected: %+v", d)
+	}
+	for _, w := range d.MissingWindows {
+		if w == "30d" || w == "credit" {
+			t.Fatalf("informational credit window required: %v", d.MissingWindows)
+		}
+	}
+}
+
 func TestCommandCodeHTTPSpikedWindow(t *testing.T) {
 	who := `{"success":true}`
 	credits := `{"windowLimits":{"fiveHour":{"used":44,"cap":40,"resetAt":1770000000},"weekly":{"used":-1,"cap":200,"resetAt":1770500000}}}`
