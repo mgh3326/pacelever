@@ -73,7 +73,7 @@ func TestGateAccountUsesSharedJudgment(t *testing.T) {
 }
 
 func TestGateAccountFailsClosed(t *testing.T) {
-	for _, mode := range []string{"missing", "stale", "future", "invalid bucket", "manual only", "http error", "wrong pool", "invalid key", "no backend"} {
+	for _, mode := range []string{"missing", "stale", "future", "invalid bucket", "manual kind", "manual only", "http error", "wrong pool", "invalid key", "empty key", "empty equals key", "malformed blocked key", "no backend"} {
 		t.Run(mode, func(t *testing.T) {
 			isolated(t)
 			now := time.Now().UTC()
@@ -93,6 +93,8 @@ func TestGateAccountFailsClosed(t *testing.T) {
 					x.Observation.MeasuredAt = now.Add(time.Hour)
 				case "invalid bucket":
 					x.Observation.Buckets[0].UsedPct = 101
+				case "manual kind":
+					x.Observation.Kind = "manual"
 				case "http error":
 					w.WriteHeader(503)
 					return
@@ -115,13 +117,23 @@ func TestGateAccountFailsClosed(t *testing.T) {
 			if mode == "wrong pool" {
 				key = "codex:0123456789abcdef"
 			}
-			if mode == "invalid key" {
+			if mode == "invalid key" || mode == "malformed blocked key" {
 				key = "claude:invalid"
 			}
-			v, _ := parse([]string{"gate", "-m", "sonnet", "--account-key", key, "--json"})
+			if mode == "empty key" || mode == "empty equals key" {
+				key = ""
+			}
+			if mode == "malformed blocked key" {
+				app.Config.Pools = map[string]pl.PoolPolicy{"claude": {Class: "exclude"}}
+			}
+			argv := []string{"gate", "-m", "sonnet", "--account-key", key, "--json"}
+			if mode == "empty equals key" {
+				argv = []string{"gate", "-m", "sonnet", "--account-key=", "--json"}
+			}
+			v, _ := parse(argv)
 			code, err := app.gate(context.Background(), v)
 			want := pl.Unmeasurable
-			if mode == "wrong pool" || mode == "invalid key" {
+			if mode == "wrong pool" || mode == "invalid key" || mode == "empty key" || mode == "empty equals key" || mode == "malformed blocked key" {
 				want = pl.Invalid
 			}
 			if err == nil || code != want || strings.Contains(out.String(), `"ok": true`) {

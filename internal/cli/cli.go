@@ -450,8 +450,13 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 		return 2, e
 	}
 	req := request(v)
-	c := a.catalog(ctx)
 	key := v.get("account-key")
+	if _, present := v.values["account-key"]; present {
+		if err := pl.ValidateAccountKey(key); err != nil {
+			return pl.Invalid, err
+		}
+	}
+	c := a.catalog(ctx)
 	var manual pl.ManualStore
 	var e error
 	if key == "" {

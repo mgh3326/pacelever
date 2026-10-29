@@ -18,6 +18,15 @@ import (
 var accountKeyRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}:[0-9a-f]{16}$`)
 var accountFPRE = regexp.MustCompile(`^[0-9a-f]{16}$`)
 
+// ValidateAccountKey checks the pool and fingerprint of an explicit shared key.
+func ValidateAccountKey(key string) error {
+	pool, _, _ := strings.Cut(key, ":")
+	if !accountKeyRE.MatchString(key) || !knownPool(pool) {
+		return deny(Invalid, "invalid quota account key")
+	}
+	return nil
+}
+
 func (q QuotaConfig) Validate() error {
 	if math.IsNaN(q.FreshTTLS) || math.IsInf(q.FreshTTLS, 0) || math.IsNaN(q.WaitS) || math.IsInf(q.WaitS, 0) || math.IsNaN(q.PresenceEveryS) || math.IsInf(q.PresenceEveryS, 0) || q.FreshTTLS < 0 || q.FreshTTLS > 86400 || q.LeaseTTLS < 0 || q.LeaseTTLS > 120 || q.WaitS < 0 || q.WaitS > 10 || q.PresenceEveryS < 0 || q.PresenceEveryS > 86400 {
 		return fmt.Errorf("invalid shared quota TTLs")
@@ -450,8 +459,8 @@ func sharedAuto(x *SharedObservation, pool, key string, now time.Time, ttl time.
 // invoking host's cache, manual observations or login for another account.
 func (c Collector) AccountObservation(ctx context.Context, key string) (Observation, error) {
 	pool, _, _ := strings.Cut(key, ":")
-	if !accountKeyRE.MatchString(key) || !knownPool(pool) {
-		return Observation{}, deny(Invalid, "invalid quota account key")
+	if err := ValidateAccountKey(key); err != nil {
+		return Observation{}, err
 	}
 	source := c.sharedSource()
 	if source == nil {
