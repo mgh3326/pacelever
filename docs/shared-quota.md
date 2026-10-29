@@ -11,6 +11,7 @@ host_id = "mac-work"
 fresh_ttl_s = 300
 lease_ttl_s = 120
 wait_s = 1
+presence_every_s = 600
 measurable_accounts = ["codex:0123456789abcdef"]
 
 [quota.accounts]
@@ -65,7 +66,10 @@ apply, and a shared outage cannot be hidden by old local manual data.
 ## Host presence
 
 After a successful shared measurement, the measuring host also publishes a
-presence record so placement can see which host last saw an account:
+presence record so placement can see which host last saw an account. A host
+that only reads fresh shared observations publishes presence too, provided its
+local identity resolves to the measured key (the same `measurable_accounts` and
+identity checks that gate probing); read-only hosts never publish:
 
 ```
 PUT /v1/quota/presence
@@ -78,10 +82,14 @@ no host metadata. `host_id` is, in order of precedence: `PACELEVER_HOST_ID` or
 config (use the machine id placement matches on, e.g. `mac-work`); otherwise a
 truncated SHA-256 of the local hostname. The raw hostname is never sent. The
 configured value may contain only letters, digits, `.`, `_` and `-` (at most 64
-characters); anything else makes the configuration invalid. Publication is
+characters); anything else makes the configuration invalid. Publishes are
+rate-limited to at most one per `presence_every_s` seconds (default 600) per
+host and account, recorded in a `presence.json` next to the cache file.
+Publication is
 best-effort: a missing endpoint or an hk error never changes a quota verdict and never fails collection. hk must expose this endpoint
 for records to persist; pacelever does not create it.
 
 Omit `quota.url` to retain the existing local collection behavior. Tests use an
 in-memory fake hk and an HTTP test server; no database or real provider probes
-are needed. The six-host contention test asserts one probe and one publication.
+are needed. The six-host contention test asserts one probe, one shared publication and one
+presence record per host.

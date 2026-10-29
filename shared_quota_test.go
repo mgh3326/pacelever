@@ -186,12 +186,99 @@ func TestSharedQuotaFleetSingleProbe(t *testing.T) {
 	if probes.Load() != 1 || f.published != 1 || f.holder != "" {
 		t.Fatalf("probes=%d published=%d holder=%s", probes.Load(), f.published, f.holder)
 	}
+	// Every logged-in host records presence: one prober plus five shared readers.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		f.mu.Lock()
+		n := len(f.presence)
+		f.mu.Unlock()
+		if n == 6 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.presence) != 6 {
+		t.Fatalf("presence %+v", f.presence)
+	}
+	for _, p := range f.presence {
+		if p.AccountKey != sharedTestKey || p.HostID == "" || p.LastSeen.IsZero() {
+			t.Fatalf("presence %+v", f.presence)
+		}
+	}
+}
+
+// A logged-in host that reads a fresh shared observation still publishes
+// presence, so placement sees hosts that never probe.
+func TestPresencePublishedOnSharedRead(t *testing.T) {
+	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now())}, presenceDone: make(chan struct{}, 1)}
+	c := sharedCollector(t, f)
+	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation { t.Fatal("fresh hk triggered probe"); return Observation{} })
+	o := collectShared(t, c)
+	if o.Stale || o.Degraded {
+		t.Fatalf("%+v", o)
+	}
 	select {
 	case <-f.presenceDone:
 	case <-time.After(2 * time.Second):
-		t.Fatal("presence was not published")
+		t.Fatal("shared read did not publish presence")
 	}
-	if len(f.presence) != 1 || f.presence[0].AccountKey != sharedTestKey || f.presence[0].HostID == "" || f.presence[0].LastSeen.IsZero() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.presence) != 1 || f.presence[0].AccountKey != sharedTestKey {
+		t.Fatalf("presence %+v", f.presence)
+	}
+}
+
+// A host whose local identity does not resolve to the measured key never
+// publishes presence for it, even when it reads fresh shared data.
+func TestPresenceSkippedWhenNotLoggedIn(t *testing.T) {
+	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now())}, presenceDone: make(chan struct{}, 1)}
+	c := sharedCollector(t, f)
+	c.Config.Quota.MeasurableAccounts = nil
+	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation { t.Fatal("read-only host probed"); return Observation{} })
+	o := collectShared(t, c)
+	if o.Stale || o.Degraded {
+		t.Fatalf("%+v", o)
+	}
+	select {
+	case <-f.presenceDone:
+		t.Fatal("read-only host published presence")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// Presence publishes at most once per interval per host+account, and the
+// record survives across CLI runs via the cache dir.
+func TestPresenceRateLimitAcrossRuns(t *testing.T) {
+	dir := t.TempDir()
+	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now())}, presenceDone: make(chan struct{}, 2)}
+	run := func() Observation {
+		c := sharedCollector(t, f)
+		c.CachePath = filepath.Join(dir, "cache.json")
+		c.Providers["grok"] = ProviderFunc(func(context.Context) Observation { t.Fatal("fresh hk triggered probe"); return Observation{} })
+		return collectShared(t, c)
+	}
+	if o := run(); o.Stale || o.Degraded {
+		t.Fatalf("%+v", o)
+	}
+	select {
+	case <-f.presenceDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first run did not publish presence")
+	}
+	if o := run(); o.Stale || o.Degraded {
+		t.Fatalf("%+v", o)
+	}
+	select {
+	case <-f.presenceDone:
+		t.Fatal("second run inside the interval published again")
+	case <-time.After(200 * time.Millisecond):
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.presence) != 1 {
 		t.Fatalf("presence %+v", f.presence)
 	}
 }

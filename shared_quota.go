@@ -19,7 +19,7 @@ var accountKeyRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}:[0-9a-f]{16}$`)
 var accountFPRE = regexp.MustCompile(`^[0-9a-f]{16}$`)
 
 func (q QuotaConfig) Validate() error {
-	if math.IsNaN(q.FreshTTLS) || math.IsInf(q.FreshTTLS, 0) || math.IsNaN(q.WaitS) || math.IsInf(q.WaitS, 0) || q.FreshTTLS < 0 || q.FreshTTLS > 86400 || q.LeaseTTLS < 0 || q.LeaseTTLS > 120 || q.WaitS < 0 || q.WaitS > 10 {
+	if math.IsNaN(q.FreshTTLS) || math.IsInf(q.FreshTTLS, 0) || math.IsNaN(q.WaitS) || math.IsInf(q.WaitS, 0) || math.IsNaN(q.PresenceEveryS) || math.IsInf(q.PresenceEveryS, 0) || q.FreshTTLS < 0 || q.FreshTTLS > 86400 || q.LeaseTTLS < 0 || q.LeaseTTLS > 120 || q.WaitS < 0 || q.WaitS > 10 || q.PresenceEveryS < 0 || q.PresenceEveryS > 86400 {
 		return fmt.Errorf("invalid shared quota TTLs")
 	}
 	if q.HostID != "" && safeHost(q.HostID) != q.HostID {
@@ -231,6 +231,49 @@ func holderToken() (string, error) {
 	_, e := rand.Read(b[:])
 	return hex.EncodeToString(b[:]), e
 }
+func (q QuotaConfig) presenceEvery() time.Duration {
+	if q.PresenceEveryS > 0 {
+		return time.Duration(q.PresenceEveryS * float64(time.Second))
+	}
+	return 10 * time.Minute
+}
+
+// presenceFile persists the last presence publish per host+account so repeated
+// CLI runs do not spam hk. Unreadable state counts as due; a state that cannot
+// be persisted skips this run's publish rather than risking a burst.
+func (c Collector) presenceFile() string { return filepath.Join(c.cacheDir(), "presence.json") }
+func (c Collector) presenceDue(host, key string, now time.Time) bool {
+	due := false
+	e := WithFileLock(c.presenceFile()+".lock", false, func() error {
+		state := map[string]int64{}
+		_ = ReadJSON(c.presenceFile(), &state)
+		k := host + "|" + key
+		if last := state[k]; last > 0 && now.Sub(time.Unix(last, 0)) < c.Config.Quota.presenceEvery() {
+			return nil
+		}
+		state[k] = now.Unix()
+		if e := WriteJSON(c.presenceFile(), state); e != nil {
+			return e
+		}
+		due = true
+		return nil
+	})
+	return e == nil && due
+}
+
+// maybePresence publishes presence for an observation served from the shared
+// store. allowed is the accountKey verdict, so a host never publishes for an
+// account whose local CLI identity does not resolve to the same key.
+func (c Collector) maybePresence(source ObservationSource, key string, allowed bool, o Observation) {
+	if !allowed || o.Stale || o.Degraded || o.Source != "handoffkeep" {
+		return
+	}
+	host := c.Config.Quota.presenceHostID()
+	if host == "" || !c.presenceDue(host, key, c.quotaNow()) {
+		return
+	}
+	c.publishPresence(source, key, c.quotaNow())
+}
 func (q QuotaConfig) freshTTL() time.Duration {
 	if q.FreshTTLS > 0 {
 		return time.Duration(q.FreshTTLS * float64(time.Second))
@@ -358,6 +401,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	finish := func(o Observation) Observation {
 		o.PoolClass = c.Config.Pool(pool, now).Class
 		o.SharedManual = sharedManual(latest.Manual, pool)
+		c.maybePresence(source, key, allowed, o)
 		return o
 	}
 	if pool == "anthropic-api" {
@@ -446,7 +490,6 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		reachable = false
 		return finish(fail("shared_publish_failed"))
 	}
-	c.publishPresence(source, key, at)
 	o, ok := sharedAuto(&x, pool, key, at, c.Config.Quota.freshTTL())
 	if !ok {
 		return finish(fail("probe_failed"))
