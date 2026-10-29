@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Track the manual `anthropic-api` organisation credit as a balance with an
+  expiry: `manual set --credit-balance/--credit-total/--expires` shows balance,
+  days left and the paced daily budget, flags `WASTE` when that budget exceeds
+  the recent hand-entered burn rate so ranking prefers it, admits while the
+  balance is positive and unexpired under the pool cutoff and inflight policy
+  (default 99, or 90 for preserve), refuses at zero, past the cutoff or past
+  expiry, and admits a stale entry with a warning bounded by `credit_max_age_s`
+  (default 3 days).
 - Merge Antigravity's per-model quota list into the `agy` observation so a
   metering group the quota summary omits (e.g. this account's gemini session
   window) still reaches the gate; an unmappable model stays under the `unknown`

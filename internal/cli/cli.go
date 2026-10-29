@@ -327,7 +327,9 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 				return 2, e
 			}
 		} else {
+			present := map[string]bool{}
 			for _, o := range in.Observations {
+				present[o.ID] = true
 				fmt.Fprintf(a.Out, "%s", o.ID)
 				for _, b := range o.Buckets {
 					if v.get("horizon") != "" && b.Horizon != v.get("horizon") {
@@ -338,7 +340,15 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 				if o.Error != "" {
 					fmt.Fprint(a.Out, " unmeasurable")
 				}
+				if credit, ok := in.CreditStatus(o.ID); ok {
+					fmt.Fprint(a.Out, " ", creditText(credit))
+				}
 				fmt.Fprintln(a.Out)
+			}
+			if !present["anthropic-api"] {
+				if credit, ok := in.CreditStatus("anthropic-api"); ok {
+					fmt.Fprintf(a.Out, "anthropic-api %s\n", creditText(credit))
+				}
 			}
 		}
 		if v.get("watch") == "" {
@@ -368,6 +378,26 @@ func percentText(p *float64) string {
 	}
 	return s
 }
+
+func creditText(c *pl.CreditStatus) string {
+	s := fmt.Sprintf("credit=$%s/$%s expires=%s days_left=%.1f daily_budget=$%s", pl.USD(c.BalanceUSD), pl.USD(c.TotalUSD), c.ExpiresOn, c.DaysLeft, pl.USD(c.DailyBudgetUSD))
+	if c.RecentDailyUSD != nil {
+		s += fmt.Sprintf(" recent_daily=$%s", pl.USD(*c.RecentDailyUSD))
+	}
+	switch {
+	case c.Expired:
+		s += " EXPIRED"
+	case c.Exhausted:
+		s += " EXHAUSTED"
+	}
+	if c.Waste {
+		s += " WASTE"
+	}
+	if c.Stale {
+		s += " STALE"
+	}
+	return s
+}
 func statusPayload(in pl.Inputs) map[string]any {
 	providers := append([]pl.Observation(nil), in.Observations...)
 	present := map[string]bool{}
@@ -388,6 +418,14 @@ func statusPayload(in pl.Inputs) map[string]any {
 		row["status"] = "ok"
 		if o.Error != "" || o.Warning != "" || o.Stale {
 			row["status"] = "degraded"
+		}
+		if credit, ok := in.CreditStatus(observation.ID); ok {
+			row["credit"] = credit
+			if credit.Expired || credit.Exhausted {
+				row["status"] = "exhausted"
+			} else if credit.Stale && row["status"] == "ok" {
+				row["status"] = "degraded"
+			}
 		}
 		rows = append(rows, row)
 	}
@@ -496,6 +534,15 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 		}
 		if d.PaceOverrideRef != nil {
 			fmt.Fprintf(a.Out, " pace_override_ref=%s", *d.PaceOverrideRef)
+		}
+		if d.Credit != nil {
+			fmt.Fprintf(a.Out, " credit_balance=$%s credit_expires=%s credit_days_left=%.1f credit_daily_budget=$%s", pl.USD(d.Credit.BalanceUSD), d.Credit.ExpiresOn, d.Credit.DaysLeft, pl.USD(d.Credit.DailyBudgetUSD))
+			if d.Credit.Waste {
+				fmt.Fprint(a.Out, " credit_waste=true")
+			}
+			if d.Credit.Stale {
+				fmt.Fprint(a.Out, " credit_stale=true")
+			}
 		}
 		if d.Source != nil {
 			fmt.Fprintf(a.Out, " source=%s", *d.Source)

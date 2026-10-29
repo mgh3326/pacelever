@@ -109,6 +109,7 @@ type Decision struct {
 	AccountWeeklyPct     *float64            `json:"account_weekly_pct,omitempty"`
 	E6Arm                string              `json:"e6_arm,omitempty"`
 	Inflight             string              `json:"inflight,omitempty"`
+	Credit               *CreditStatus       `json:"credit,omitempty"`
 }
 
 type PolicyError struct {

@@ -14,7 +14,7 @@ type args struct {
 }
 
 var boolFlags = words("json raw brief explain hide-excluded no-color no-cache background _worker clear unparsed check emit-seed dry-run list-providers list-recommend-profiles help version allow-plaintext-http")
-var valueFlags = words("profile effort role purpose operator-request requested-by pace-override gate-output cache-ttl recommend area only horizon watch exit-code-on used window measured-at reason ttl resets-in resets-at remaining total expires-on until boost subscribed fusion-billing-fp inflight-reserve note reset observed rung source account-key pool model task tier grade rounds blockers-found completed input-tokens output-tokens notes limit out decided-by deviation-ref boundary-version min-passes demote-window demote-rate allow-degraded format file non-coding-task pa-reviews first-ci-green findings-by-severity reverted-within-7d time-to-merge-s experiment-id experiment-arm")
+var valueFlags = words("profile effort role purpose operator-request requested-by pace-override gate-output cache-ttl recommend area only horizon watch exit-code-on used window measured-at reason ttl resets-in resets-at remaining total expires-on credit-balance credit-total expires until boost subscribed fusion-billing-fp inflight-reserve note reset observed rung source account-key pool model task tier grade rounds blockers-found completed input-tokens output-tokens notes limit out decided-by deviation-ref boundary-version min-passes demote-window demote-rate allow-degraded format file non-coding-task pa-reviews first-ci-green findings-by-severity reverted-within-7d time-to-merge-s experiment-id experiment-arm")
 
 func words(s string) map[string]bool {
 	m := map[string]bool{}
