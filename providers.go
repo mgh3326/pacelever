@@ -18,7 +18,6 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -190,8 +189,8 @@ func retryAfterSeconds(header string, now time.Time) float64 {
 	if v == "" {
 		return 0
 	}
-	if n, e := strconv.ParseFloat(v, 64); e == nil {
-		if n <= 0 || math.IsNaN(n) || math.IsInf(n, 0) {
+	if n, ok := ParseFinite(v); ok {
+		if n <= 0 {
 			return 0
 		}
 		return math.Min(n, 86400)
@@ -421,72 +420,6 @@ func commandCodeCreditTotal(plan string, monthly, purchased, free float64) (floa
 	return math.Max(plans[best], monthly) + purchased + free, true
 }
 
-func creditAmount(v any) float64 {
-	n, ok := finiteNumber(v)
-	if !ok || n < 0 {
-		return 0
-	}
-	return n
-}
-
-func numericValue(v any) float64 {
-	n, _ := finiteNumber(v)
-	return n
-}
-
-func resetAtValue(v any) string {
-	switch x := v.(type) {
-	case float64:
-		return epochTime(x)
-	case json.Number:
-		n, e := x.Float64()
-		if e != nil {
-			return ""
-		}
-		return epochTime(n)
-	case int64:
-		return epochTime(float64(x))
-	case int:
-		return epochTime(float64(x))
-	case string:
-		text := strings.TrimSpace(x)
-		if text == "" {
-			return ""
-		}
-		if at, e := time.Parse(time.RFC3339Nano, text); e == nil {
-			return at.UTC().Format(time.RFC3339Nano)
-		}
-		if n, e := strconv.ParseFloat(text, 64); e == nil {
-			return epochTime(n)
-		}
-		if at, e := http.ParseTime(text); e == nil {
-			return at.UTC().Format(time.RFC3339Nano)
-		}
-	}
-	return ""
-}
-
-func epochTime(n float64) string {
-	if math.IsNaN(n) || math.IsInf(n, 0) || n <= 0 || n > 9.2e18 {
-		return ""
-	}
-	var at time.Time
-	switch {
-	case n >= 1e14:
-		at = time.UnixMicro(int64(n))
-	case n >= 1e11:
-		at = time.UnixMilli(int64(n))
-	default:
-		at = time.Unix(int64(n), 0)
-	}
-	at = at.UTC()
-	// A quota reset outside this range is a malformed unit, not a real time.
-	if at.Before(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)) || at.After(time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)) {
-		return ""
-	}
-	return at.Format(time.RFC3339Nano)
-}
-
 // grokRefreshSkew is the window in which a login is treated as due before it
 // actually expires (ClaudeBar's `dueWhen.skew`).
 const grokRefreshSkew = 300 * time.Second
@@ -606,7 +539,7 @@ func grokRefresh(ctx context.Context, record grokRecord, client HTTPDoer, now fu
 	if next := strings.TrimSpace(str(resp.Body["refresh_token"])); next != "" {
 		renewed.RefreshToken = next
 	}
-	if seconds, ok := grokAmount(resp.Body["expires_in"]); ok && seconds > 0 && seconds <= 10*365*24*3600 {
+	if seconds, ok := looseNumber(resp.Body["expires_in"]); ok && seconds > 0 && seconds <= 10*365*24*3600 {
 		renewed.Expires, renewed.HasExpiry = now().Add(time.Duration(seconds*float64(time.Second))), true
 	} else {
 		// A renewed token with no stated lifetime is used until the API refuses
@@ -693,7 +626,7 @@ func parseGrok(raw map[string]any) Observation {
 	note := productNote(config["productUsage"])
 	// Prepaid balance is money in cents, not a percentage; it rides the account
 	// note so every bucket stays percentage-bearing and publishable shared.
-	if balance, ok := grokAmount(object(config["prepaidBalance"])["val"]); ok && balance > 0 {
+	if balance, ok := looseNumber(object(config["prepaidBalance"])["val"]); ok && balance > 0 {
 		if note != "" {
 			note += "; "
 		}
@@ -734,22 +667,6 @@ func parseGrok(raw map[string]any) Observation {
 		o.Buckets = append(o.Buckets, Bucket{Label: "On-Demand", Window: window, UsedPct: Pct(share), ResetsAt: reset, Scope: Scope{Kind: "model", Name: "On-Demand"}, Horizon: horizon(window), Locked: locked})
 	}
 	return o
-}
-
-// grokAmount accepts the number or numeric string Grok uses for money fields.
-func grokAmount(v any) (float64, bool) {
-	if n, ok := finiteNumber(v); ok {
-		return n, true
-	}
-	text := strings.TrimSpace(str(v))
-	if text == "" {
-		return 0, false
-	}
-	n, e := strconv.ParseFloat(text, 64)
-	if e != nil || math.IsNaN(n) || math.IsInf(n, 0) {
-		return 0, false
-	}
-	return n, true
 }
 
 func productNote(v any) string {
@@ -864,17 +781,17 @@ func devinWindow(percentage, resetValue, nestedValue any) (float64, string, bool
 	if used, ok := devinUsedPercent(percent); ok {
 		return used, reset, true
 	}
-	if remaining, ok := devinNumber(nested["remaining_percent"]); ok {
+	if remaining, ok := looseNumber(nested["remaining_percent"]); ok {
 		remaining = devinRemainingPercent(remaining)
 		if remaining < 0 || remaining > 100 {
 			return 0, "", false
 		}
 		return 100 - remaining, reset, true
 	}
-	if limit, ok := devinNumber(nested["limit"]); ok && limit > 0 {
-		count, hasCount := devinNumber(nested["used"])
+	if limit, ok := looseNumber(nested["limit"]); ok && limit > 0 {
+		count, hasCount := looseNumber(nested["used"])
 		if !hasCount {
-			if remaining, ok := devinNumber(nested["remaining"]); ok {
+			if remaining, ok := looseNumber(nested["remaining"]); ok {
 				count, hasCount = limit-remaining, true
 			}
 		}
@@ -889,7 +806,7 @@ func devinWindow(percentage, resetValue, nestedValue any) (float64, string, bool
 // fraction (0.12 is 12%), while exactly one is one percent. devinRemainingPercent
 // is intentionally inclusive at one, matching ClaudeBar's devin-quota.js.
 func devinUsedPercent(v any) (float64, bool) {
-	n, ok := devinNumber(v)
+	n, ok := looseNumber(v)
 	if !ok || n < 0 {
 		return 0, false
 	}
@@ -904,21 +821,6 @@ func devinRemainingPercent(n float64) float64 {
 		return n * 100
 	}
 	return n
-}
-
-func devinNumber(v any) (float64, bool) {
-	if n, ok := finiteNumber(v); ok {
-		return n, true
-	}
-	text, ok := v.(string)
-	if !ok {
-		return 0, false
-	}
-	n, e := strconv.ParseFloat(strings.TrimSpace(text), 64)
-	if e != nil || math.IsNaN(n) || math.IsInf(n, 0) {
-		return 0, false
-	}
-	return n, true
 }
 
 func devinClamp(n float64) float64 {
@@ -1137,20 +1039,6 @@ func agyGroup(id, display string) string {
 	return "unknown"
 }
 
-func list(v any) []any {
-	if items, ok := v.([]any); ok {
-		return items
-	}
-	return nil
-}
-
-func validated(p *float64) *float64 {
-	if !validPct(p) {
-		return nil
-	}
-	return p
-}
-
 type codexWindow struct {
 	Used       *float64 `json:"used_percent"`
 	Seconds    float64  `json:"limit_window_seconds"`
@@ -1183,23 +1071,6 @@ func (w codexWindow) bucket(scope Scope, now time.Time) Bucket {
 		reset = now.Add(time.Duration(w.ResetAfter) * time.Second).UTC().Format(time.RFC3339Nano)
 	}
 	return Bucket{Label: label, Window: label, UsedPct: validated(w.Used), ResetsAt: reset, Scope: scope, Horizon: horizon(label)}
-}
-func readObject(path string) map[string]any {
-	var data map[string]any
-	_ = ReadJSON(path, &data)
-	return data
-}
-func object(v any) map[string]any {
-	if m, ok := v.(map[string]any); ok {
-		return m
-	}
-	return map[string]any{}
-}
-func str(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
 }
 func fingerprint(prefix, value string) string {
 	if value == "" {
@@ -1760,58 +1631,4 @@ func chooseOAuth(file, keychain map[string]any, now time.Time) map[string]any {
 		return keychain
 	}
 	return file
-}
-
-// headerFloat parses a numeric response header; absent or unparsable is nil,
-// never a guessed value.
-func headerFloat(header http.Header, name string) *float64 {
-	if header == nil {
-		return nil
-	}
-	s := strings.TrimSpace(header.Get(name))
-	if s == "" {
-		return nil
-	}
-	f, e := strconv.ParseFloat(s, 64)
-	if e != nil {
-		return nil
-	}
-	return &f
-}
-
-// anyFloat accepts a JSON number or a numeric string (the codex credits
-// balance has been observed as "0").
-func anyFloat(value any) *float64 {
-	if s, ok := value.(string); ok {
-		f, e := strconv.ParseFloat(strings.TrimSpace(s), 64)
-		if e != nil {
-			return nil
-		}
-		return &f
-	}
-	if n, ok := finiteNumber(value); ok {
-		return &n
-	}
-	return nil
-}
-
-func finiteNumber(value any) (float64, bool) {
-	var n float64
-	switch v := value.(type) {
-	case float64:
-		n = v
-	case json.Number:
-		var e error
-		n, e = v.Float64()
-		if e != nil {
-			return 0, false
-		}
-	case int64:
-		n = float64(v)
-	case int:
-		n = float64(v)
-	default:
-		return 0, false
-	}
-	return n, !math.IsNaN(n) && !math.IsInf(n, 0)
 }

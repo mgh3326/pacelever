@@ -3,8 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"math"
-	"strconv"
 	"strings"
 	"time"
 
@@ -104,8 +102,8 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 				if value == "none" {
 					delete(entry, "boost")
 				} else {
-					boost, e := strconv.ParseFloat(value, 64)
-					if e != nil || math.IsNaN(boost) || math.IsInf(boost, 0) || boost < 0 {
+					boost, ok := pl.ParseFinite(value)
+					if !ok || boost < 0 {
 						return fmt.Errorf("invalid boost")
 					}
 					entry["boost"] = boost
@@ -140,8 +138,8 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 					r := map[string]any{}
 					for _, item := range reserve {
 						window, pct, ok := strings.Cut(item, "=")
-						n, e := strconv.ParseFloat(pct, 64)
-						if !ok || e != nil || n < 0 || n > 100 || math.IsNaN(n) || math.IsInf(n, 0) {
+						n, finite := pl.ParseFinite(pct)
+						if !ok || !finite || n < 0 || n > 100 {
 							return fmt.Errorf("invalid WINDOW=PCT reserve")
 						}
 						r[window] = n
@@ -199,8 +197,8 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 				delete(settings, name)
 				return nil
 			}
-			n, e := strconv.ParseFloat(value, 64)
-			if e != nil || n <= 0 || math.IsNaN(n) || math.IsInf(n, 0) {
+			n, ok := pl.ParseFinite(value)
+			if !ok || n <= 0 {
 				return fmt.Errorf("setting must be a finite positive number")
 			}
 			settings[name] = n

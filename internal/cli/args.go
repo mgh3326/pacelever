@@ -2,9 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
+
+	pl "github.com/mgh3326/pacelever"
 )
 
 type args struct {
@@ -80,8 +81,8 @@ func (a args) float(k string, def float64) (float64, error) {
 	if a.get(k) == "" {
 		return def, nil
 	}
-	v, e := strconv.ParseFloat(a.get(k), 64)
-	if e != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+	v, ok := pl.ParseFinite(a.get(k))
+	if !ok {
 		return 0, fmt.Errorf("--%s requires a finite number", k)
 	}
 	return v, nil
