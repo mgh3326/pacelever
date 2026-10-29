@@ -182,7 +182,8 @@ func (w codexRPCWindow) bucket(scope Scope) Bucket {
 // codexLimitName trims the codex prefix from a per-limit id, matching
 // ClaudeBar's dropPrefixes ("codex_" → capitalize, "codex " → drop).
 func codexLimitName(s string) string {
-	if rest := s[len("codex_"):]; len(s) > len("codex_") && strings.EqualFold(s[:len("codex_")], "codex_") && rest != "" {
+	if len(s) > len("codex_") && strings.EqualFold(s[:len("codex_")], "codex_") {
+		rest := s[len("codex_"):]
 		return strings.ToUpper(rest[:1]) + rest[1:]
 	}
 	if len(s) > len("codex ") && strings.EqualFold(s[:len("codex ")], "codex ") {

@@ -114,6 +114,20 @@ func TestCodexRPCFreePlan(t *testing.T) {
 	}
 }
 
+func TestCodexLimitNameShortInputs(t *testing.T) {
+	for in, want := range map[string]string{
+		"o3":          "o3",
+		"Codex":       "Codex",
+		"codex":       "codex",
+		"codex_spark": "Spark",
+		"Codex Spark": "Spark",
+	} {
+		if got := codexLimitName(in); got != want {
+			t.Fatalf("codexLimitName(%q)=%q want %q", in, got, want)
+		}
+	}
+}
+
 func codexAuthHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
