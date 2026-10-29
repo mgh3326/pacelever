@@ -171,6 +171,15 @@ func TestGrokBilling(t *testing.T) {
 	}
 }
 
+func TestGrokInvalidPercent(t *testing.T) {
+	body := `{"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","end":"2026-10-29T19:58:08Z"},"creditUsagePercent":140}}`
+	client := doFunc(func(*http.Request) (*http.Response, error) { return response(200, body), nil })
+	o := fetchGrok(context.Background(), "fixture-token", client, fixedNow)
+	if o.ErrorKind != "parse_error" {
+		t.Fatalf("invalid grok percent %+v", o)
+	}
+}
+
 func TestGrokAuthFailure(t *testing.T) {
 	client := doFunc(func(*http.Request) (*http.Response, error) { return response(403, `{}`), nil })
 	o := fetchGrok(context.Background(), "fixture-token", client, fixedNow)

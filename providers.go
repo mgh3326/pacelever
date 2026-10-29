@@ -472,8 +472,8 @@ func parseGrok(raw map[string]any) Observation {
 		config = raw
 	}
 	used, ok := finiteNumber(config["creditUsagePercent"])
-	if !ok {
-		return Observation{ID: "grok", Error: "usage response has no credit percentage", ErrorKind: "parse_error"}
+	if !ok || !validPct(&used) {
+		return Observation{ID: "grok", Error: "usage response has no valid credit percentage", ErrorKind: "parse_error"}
 	}
 	period := object(config["currentPeriod"])
 	kind := strings.ToUpper(str(period["type"]))
