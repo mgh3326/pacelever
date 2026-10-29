@@ -644,8 +644,15 @@ func parseAgy(raw map[string]any, extraModels map[string]any) Observation {
 				continue
 			}
 			window := agyWindow(str(quota["window"]), key)
-			if window == "" {
+			switch {
+			case window != "":
+			case strings.TrimSpace(str(quota["window"])) == "":
+				// Per-model quotaInfo without a window is the session quota.
 				window = "5h"
+			default:
+				// An explicit window we do not recognize stays unmetered
+				// instead of masquerading as the session quota.
+				window = "unknown"
 			}
 			add(agyGroup(key, str(entry["displayName"])), window, fraction, resetAtValue(quota["resetTime"]))
 		}

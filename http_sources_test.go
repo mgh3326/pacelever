@@ -351,7 +351,7 @@ func TestAgySummaryMissingGroupMergedFromModels(t *testing.T) {
 		return response(200, summary), nil
 	})
 	o := fetchAgy(context.Background(), "fixture-token", client, fixedNow)
-	if o.Error != "" || len(o.Buckets) != 4 {
+	if o.Error != "" || len(o.Buckets) != 5 {
 		t.Fatalf("agy merged buckets %+v", o)
 	}
 	if o.Buckets[0].Scope.Name != "gemini" || o.Buckets[0].Window != "5h" || !pctClose(o.Buckets[0].UsedPct, 0.3521) {
@@ -360,8 +360,13 @@ func TestAgySummaryMissingGroupMergedFromModels(t *testing.T) {
 	if len(matching(o.Buckets, "gemini")) != 1 || len(matching(o.Buckets, "3p")) != 2 {
 		t.Fatalf("agy merged group selection %+v", o.Buckets)
 	}
-	if len(matching(o.Buckets, "unknown")) != 1 {
-		t.Fatalf("agy unmapped model not emitted: %+v", o.Buckets)
+	if len(matching(o.Buckets, "unknown")) != 2 {
+		t.Fatalf("agy unmapped models not emitted: %+v", o.Buckets)
+	}
+	for _, b := range matching(o.Buckets, "unknown") {
+		if b.Window == "monthly" || (b.Window == "5h" && pctClose(b.UsedPct, 10)) {
+			t.Fatalf("unrecognized model window mislabeled: %+v", b)
+		}
 	}
 	if len(paths) != 2 || !strings.HasSuffix(paths[0], ":retrieveUserQuotaSummary") || !strings.HasSuffix(paths[1], ":fetchAvailableModels") {
 		t.Fatalf("agy endpoint order %v", paths)
@@ -399,7 +404,7 @@ func TestAgyModelsUnavailableKeepsSummary(t *testing.T) {
 	}
 }
 
-var agyModelsBody = `{"models":{"gemini-3.8-flash-high":{"displayName":"Gemini 3.8 Flash (High)","quotaInfo":{"remainingFraction":0.996479,"resetTime":"2026-10-29T06:18:55Z"}},"claude-sonnet-4-6":{"displayName":"Claude Sonnet 4.6","quotaInfo":{"remainingFraction":1,"resetTime":"2026-10-29T06:18:55Z"}},"chat_1":{"isInternal":true,"quotaInfo":{"remainingFraction":0.1,"resetTime":"2026-10-29T06:18:55Z"}},"mystery-1":{"quotaInfo":{"remainingFraction":0.5,"resetTime":"2026-10-29T06:18:55Z"}}}}`
+var agyModelsBody = `{"models":{"gemini-3.8-flash-high":{"displayName":"Gemini 3.8 Flash (High)","quotaInfo":{"remainingFraction":0.996479,"resetTime":"2026-10-29T06:18:55Z"}},"claude-sonnet-4-6":{"displayName":"Claude Sonnet 4.6","quotaInfo":{"remainingFraction":1,"resetTime":"2026-10-29T06:18:55Z"}},"chat_1":{"isInternal":true,"quotaInfo":{"remainingFraction":0.1,"resetTime":"2026-10-29T06:18:55Z"}},"mystery-1":{"quotaInfo":{"remainingFraction":0.5,"resetTime":"2026-10-29T06:18:55Z"}},"mystery-monthly":{"quotaInfo":{"remainingFraction":0.9,"window":"monthly","resetTime":"2026-10-29T06:18:55Z"}}}}`
 
 func agyGateCatalog() Catalog {
 	c := BundledCatalog()
