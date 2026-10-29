@@ -20,9 +20,11 @@ cache, and serves its last good value as stale rather than scraping a screen.
 Command Code reads the saved API key and calls `whoami` then `credits`, so a
 refused credential is an immediate `auth_failed` rather than a probe timeout.
 Grok reads the CLI billing endpoint, and Antigravity reads the cloud quota
-summary (weekly and five-hour buckets) with the `agy` login. Antigravity buckets
-keep their metered group (gemini or Claude/GPT); a profile is never gated on
-another group's numbers. Codex windows are labelled by `limit_window_seconds`,
+summary (weekly and five-hour buckets) with the `agy` login. The per-model quota
+list is merged in as session-window buckets, so a metering group the summary
+omits is still measured. Antigravity buckets keep their metered group (gemini or
+Claude/GPT); a profile is never gated on another group's numbers. A bucket whose
+identity maps to no known group stays visible under `unknown` and never gates. Codex windows are labelled by `limit_window_seconds`,
 never by primary/secondary position.
 
 ## Admission contract

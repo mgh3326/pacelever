@@ -314,6 +314,9 @@ func TestAgyQuotaSummaryWeeklyAndFiveHour(t *testing.T) {
 	var hosts []string
 	client := doFunc(func(r *http.Request) (*http.Response, error) {
 		hosts = append(hosts, r.URL.Host)
+		if strings.HasSuffix(r.URL.Path, ":fetchAvailableModels") {
+			return response(200, `{"models":{}}`), nil
+		}
 		return response(200, body), nil
 	})
 	o := fetchAgy(context.Background(), "fixture-token", client, fixedNow)
@@ -332,14 +335,114 @@ func TestAgyQuotaSummaryWeeklyAndFiveHour(t *testing.T) {
 	if len(matching(o.Buckets, "gemini")) != 2 || len(matching(o.Buckets, "3p")) != 1 {
 		t.Fatalf("agy group selection %+v", o.Buckets)
 	}
-	if len(hosts) != 1 || hosts[0] != "daily-cloudcode-pa.googleapis.com" {
+	if len(hosts) != 2 || hosts[0] != "daily-cloudcode-pa.googleapis.com" || hosts[1] != "daily-cloudcode-pa.googleapis.com" {
 		t.Fatalf("agy host order %v", hosts)
+	}
+}
+
+func TestAgySummaryMissingGroupMergedFromModels(t *testing.T) {
+	summary := `{"groups":[{"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-5h","window":"5h","remainingFraction":0.5,"resetTime":"2026-10-29T06:18:55Z"},{"bucketId":"3p-weekly","window":"weekly","remainingFraction":0.4,"resetTime":"2026-11-05T01:18:55Z"}]}]}`
+	var paths []string
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		paths = append(paths, r.URL.Path)
+		if strings.HasSuffix(r.URL.Path, ":fetchAvailableModels") {
+			return response(200, agyModelsBody), nil
+		}
+		return response(200, summary), nil
+	})
+	o := fetchAgy(context.Background(), "fixture-token", client, fixedNow)
+	if o.Error != "" || len(o.Buckets) != 4 {
+		t.Fatalf("agy merged buckets %+v", o)
+	}
+	if o.Buckets[0].Scope.Name != "gemini" || o.Buckets[0].Window != "5h" || !pctClose(o.Buckets[0].UsedPct, 0.3521) {
+		t.Fatalf("agy merged gemini five-hour %+v", o.Buckets[0])
+	}
+	if len(matching(o.Buckets, "gemini")) != 1 || len(matching(o.Buckets, "3p")) != 2 {
+		t.Fatalf("agy merged group selection %+v", o.Buckets)
+	}
+	if len(matching(o.Buckets, "unknown")) != 1 {
+		t.Fatalf("agy unmapped model not emitted: %+v", o.Buckets)
+	}
+	if len(paths) != 2 || !strings.HasSuffix(paths[0], ":retrieveUserQuotaSummary") || !strings.HasSuffix(paths[1], ":fetchAvailableModels") {
+		t.Fatalf("agy endpoint order %v", paths)
+	}
+	for _, b := range o.Buckets {
+		if pctClose(b.UsedPct, 90) {
+			t.Fatalf("internal model leaked: %+v", o.Buckets)
+		}
+	}
+}
+
+func TestAgyModelsOnlyCoverGroups(t *testing.T) {
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, ":fetchAvailableModels") {
+			return response(200, agyModelsBody), nil
+		}
+		return response(200, `{"groups":[]}`), nil
+	})
+	o := fetchAgy(context.Background(), "fixture-token", client, fixedNow)
+	if o.Error != "" || len(matching(o.Buckets, "gemini")) != 1 || len(matching(o.Buckets, "3p")) != 1 {
+		t.Fatalf("agy models-only %+v", o)
+	}
+}
+
+func TestAgyModelsUnavailableKeepsSummary(t *testing.T) {
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, ":fetchAvailableModels") {
+			return response(404, `{}`), nil
+		}
+		return response(200, `{"groups":[{"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-5h","window":"5h","remainingFraction":0.5,"resetTime":"2026-10-29T06:18:55Z"}]}]}`), nil
+	})
+	o := fetchAgy(context.Background(), "fixture-token", client, fixedNow)
+	if o.Error != "" || len(o.Buckets) != 1 || o.Buckets[0].Scope.Name != "3p" {
+		t.Fatalf("agy summary-only %+v", o)
+	}
+}
+
+var agyModelsBody = `{"models":{"gemini-3.8-flash-high":{"displayName":"Gemini 3.8 Flash (High)","quotaInfo":{"remainingFraction":0.996479,"resetTime":"2026-10-29T06:18:55Z"}},"claude-sonnet-4-6":{"displayName":"Claude Sonnet 4.6","quotaInfo":{"remainingFraction":1,"resetTime":"2026-10-29T06:18:55Z"}},"chat_1":{"isInternal":true,"quotaInfo":{"remainingFraction":0.1,"resetTime":"2026-10-29T06:18:55Z"}},"mystery-1":{"quotaInfo":{"remainingFraction":0.5,"resetTime":"2026-10-29T06:18:55Z"}}}}`
+
+func agyGateCatalog() Catalog {
+	c := BundledCatalog()
+	c.Rows = []CatalogRow{
+		{Profile: "agy-gem", Effort: "high", ModelID: "gemini-3.8-flash-high", Pool: "agy", Grade: "A", Gate: "default", Placed: true, Group: "gemini"},
+		{Profile: "agy-son", Effort: "high", ModelID: "claude-sonnet-4-6", Pool: "agy", Grade: "A", Gate: "default", Placed: true, Group: "3p"},
+		{Profile: "agy-old", Effort: "high", ModelID: "mystery-1", Pool: "agy", Grade: "A", Gate: "default", Placed: true},
+	}
+	return c
+}
+
+func TestAgyGateAdmitsGroupBucketsFromEitherSource(t *testing.T) {
+	summary := `{"groups":[{"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-5h","window":"5h","remainingFraction":0.5,"resetTime":"2026-10-29T06:18:55Z"},{"bucketId":"3p-weekly","window":"weekly","remainingFraction":0.4,"resetTime":"2026-11-05T01:18:55Z"}]}]}`
+	usage := parseAgy(mustJSON(t, summary), object(mustJSON(t, agyModelsBody)["models"]))
+	reset5h := testNow.Add(5 * time.Hour)
+	reset7d := testNow.Add(144 * time.Hour)
+	shared, ok := sharedAuto(&SharedObservation{Kind: "auto", MeasuredAt: testNow, Buckets: []SharedBucket{
+		{Window: "5h", UsedPct: 0.4, ResetsAt: &reset5h, Scope: "group", Model: "gemini"},
+		{Window: "5h", UsedPct: 50, ResetsAt: &reset5h, Scope: "group", Model: "3p"},
+		{Window: "7d", UsedPct: 40, ResetsAt: &reset7d, Scope: "group", Model: "3p"},
+	}}, "agy", "agy:0123456789abcdef", testNow, time.Hour)
+	if !ok {
+		t.Fatal("shared agy observation rejected")
+	}
+	for name, obs := range map[string]Observation{"usage-api": usage, "shared": shared} {
+		t.Run(name, func(t *testing.T) {
+			in := Inputs{Now: testNow, Catalog: agyGateCatalog(), Observations: []Observation{obs}}
+			if d := Gate(in, Request{Profile: "agy-gem", Effort: "high"}); d.ExitCode != 0 {
+				t.Fatalf("gemini row denied %d: %s", d.ExitCode, d.Reason)
+			}
+			if d := Gate(in, Request{Profile: "agy-son", Effort: "high"}); d.ExitCode != 0 {
+				t.Fatalf("3p row denied %d: %s", d.ExitCode, d.Reason)
+			}
+			if d := Gate(in, Request{Profile: "agy-old", Effort: "high"}); d.ExitCode != 4 {
+				t.Fatalf("ungrouped row admitted %d: %s", d.ExitCode, d.Reason)
+			}
+		})
 	}
 }
 
 func TestAgyMissingGroupIsUnknown(t *testing.T) {
 	body := `{"groups":[{"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-5h","window":"5h","remainingFraction":0.5,"resetTime":"2026-10-29T06:18:55Z"}]}]}`
-	o := parseAgy(mustJSON(t, body))
+	o := parseAgy(mustJSON(t, body), nil)
 	if len(matching(o.Buckets, "gemini")) != 0 {
 		t.Fatalf("3p numbers reached the gemini group: %+v", o.Buckets)
 	}
@@ -350,15 +453,15 @@ func TestAgyMissingGroupIsUnknown(t *testing.T) {
 
 func TestAgyModelFallbackPeriod(t *testing.T) {
 	body := `{"models":{"gemini-3.7-flash":{"quotaInfo":{"remainingFraction":0.5,"window":"weekly","resetTime":"2026-11-05T01:18:55Z"}},"claude-3.7":{"quotaInfo":{"remainingFraction":0.25}}}}`
-	o := parseAgy(mustJSON(t, body))
+	o := parseAgy(mustJSON(t, body), nil)
 	if o.Error != "" || len(o.Buckets) != 2 {
 		t.Fatalf("agy model fallback %+v", o)
 	}
 	if o.Buckets[0].Scope.Name != "gemini" || o.Buckets[0].Window != "7d" || !pctClose(o.Buckets[0].UsedPct, 50) {
 		t.Fatalf("gemini model period %+v", o.Buckets[0])
 	}
-	if o.Buckets[1].Scope.Name != "3p" || o.Buckets[1].Window != "unknown" || !pctClose(o.Buckets[1].UsedPct, 75) {
-		t.Fatalf("unknown model period %+v", o.Buckets[1])
+	if o.Buckets[1].Scope.Name != "3p" || o.Buckets[1].Window != "5h" || !pctClose(o.Buckets[1].UsedPct, 75) {
+		t.Fatalf("model quota is the session window %+v", o.Buckets[1])
 	}
 }
 
@@ -466,7 +569,7 @@ func TestAgyWakeRefreshesExpiredToken(t *testing.T) {
 	if o.Error != "" || len(o.Buckets) == 0 {
 		t.Fatalf("refresh did not recover: %+v", o)
 	}
-	if len(tokens) != 2 || tokens[0] != "fixture-expired" || tokens[1] != "fixture-fresh" {
+	if len(tokens) != 3 || tokens[0] != "fixture-expired" || tokens[1] != "fixture-fresh" || tokens[2] != "fixture-fresh" {
 		t.Fatalf("unexpected token sequence %v", tokens)
 	}
 	if wakeCount(t, marker) != 1 {
@@ -554,7 +657,7 @@ func TestAgyKeychainFallbackAfterRefusedFile(t *testing.T) {
 	if o.Error != "" || len(o.Buckets) == 0 {
 		t.Fatalf("keychain fallback failed: %+v", o)
 	}
-	if len(tokens) != 3 || tokens[0] != "fixture-file" || tokens[1] != "fixture-file" || tokens[2] != "fixture-keychain" {
+	if len(tokens) != 4 || tokens[0] != "fixture-file" || tokens[1] != "fixture-file" || tokens[2] != "fixture-keychain" || tokens[3] != "fixture-keychain" {
 		t.Fatalf("unexpected token order %v", tokens)
 	}
 }
@@ -583,7 +686,7 @@ func TestAgyWakeRefreshesKeychainToken(t *testing.T) {
 	if o.Error != "" || len(o.Buckets) == 0 {
 		t.Fatalf("refreshed keychain token not picked up: %+v", o)
 	}
-	if len(tokens) != 2 || tokens[0] != "fixture-secret-old" || tokens[1] != "fixture-secret-new" {
+	if len(tokens) != 3 || tokens[0] != "fixture-secret-old" || tokens[1] != "fixture-secret-new" || tokens[2] != "fixture-secret-new" {
 		t.Fatalf("unexpected token order %v", tokens)
 	}
 }
@@ -622,7 +725,7 @@ func TestAgyKeychainUsedWhenFileMissing(t *testing.T) {
 		secrets: stubSecrets{"fixture-keychain"},
 	}
 	o := p.Fetch(context.Background())
-	if o.Error != "" || len(tokens) != 1 || tokens[0] != "fixture-keychain" {
+	if o.Error != "" || len(tokens) != 2 || tokens[0] != "fixture-keychain" || tokens[1] != "fixture-keychain" {
 		t.Fatalf("missing file did not read the keychain: %+v %v", o, tokens)
 	}
 }

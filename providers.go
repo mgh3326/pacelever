@@ -549,7 +549,7 @@ func fetchAgy(ctx context.Context, token string, client HTTPDoer, now func() tim
 			return statusObservation("agy", resp.Status, resp.Header, now(), "auth_failed", "antigravity authentication failed; run agy to refresh the login", 0)
 		}
 		if resp.Status == 200 && !resp.ParseError {
-			return parseAgy(resp.Body)
+			return parseAgy(resp.Body, fetchAgyModels(ctx, headers, client, base))
 		}
 	}
 	if gotStatus && last.Status == 200 {
@@ -567,7 +567,32 @@ func fetchAgy(ctx context.Context, token string, client HTTPDoer, now func() tim
 	return Observation{ID: "agy", Error: "usage request failed", ErrorKind: "network"}
 }
 
-func parseAgy(raw map[string]any) Observation {
+// fetchAgyModels reads the per-model quota list. The summary groups omit a
+// metering group when it is not reported for the account; each model's
+// quotaInfo still carries that group's session (5h) quota. Best effort: a
+// failure keeps the summary-only observation. The answered host goes first.
+func fetchAgyModels(ctx context.Context, headers map[string]string, client HTTPDoer, answered string) map[string]any {
+	hosts := []string{answered}
+	for _, base := range []string{"https://daily-cloudcode-pa.googleapis.com", "https://cloudcode-pa.googleapis.com"} {
+		if base != answered {
+			hosts = append(hosts, base)
+		}
+	}
+	for _, base := range hosts {
+		resp, e := doJSON(ctx, client, "POST", base+"/v1internal:fetchAvailableModels", headers, []byte("{}"))
+		if e != nil || resp.Status != 200 || resp.ParseError {
+			continue
+		}
+		root := resp.Body
+		if response := object(root["response"]); len(response) > 0 {
+			root = response
+		}
+		return object(root["models"])
+	}
+	return nil
+}
+
+func parseAgy(raw map[string]any, extraModels map[string]any) Observation {
 	o := Observation{ID: "agy", Source: "usage-api"}
 	root := raw
 	if response := object(raw["response"]); len(response) > 0 {
@@ -575,6 +600,9 @@ func parseAgy(raw map[string]any) Observation {
 	}
 	worst := map[string]Bucket{}
 	add := func(group, window string, fraction float64, reset string) {
+		// An unmappable identity is emitted as scope group/unknown: visible in
+		// output but never matched by the gate, so it fails closed instead of
+		// passing as an account-wide bucket.
 		if group == "" {
 			group = "unknown"
 		}
@@ -604,20 +632,28 @@ func parseAgy(raw map[string]any) Observation {
 			add(agyGroup(id, display), agyWindow(str(bucket["window"]), id), fraction, resetAtValue(bucket["resetTime"]))
 		}
 	}
-	if len(worst) == 0 {
-		for key, value := range object(root["models"]) {
-			quota := object(object(value)["quotaInfo"])
+	addModels := func(models map[string]any) {
+		for key, value := range models {
+			entry := object(value)
+			if entry["isInternal"] == true {
+				continue
+			}
+			quota := object(entry["quotaInfo"])
 			fraction, ok := finiteNumber(quota["remainingFraction"])
 			if !ok {
 				continue
 			}
 			window := agyWindow(str(quota["window"]), key)
 			if window == "" {
-				window = "unknown"
+				window = "5h"
 			}
-			add(agyGroup(key, key), window, fraction, resetAtValue(quota["resetTime"]))
+			add(agyGroup(key, str(entry["displayName"])), window, fraction, resetAtValue(quota["resetTime"]))
 		}
 	}
+	if len(worst) == 0 {
+		addModels(object(root["models"]))
+	}
+	addModels(extraModels)
 	for _, group := range []string{"gemini", "3p", "unknown"} {
 		for _, window := range []string{"5h", "7d", "30d", "1d", "unknown"} {
 			if bucket, ok := worst[group+"\x00"+window]; ok {
