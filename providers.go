@@ -271,6 +271,9 @@ func fetchCommandCode(ctx context.Context, token string, client HTTPDoer, now fu
 	if len(identity) == 0 {
 		identity = who.Body
 	}
+	if success, ok := identity["success"].(bool); ok && !success {
+		return Observation{ID: "commandcode", Error: "commandcode rejected the request", ErrorKind: "http"}
+	}
 	orgID := str(object(identity["org"])["id"])
 	endpoint := "https://api.commandcode.ai/alpha/billing/credits"
 	if orgID != "" {
@@ -286,7 +289,7 @@ func fetchCommandCode(ctx context.Context, token string, client HTTPDoer, now fu
 	if billing.ParseError {
 		return Observation{ID: "commandcode", Error: "invalid usage JSON", ErrorKind: "parse_error"}
 	}
-	o := parseCommandCode(billing.Body, now())
+	o := parseCommandCode(billing.Body)
 	account := str(object(identity["user"])["id"])
 	if account == "" {
 		account = orgID
@@ -298,7 +301,7 @@ func fetchCommandCode(ctx context.Context, token string, client HTTPDoer, now fu
 	return o
 }
 
-func parseCommandCode(raw map[string]any, now time.Time) Observation {
+func parseCommandCode(raw map[string]any) Observation {
 	o := Observation{ID: "commandcode", Source: "usage-api"}
 	data := object(raw["data"])
 	if len(data) == 0 {
@@ -311,8 +314,22 @@ func parseCommandCode(raw map[string]any, now time.Time) Observation {
 		if !capacityOK || capacity <= 0 {
 			continue
 		}
-		used, _ := finiteNumber(w["used"])
-		o.Buckets = append(o.Buckets, Bucket{Label: axis.window, Window: axis.window, UsedPct: Pct(100 * used / capacity), ResetsAt: resetAtValue(w["resetAt"]), Scope: Scope{Kind: "account"}, Horizon: horizon(axis.window)})
+		used, usedOK := finiteNumber(w["used"])
+		if !usedOK {
+			used = 0
+		}
+		if used < 0 {
+			continue
+		}
+		pct, locked := 100*used/capacity, false
+		if pct > 100 {
+			// A window past its cap is exhausted, not an out-of-range percentage.
+			pct, locked = 100, true
+		}
+		if !validPct(&pct) {
+			continue
+		}
+		o.Buckets = append(o.Buckets, Bucket{Label: axis.window, Window: axis.window, UsedPct: Pct(pct), ResetsAt: resetAtValue(w["resetAt"]), Scope: Scope{Kind: "account"}, Horizon: horizon(axis.window), Locked: locked})
 	}
 	if credits := object(data["credits"]); len(credits) > 0 {
 		monthly := creditAmount(credits["monthlyCredits"])
@@ -321,7 +338,14 @@ func parseCommandCode(raw map[string]any, now time.Time) Observation {
 		remaining := monthly + purchased + free
 		o.Plan = str(credits["planId"])
 		if total, ok := commandCodeCreditTotal(o.Plan, monthly, purchased, free); ok && total > 0 {
-			o.Buckets = append(o.Buckets, Bucket{Label: "30d", Window: "30d", UsedPct: Pct(100 * (total - remaining) / total), Scope: Scope{Kind: "account"}, Horizon: "month", Note: fmt.Sprintf("credits remaining %.2f of %.2f USD", remaining, total)})
+			pct := 100 * (total - remaining) / total
+			if pct < 0 {
+				pct = 0
+			}
+			if pct > 100 {
+				pct = 100
+			}
+			o.Buckets = append(o.Buckets, Bucket{Label: "30d", Window: "30d", UsedPct: Pct(pct), Scope: Scope{Kind: "account"}, Horizon: "month", Note: fmt.Sprintf("credits remaining %.2f of %.2f USD", remaining, total)})
 		} else if remaining > 0 {
 			// A balance with no plan ceiling is money, not a percentage.
 			o.Buckets = append(o.Buckets, Bucket{Label: "credits", Window: "credit", Scope: Scope{Kind: "account"}, Note: fmt.Sprintf("credits remaining %.2f USD", remaining)})
@@ -399,13 +423,24 @@ func resetAtValue(v any) string {
 }
 
 func epochTime(n float64) string {
-	if math.IsNaN(n) || math.IsInf(n, 0) || n <= 0 {
+	if math.IsNaN(n) || math.IsInf(n, 0) || n <= 0 || n > 9.2e18 {
 		return ""
 	}
-	if n > 1e12 {
-		return time.UnixMilli(int64(n)).UTC().Format(time.RFC3339Nano)
+	var at time.Time
+	switch {
+	case n >= 1e14:
+		at = time.UnixMicro(int64(n))
+	case n >= 1e11:
+		at = time.UnixMilli(int64(n))
+	default:
+		at = time.Unix(int64(n), 0)
 	}
-	return time.Unix(int64(n), 0).UTC().Format(time.RFC3339Nano)
+	at = at.UTC()
+	// A quota reset outside this range is a malformed unit, not a real time.
+	if at.Before(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)) || at.After(time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		return ""
+	}
+	return at.Format(time.RFC3339Nano)
 }
 
 func validated(p *float64) *float64 {

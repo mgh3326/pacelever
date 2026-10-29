@@ -106,6 +106,50 @@ func TestCommandCodeHTTPSkipsZeroCapacity(t *testing.T) {
 	}
 }
 
+func TestCommandCodeHTTPSoftFailure(t *testing.T) {
+	who := `{"success":false,"user":{"id":"fixture-user"},"org":null}`
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/alpha/whoami" {
+			t.Fatal("credits requested after a soft failure")
+		}
+		return response(200, who), nil
+	})
+	o := fetchCommandCode(context.Background(), "fixture-key", client, fixedNow)
+	if o.ErrorKind != "http" || !strings.Contains(o.Error, "rejected") {
+		t.Fatalf("soft failure %+v", o)
+	}
+}
+
+func TestCommandCodeHTTPSpikedWindow(t *testing.T) {
+	who := `{"success":true}`
+	credits := `{"windowLimits":{"fiveHour":{"used":44,"cap":40,"resetAt":1770000000},"weekly":{"used":-1,"cap":200,"resetAt":1770500000}}}`
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/alpha/whoami" {
+			return response(200, who), nil
+		}
+		return response(200, credits), nil
+	})
+	o := fetchCommandCode(context.Background(), "fixture-key", client, fixedNow)
+	if o.Error != "" || len(o.Buckets) != 1 {
+		t.Fatalf("spiked window %+v", o)
+	}
+	if o.Buckets[0].Window != "5h" || o.Buckets[0].UsedPct == nil || *o.Buckets[0].UsedPct != 100 || !o.Buckets[0].Locked {
+		t.Fatalf("clamped window %+v", o.Buckets[0])
+	}
+}
+
+func TestEpochTimeUnits(t *testing.T) {
+	want := "2026-02-02T02:40:00Z"
+	for _, n := range []float64{1770000000, 1770000000000, 1770000000000000} {
+		if got := epochTime(n); got != want {
+			t.Fatalf("epoch %g = %q, want %q", n, got, want)
+		}
+	}
+	if epochTime(1e18) != "" || epochTime(1e19) != "" {
+		t.Fatal("absurd reset timestamp accepted")
+	}
+}
+
 func TestRetryAfter(t *testing.T) {
 	for _, tt := range []struct {
 		header string
