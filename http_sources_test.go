@@ -150,6 +150,79 @@ func TestEpochTimeUnits(t *testing.T) {
 	}
 }
 
+func TestGrokBilling(t *testing.T) {
+	body := `{"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-10-22T19:58:08Z","end":"2026-10-29T19:58:08Z"},"creditUsagePercent":91.0,"productUsage":[{"product":"GrokBuild","usagePercent":5.0},{"product":"GrokChat","usagePercent":3.0}]}}`
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("x-grok-client-mode") != "build" {
+			t.Fatal("grok client mode missing")
+		}
+		return response(200, body), nil
+	})
+	o := fetchGrok(context.Background(), "fixture-token", client, fixedNow)
+	if o.Error != "" || len(o.Buckets) != 1 {
+		t.Fatalf("grok buckets %+v", o)
+	}
+	b := o.Buckets[0]
+	if b.Window != "7d" || b.UsedPct == nil || *b.UsedPct != 91 || b.ResetsAt != "2026-10-29T19:58:08Z" {
+		t.Fatalf("grok bucket %+v", b)
+	}
+	if !strings.Contains(b.Note, "GrokBuild 5.0%") {
+		t.Fatalf("product note %q", b.Note)
+	}
+}
+
+func TestGrokAuthFailure(t *testing.T) {
+	client := doFunc(func(*http.Request) (*http.Response, error) { return response(403, `{}`), nil })
+	o := fetchGrok(context.Background(), "fixture-token", client, fixedNow)
+	if o.ErrorKind != "auth_failed" || !strings.Contains(o.Error, "grok login") {
+		t.Fatalf("grok auth %+v", o)
+	}
+}
+
+func TestAgyQuotaSummaryWeeklyAndFiveHour(t *testing.T) {
+	body := `{"groups":[{"displayName":"Gemini Models","buckets":[{"bucketId":"gemini-5h","window":"5h","remainingFraction":0.8,"resetTime":"2026-10-29T06:18:55Z"},{"bucketId":"gemini-weekly","window":"weekly","remainingFraction":0.6,"resetTime":"2026-11-05T01:18:55Z"}]},{"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-5h","window":"5h","remainingFraction":0.5,"resetTime":"2026-10-29T06:18:55Z"}]}]}`
+	var hosts []string
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		hosts = append(hosts, r.URL.Host)
+		return response(200, body), nil
+	})
+	o := fetchAgy(context.Background(), "fixture-token", client, fixedNow)
+	if o.Error != "" || len(o.Buckets) != 2 {
+		t.Fatalf("agy buckets %+v", o)
+	}
+	if o.Buckets[0].Window != "5h" || *o.Buckets[0].UsedPct != 50 {
+		t.Fatalf("agy five-hour uses the worst group %+v", o.Buckets[0])
+	}
+	if o.Buckets[1].Window != "7d" || *o.Buckets[1].UsedPct != 40 {
+		t.Fatalf("agy weekly bucket %+v", o.Buckets[1])
+	}
+	if len(hosts) != 1 || hosts[0] != "daily-cloudcode-pa.googleapis.com" {
+		t.Fatalf("agy host order %v", hosts)
+	}
+}
+
+func TestAgyFallsBackToSecondHost(t *testing.T) {
+	body := `{"response":{"groups":[{"buckets":[{"bucketId":"3p-weekly","window":"weekly","remainingFraction":0.6,"resetTime":"2026-11-05T01:18:55Z"}]}]}}`
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "daily-cloudcode-pa.googleapis.com" {
+			return response(500, `{}`), nil
+		}
+		return response(200, body), nil
+	})
+	o := fetchAgy(context.Background(), "fixture-token", client, fixedNow)
+	if o.Error != "" || len(o.Buckets) != 1 || o.Buckets[0].Window != "7d" {
+		t.Fatalf("agy fallback %+v", o)
+	}
+}
+
+func TestAgyAuthFailure(t *testing.T) {
+	client := doFunc(func(*http.Request) (*http.Response, error) { return response(401, `{}`), nil })
+	o := fetchAgy(context.Background(), "fixture-token", client, fixedNow)
+	if o.ErrorKind != "auth_failed" || !strings.Contains(o.Error, "agy") {
+		t.Fatalf("agy auth %+v", o)
+	}
+}
+
 func TestRetryAfter(t *testing.T) {
 	for _, tt := range []struct {
 		header string
@@ -207,6 +280,18 @@ func TestProviderTTL(t *testing.T) {
 	if ttlFor("claude") != 900*time.Second {
 		t.Fatal("claude TTL must be 900s")
 	}
+	if ttlFor("agy") != 300*time.Second {
+		t.Fatal("agy TTL must be 300s")
+	}
+}
+
+func TestCodexWindowsBySeconds(t *testing.T) {
+	body := `{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":604800,"reset_at":1793232000},"secondary_window":{"used_percent":10,"limit_window_seconds":18000,"reset_at":1793232000}}}`
+	p := HTTPProvider{ID: "codex", URL: "https://provider.example.invalid/usage", Client: doFunc(func(*http.Request) (*http.Response, error) { return response(200, body), nil })}
+	o := p.Fetch(context.Background())
+	if o.Error != "" || len(o.Buckets) != 2 || o.Buckets[0].Window != "7d" || o.Buckets[1].Window != "5h" {
+		t.Fatalf("codex windows by position %+v", o)
+	}
 }
 
 func TestClineProvidersJSON(t *testing.T) {
@@ -237,5 +322,33 @@ func TestProviderTokens(t *testing.T) {
 	t.Setenv("COMMANDCODE_API_KEY", "")
 	if token := commandCodeToken(home); token != "fixture-command-code" {
 		t.Fatalf("command code token %q", token)
+	}
+	if e := os.MkdirAll(filepath.Join(home, ".grok"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	grok := `{"https://auth.x.ai::fixture":{"key":"fixture-grok","expires_at":"2026-11-01T00:00:00Z"}}`
+	if e := os.WriteFile(filepath.Join(home, ".grok", "auth.json"), []byte(grok), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if token := grokToken(home, nil); token != "fixture-grok" {
+		t.Fatalf("grok token %q", token)
+	}
+	if e := os.MkdirAll(filepath.Join(home, ".gemini", "antigravity-cli"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.WriteFile(filepath.Join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token"), []byte(`{"token":{"access_token":"fixture-agy"}}`), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if token := agyToken(home); token != "fixture-agy" {
+		t.Fatalf("agy token %q", token)
+	}
+}
+
+func TestAgyPoolKnown(t *testing.T) {
+	if !knownPool("agy") {
+		t.Fatal("agy must be a known pool")
+	}
+	if windows := RequiredWindows("agy", "", false); len(windows) != 2 || windows[0] != "5h" || windows[1] != "7d" {
+		t.Fatalf("agy required windows %v", windows)
 	}
 }

@@ -54,6 +54,23 @@ manual entries are ignored in shared mode; re-enter a valid observation once
 with the shared configuration enabled. Manual expiry and reset checks still
 apply, and a shared outage cannot be hidden by old local manual data.
 
+## Host presence
+
+After a successful shared measurement, the measuring host also publishes a
+presence record so placement can see which host last saw an account:
+
+```
+PUT /v1/quota/presence
+{"host_id":"host-<stable-id>","account_key":"<pool>:<fingerprint>","last_seen":"<RFC3339>"}
+```
+
+It is a separate record from the quota observation, which deliberately carries
+no host metadata. `host_id` is `PACELEVER_HOST_ID` or `HANDOFFKEEP_HOST_ID` when
+set, otherwise a truncated SHA-256 of the local hostname; the raw hostname is
+never sent. Publication is best-effort: a missing endpoint or an hk error never
+changes a quota verdict and never fails collection. hk must expose this endpoint
+for records to persist; pacelever does not create it.
+
 Omit `quota.url` to retain the existing local collection behavior. Tests use an
 in-memory fake hk and an HTTP test server; no database or real provider probes
 are needed. The six-host contention test asserts one probe and one publication.

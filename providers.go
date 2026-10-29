@@ -390,6 +390,11 @@ func creditAmount(v any) float64 {
 	return n
 }
 
+func numericValue(v any) float64 {
+	n, _ := finiteNumber(v)
+	return n
+}
+
 func resetAtValue(v any) string {
 	switch x := v.(type) {
 	case float64:
@@ -441,6 +446,186 @@ func epochTime(n float64) string {
 		return ""
 	}
 	return at.Format(time.RFC3339Nano)
+}
+
+func fetchGrok(ctx context.Context, token string, client HTTPDoer, now func() time.Time) Observation {
+	if token == "" {
+		return Observation{ID: "grok", Error: "credentials unavailable", ErrorKind: "credentials"}
+	}
+	resp, e := doJSON(ctx, client, "GET", "https://cli-chat-proxy.grok.com/v1/billing?format=credits", map[string]string{"Authorization": "Bearer " + token, "x-grok-client-mode": "build"}, nil)
+	if e != nil {
+		return Observation{ID: "grok", Error: "usage request failed", ErrorKind: "network"}
+	}
+	if resp.Status != 200 {
+		return statusObservation("grok", resp.Status, resp.Header, now(), "auth_failed", "grok authentication failed; run grok login", 0)
+	}
+	if resp.ParseError {
+		return Observation{ID: "grok", Error: "invalid usage JSON", ErrorKind: "parse_error"}
+	}
+	return parseGrok(resp.Body)
+}
+
+func parseGrok(raw map[string]any) Observation {
+	o := Observation{ID: "grok", Source: "usage-api"}
+	config := object(raw["config"])
+	if len(config) == 0 {
+		config = raw
+	}
+	used, ok := finiteNumber(config["creditUsagePercent"])
+	if !ok {
+		return Observation{ID: "grok", Error: "usage response has no credit percentage", ErrorKind: "parse_error"}
+	}
+	period := object(config["currentPeriod"])
+	kind := strings.ToUpper(str(period["type"]))
+	window, label := "", "usage"
+	switch {
+	case strings.Contains(kind, "WEEKLY"):
+		window, label = "7d", "7d"
+	case strings.Contains(kind, "MONTHLY"):
+		window, label = "30d", "30d"
+	case strings.Contains(kind, "DAILY"):
+		window, label = "1d", "1d"
+	}
+	bucket := Bucket{Label: label, Window: window, UsedPct: Pct(used), ResetsAt: resetAtValue(period["end"]), Scope: Scope{Kind: "account"}, Horizon: horizon(window)}
+	if note := productNote(config["productUsage"]); note != "" {
+		bucket.Note = note
+	}
+	o.Buckets = []Bucket{bucket}
+	return o
+}
+
+func productNote(v any) string {
+	items, ok := v.([]any)
+	if !ok || len(items) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		entry := object(item)
+		name := str(entry["product"])
+		if name == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s %.1f%%", name, numericValue(entry["usagePercent"])))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "products: " + strings.Join(parts, ", ")
+}
+
+func fetchAgy(ctx context.Context, token string, client HTTPDoer, now func() time.Time) Observation {
+	if token == "" {
+		return Observation{ID: "agy", Error: "credentials unavailable", ErrorKind: "credentials"}
+	}
+	headers := map[string]string{"Authorization": "Bearer " + token, "User-Agent": "antigravity", "Content-Type": "application/json"}
+	var last httpJSON
+	gotStatus := false
+	for _, base := range []string{"https://daily-cloudcode-pa.googleapis.com", "https://cloudcode-pa.googleapis.com"} {
+		resp, e := doJSON(ctx, client, "POST", base+"/v1internal:retrieveUserQuotaSummary", headers, []byte("{}"))
+		if e != nil {
+			continue
+		}
+		last, gotStatus = resp, true
+		if resp.Status == 401 || resp.Status == 403 {
+			return statusObservation("agy", resp.Status, resp.Header, now(), "auth_failed", "antigravity authentication failed; run agy to refresh the login", 0)
+		}
+		if resp.Status == 200 && !resp.ParseError {
+			return parseAgy(resp.Body)
+		}
+	}
+	if gotStatus && last.Status == 200 {
+		return Observation{ID: "agy", Error: "invalid usage JSON", ErrorKind: "parse_error"}
+	}
+	if gotStatus {
+		return statusObservation("agy", last.Status, last.Header, now(), "auth_failed", "antigravity authentication failed; run agy to refresh the login", 0)
+	}
+	return Observation{ID: "agy", Error: "usage request failed", ErrorKind: "network"}
+}
+
+func parseAgy(raw map[string]any) Observation {
+	o := Observation{ID: "agy", Source: "usage-api"}
+	root := raw
+	if response := object(raw["response"]); len(response) > 0 {
+		root = response
+	}
+	worst := map[string]Bucket{}
+	add := func(window string, fraction float64, reset string) {
+		if window == "" || math.IsNaN(fraction) || fraction < 0 || fraction > 1 {
+			return
+		}
+		bucket := Bucket{Label: window, Window: window, UsedPct: Pct(100 * (1 - fraction)), ResetsAt: reset, Scope: Scope{Kind: "account"}, Horizon: horizon(window)}
+		if previous, ok := worst[window]; !ok || (previous.UsedPct != nil && bucket.UsedPct != nil && *bucket.UsedPct > *previous.UsedPct) {
+			worst[window] = bucket
+		}
+	}
+	for _, group := range list(root["groups"]) {
+		for _, value := range list(object(group)["buckets"]) {
+			bucket := object(value)
+			fraction, ok := finiteNumber(bucket["remainingFraction"])
+			if !ok {
+				continue
+			}
+			add(agyWindow(str(bucket["window"]), str(bucket["bucketId"])), fraction, resetAtValue(bucket["resetTime"]))
+		}
+	}
+	if len(worst) == 0 {
+		for _, value := range object(root["models"]) {
+			quota := object(object(value)["quotaInfo"])
+			fraction, ok := finiteNumber(quota["remainingFraction"])
+			if !ok {
+				continue
+			}
+			add("5h", fraction, resetAtValue(quota["resetTime"]))
+		}
+	}
+	for _, window := range []string{"5h", "7d", "30d", "1d"} {
+		if bucket, ok := worst[window]; ok {
+			o.Buckets = append(o.Buckets, bucket)
+		}
+	}
+	for _, key := range []string{"planDaily", "plan"} {
+		plan := object(raw[key])
+		name := str(object(plan["paidTier"])["name"])
+		if name == "" {
+			name = str(object(plan["currentTier"])["name"])
+		}
+		if name != "" {
+			o.Plan = strings.ToUpper(name)
+			break
+		}
+	}
+	if len(o.Buckets) == 0 {
+		o.Error = "usage response has no recognized windows"
+		o.ErrorKind = "parse_error"
+	}
+	return o
+}
+
+func agyWindow(window, bucketID string) string {
+	switch strings.ToLower(strings.TrimSpace(window)) {
+	case "weekly":
+		return "7d"
+	case "5h", "session":
+		return "5h"
+	case "daily":
+		return "1d"
+	}
+	id := strings.ToLower(bucketID)
+	switch {
+	case strings.HasSuffix(id, "-weekly"):
+		return "7d"
+	case strings.HasSuffix(id, "-5h"):
+		return "5h"
+	}
+	return ""
+}
+
+func list(v any) []any {
+	if items, ok := v.([]any); ok {
+		return items
+	}
+	return nil
 }
 
 func validated(p *float64) *float64 {
@@ -566,7 +751,13 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 	result["commandcode"] = ProviderFunc(func(ctx context.Context) Observation {
 		return fetchCommandCode(ctx, commandCodeToken(home), nil, time.Now)
 	})
-	for _, pool := range []string{"devin", "grok", "kimi", "kiro"} {
+	result["grok"] = ProviderFunc(func(ctx context.Context) Observation {
+		return fetchGrok(ctx, grokToken(home, selectors), nil, time.Now)
+	})
+	result["agy"] = ProviderFunc(func(ctx context.Context) Observation {
+		return fetchAgy(ctx, agyToken(home), nil, time.Now)
+	})
+	for _, pool := range []string{"devin", "kimi", "kiro"} {
 		result[pool] = PTYProvider{ID: pool, Binary: ResolveBinary(pool, cfg), Timeout: 35 * time.Second, Env: selectors}
 	}
 	return result
@@ -577,6 +768,49 @@ func commandCodeToken(home string) string {
 		return token
 	}
 	return strings.TrimSpace(str(readObject(filepath.Join(home, ".commandcode", "auth.json"))["apiKey"]))
+}
+
+func grokToken(home string, selectors map[string]string) string {
+	dir := selectors["GROK_HOME"]
+	if dir == "" {
+		dir = os.Getenv("GROK_HOME")
+	}
+	if dir == "" {
+		dir = filepath.Join(home, ".grok")
+	}
+	data := readObject(filepath.Join(dir, "auth.json"))
+	if token := strings.TrimSpace(str(data["key"])); token != "" {
+		return token
+	}
+	best, bestRank := "", ""
+	for key, value := range data {
+		record := object(value)
+		token := strings.TrimSpace(str(record["key"]))
+		if token == "" && strings.HasSuffix(key, ".key") {
+			token = strings.TrimSpace(str(value))
+		}
+		if token == "" {
+			continue
+		}
+		rank := str(record["expires_at"]) + str(record["create_time"])
+		if best == "" || rank >= bestRank {
+			best, bestRank = token, rank
+		}
+	}
+	return best
+}
+
+func agyToken(home string) string {
+	for _, path := range []string{
+		filepath.Join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token"),
+		filepath.Join(configBase(), "antigravity-cli", "antigravity-oauth-token"),
+	} {
+		token := strings.TrimSpace(str(object(readObject(path)["token"])["access_token"]))
+		if token != "" {
+			return token
+		}
+	}
+	return ""
 }
 
 func clineToken(home string) string {

@@ -26,8 +26,17 @@ type fakeHK struct {
 	calls     []string
 	fail      string
 	published int
+	presence  []PresenceRecord
 	onRead    func(int) *SharedObservation
 	reads     int
+}
+
+func (f *fakeHK) PublishPresence(ctx context.Context, r PresenceRecord) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "presence")
+	f.presence = append(f.presence, r)
+	return nil
 }
 
 func (f *fakeHK) Latest(ctx context.Context, key string) (SharedLatest, error) {
@@ -166,6 +175,9 @@ func TestSharedQuotaFleetSingleProbe(t *testing.T) {
 	}
 	if probes.Load() != 1 || f.published != 1 || f.holder != "" {
 		t.Fatalf("probes=%d published=%d holder=%s", probes.Load(), f.published, f.holder)
+	}
+	if len(f.presence) != 1 || f.presence[0].AccountKey != sharedTestKey || f.presence[0].HostID == "" || f.presence[0].LastSeen.IsZero() {
+		t.Fatalf("presence %+v", f.presence)
 	}
 }
 func TestSharedQuotaRereadAndReadOnly(t *testing.T) {

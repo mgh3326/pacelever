@@ -13,7 +13,6 @@ func TestScreenFixtures(t *testing.T) {
 	}{
 		{"kimi", "kimi_usage.txt", []float64{20, 25, 10}, false},
 		{"devin", "devin_usage.txt", []float64{10, 25}, false},
-		{"grok", "grok_usage.txt", []float64{24}, false},
 		{"kiro", "kiro_usage.txt", []float64{60}, false},
 	} {
 		t.Run(tt.pool+"/"+tt.file, func(t *testing.T) {

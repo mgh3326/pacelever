@@ -203,6 +203,8 @@ func RequiredWindows(pool, plan string, manual bool) []string {
 		return []string{"5h", "7d"}
 	case "devin", "grok":
 		return []string{"7d"}
+	case "agy":
+		return []string{"5h", "7d"}
 	case "kiro":
 		return []string{"30d"}
 	case "clinepass", "commandcode":

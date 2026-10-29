@@ -19,7 +19,7 @@ const (
 	Unsubscribed = 6
 )
 
-var ProviderIDs = []string{"claude", "codex", "devin", "kimi", "grok", "kiro", "clinepass", "commandcode"}
+var ProviderIDs = []string{"claude", "codex", "devin", "kimi", "grok", "kiro", "clinepass", "commandcode", "agy"}
 var Grades = []string{"S+", "S", "A+", "A", "B", "C"}
 
 type Scope struct {
