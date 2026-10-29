@@ -15,11 +15,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"golang.org/x/text/unicode/norm"
 )
@@ -775,6 +777,168 @@ func productNote(v any) string {
 	return "products: " + strings.Join(parts, ", ")
 }
 
+// devinOrgRE is the organization id shape app.devin.ai uses. Rejecting other
+// values keeps a malformed setting out of the request path and headers.
+var devinOrgRE = regexp.MustCompile(`^org[-_][A-Za-z0-9_-]+$`)
+
+func devinWebProvider(cfg Config, client HTTPDoer, now func() time.Time) Provider {
+	token := strings.TrimSpace(os.Getenv("DEVIN_BEARER_TOKEN"))
+	org := strings.TrimSpace(cfg.Pools["devin"].OrgID)
+	if token == "" || !devinOrgRE.MatchString(org) {
+		return nil
+	}
+	if now == nil {
+		now = time.Now
+	}
+	return ProviderFunc(func(ctx context.Context) Observation {
+		return fetchDevinWeb(ctx, token, org, client, now)
+	})
+}
+
+// fetchDevinWeb reads the organization quota from app.devin.ai. It is the web
+// source from ClaudeBar (MIT, tddworks/ClaudeBar): the credential is limited to
+// the DEVIN_BEARER_TOKEN environment variable plus the pools.devin.org_id
+// setting, so no browser storage is read and nothing is written back.
+func fetchDevinWeb(ctx context.Context, token, org string, client HTTPDoer, now func() time.Time) Observation {
+	if token == "" || !devinOrgRE.MatchString(org) {
+		return Observation{ID: "devin", Error: "credentials unavailable", ErrorKind: "credentials"}
+	}
+	endpoint := "https://app.devin.ai/api/" + url.PathEscape(org) + "/billing/quota/usage"
+	resp, e := doJSON(ctx, client, "GET", endpoint, map[string]string{
+		"Authorization": "Bearer " + token,
+		"x-cog-org-id":  org,
+	}, nil)
+	if e != nil {
+		return Observation{ID: "devin", Error: "usage request failed", ErrorKind: "network"}
+	}
+	if resp.Status != 200 {
+		return statusObservation("devin", resp.Status, resp.Header, now(), "auth_failed", "devin authentication failed; set DEVIN_BEARER_TOKEN and pools.devin.org_id", 0)
+	}
+	if resp.ParseError {
+		return Observation{ID: "devin", Error: "invalid usage JSON", ErrorKind: "parse_error"}
+	}
+	return parseDevin(resp.Body)
+}
+
+func parseDevin(raw map[string]any) Observation {
+	o := Observation{ID: "devin", Source: "usage-api"}
+	nested := object(raw["quota_usage"])
+	if raw["hide_daily_quota"] != true {
+		if used, reset, ok := devinWindow(raw["daily_percentage"], raw["daily_reset_at"], nested["daily_quota"]); ok {
+			o.Buckets = append(o.Buckets, Bucket{Label: "1d", Window: "1d", UsedPct: Pct(used), ResetsAt: reset, Scope: Scope{Kind: "account"}, Horizon: horizon("1d")})
+		}
+	}
+	if used, reset, ok := devinWindow(raw["weekly_percentage"], raw["weekly_reset_at"], nested["weekly_quota"]); ok {
+		o.Buckets = append(o.Buckets, Bucket{Label: "7d", Window: "7d", UsedPct: Pct(used), ResetsAt: reset, Scope: Scope{Kind: "account"}, Horizon: horizon("7d")})
+	}
+	o.Plan = devinPlan(raw)
+	if len(o.Buckets) == 0 {
+		o.Error = "usage response has no recognized windows"
+		o.ErrorKind = "parse_error"
+	}
+	return o
+}
+
+// devinWindow reads one window from either the flat percentage shape or the
+// nested quota_usage shape. A fraction below one is a percentage, matching the
+// API and ClaudeBar's mapper.
+func devinWindow(percentage, resetValue, nestedValue any) (float64, string, bool) {
+	if used, ok := devinUsedPercent(percentage); ok {
+		return used, resetAtValue(resetValue), true
+	}
+	nested := object(nestedValue)
+	if len(nested) == 0 {
+		return 0, "", false
+	}
+	at := nested["reset_at"]
+	if at == nil {
+		at = nested["next_reset_at"]
+	}
+	reset := resetAtValue(at)
+	percent := nested["used_percent"]
+	if percent == nil {
+		percent = nested["percentUsed"]
+	}
+	if used, ok := devinUsedPercent(percent); ok {
+		return used, reset, true
+	}
+	if remaining, ok := devinNumber(nested["remaining_percent"]); ok {
+		remaining = devinRemainingPercent(remaining)
+		if remaining < 0 || remaining > 100 {
+			return 0, "", false
+		}
+		return 100 - remaining, reset, true
+	}
+	if limit, ok := devinNumber(nested["limit"]); ok && limit > 0 {
+		count, hasCount := devinNumber(nested["used"])
+		if !hasCount {
+			if remaining, ok := devinNumber(nested["remaining"]); ok {
+				count, hasCount = limit-remaining, true
+			}
+		}
+		if hasCount && count >= 0 {
+			return devinClamp(100 * count / limit), reset, true
+		}
+	}
+	return 0, "", false
+}
+
+func devinUsedPercent(v any) (float64, bool) {
+	n, ok := devinNumber(v)
+	if !ok || n < 0 {
+		return 0, false
+	}
+	if n < 1 {
+		n *= 100
+	}
+	return devinClamp(n), true
+}
+
+func devinRemainingPercent(n float64) float64 {
+	if n <= 1 {
+		return n * 100
+	}
+	return n
+}
+
+func devinNumber(v any) (float64, bool) {
+	if n, ok := finiteNumber(v); ok {
+		return n, true
+	}
+	text, ok := v.(string)
+	if !ok {
+		return 0, false
+	}
+	n, e := strconv.ParseFloat(strings.TrimSpace(text), 64)
+	if e != nil || math.IsNaN(n) || math.IsInf(n, 0) {
+		return 0, false
+	}
+	return n, true
+}
+
+func devinClamp(n float64) float64 {
+	if n < 0 {
+		return 0
+	}
+	if n > 100 {
+		return 100
+	}
+	return n
+}
+
+func devinPlan(raw map[string]any) string {
+	for _, key := range []string{"plan_name", "planName", "plan", "tier", "subscription_tier"} {
+		plan := strings.TrimSpace(str(raw[key]))
+		if plan == "" {
+			continue
+		}
+		runes := []rune(plan)
+		runes[0] = unicode.ToUpper(runes[0])
+		return string(runes)
+	}
+	return ""
+}
+
 func fetchAgy(ctx context.Context, token string, client HTTPDoer, now func() time.Time) Observation {
 	if token == "" {
 		return Observation{ID: "agy", Error: "credentials unavailable", ErrorKind: "credentials"}
@@ -1098,7 +1262,10 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 		return o
 	})
 	result["agy"] = newAgyProvider(home, cfg, nil)
-	for _, pool := range []string{"devin", "kimi", "kiro"} {
+	// Devin keeps its CLI probe for the per-model Free tags; the read-only web
+	// quota is tried first when its environment token and org setting are set.
+	result["devin"] = PTYProvider{ID: "devin", Binary: ResolveBinary("devin", cfg), Timeout: 35 * time.Second, Env: selectors, Preferred: devinWebProvider(cfg, nil, time.Now)}
+	for _, pool := range []string{"kimi", "kiro"} {
 		result[pool] = PTYProvider{ID: pool, Binary: ResolveBinary(pool, cfg), Timeout: 35 * time.Second, Env: selectors}
 	}
 	return result
