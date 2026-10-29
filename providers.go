@@ -978,13 +978,17 @@ type agySecrets interface {
 
 // agyProvider measures Antigravity quota over HTTP. A refused token is re-armed
 // once by running the CLI's model listing, which refreshes the OAuth file as a
-// side effect; the collector's per-pool lock keeps the refresh single-flight.
+// side effect; a shared lock keeps the refresh single-flight.
 type agyProvider struct {
 	client  HTTPDoer
 	now     func() time.Time
 	file    func() string
 	secrets agySecrets
 	wake    func(context.Context) error
+	// wakeLock serializes the CLI refresh across collectors whose cache
+	// directories differ (default runs and herdr events). Empty relies on
+	// the caller's own serialization.
+	wakeLock string
 }
 
 func newAgyProvider(home string, cfg Config, client HTTPDoer) agyProvider {
@@ -998,6 +1002,7 @@ func newAgyProvider(home string, cfg Config, client HTTPDoer) agyProvider {
 	}
 	if binary, e := exec.LookPath(ResolveBinary("agy", cfg)); e == nil {
 		p.wake = agyWake(binary)
+		p.wakeLock = filepath.Join(CacheDir(), "agy-wake.lock")
 	}
 	return p
 }
@@ -1037,17 +1042,13 @@ func (p agyProvider) Fetch(ctx context.Context) Observation {
 	switch {
 	case p.wake == nil:
 		o.Error = "antigravity authentication failed; the agy command is unavailable to refresh the login"
-	case p.wake(ctx) != nil:
-		o.Error = "antigravity authentication failed; `agy models` could not refresh the login"
 	default:
-		// The wake refreshes the token file, so re-read before retrying once.
-		// When no file exists the CLI may have refreshed the keychain entry
-		// instead; re-read whichever store supplied the token.
-		if fresh := p.fileToken(); fresh != "" {
-			token, usedSecret = fresh, false
-		} else if fresh := p.secretToken(ctx); usedSecret && fresh != "" {
-			token = fresh
+		fresh, freshSecret, e := p.refresh(ctx, token, usedSecret)
+		if e != nil {
+			o.Error = "antigravity authentication failed; `agy models` could not refresh the login"
+			break
 		}
+		token, usedSecret = fresh, freshSecret
 		if o = fetchAgy(ctx, token, p.client, now); o.ErrorKind != "auth_failed" {
 			return o
 		}
@@ -1066,6 +1067,45 @@ func (p agyProvider) Fetch(ctx context.Context) Observation {
 		}
 	}
 	return o
+}
+
+// refresh re-arms a refused token under a lock shared by collectors whose
+// cache directories differ. A token another holder just refreshed is reused
+// instead of waking the CLI again. It returns the token to retry with.
+func (p agyProvider) refresh(ctx context.Context, token string, usedSecret bool) (string, bool, error) {
+	// Re-read whichever store supplied the token: the wake or a concurrent
+	// refresh may have replaced it in either one.
+	latest := func() (string, bool) {
+		if fresh := p.fileToken(); fresh != "" {
+			return fresh, false
+		}
+		if usedSecret {
+			if fresh := p.secretToken(ctx); fresh != "" {
+				return fresh, true
+			}
+		}
+		return token, usedSecret
+	}
+	if p.wakeLock == "" {
+		if e := p.wake(ctx); e != nil {
+			return token, usedSecret, e
+		}
+		next, secret := latest()
+		return next, secret, nil
+	}
+	next, nextSecret := token, usedSecret
+	e := WithFileLock(p.wakeLock, false, func() error {
+		if fresh, secret := latest(); fresh != token {
+			next, nextSecret = fresh, secret
+			return nil
+		}
+		if e := p.wake(ctx); e != nil {
+			return e
+		}
+		next, nextSecret = latest()
+		return nil
+	})
+	return next, nextSecret, e
 }
 
 // agyWake re-arms the OAuth token with one model listing. The CLI output may

@@ -438,6 +438,7 @@ func wakeCount(t *testing.T, marker string) int {
 }
 
 func TestAgyWakeRefreshesExpiredToken(t *testing.T) {
+	isolate(t)
 	home := t.TempDir()
 	dir := filepath.Join(home, ".gemini", "antigravity-cli")
 	if e := os.MkdirAll(dir, 0700); e != nil {
@@ -474,6 +475,7 @@ func TestAgyWakeRefreshesExpiredToken(t *testing.T) {
 }
 
 func TestAgyWakeFailureKeepsAuthHint(t *testing.T) {
+	isolate(t)
 	home := t.TempDir()
 	dir := filepath.Join(home, ".gemini", "antigravity-cli")
 	if e := os.MkdirAll(dir, 0700); e != nil {
