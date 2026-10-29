@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func isolate(t *testing.T) {
@@ -125,5 +126,44 @@ model_order = ["opus", "sonnet", "haiku"]
 	}
 	if _, e = LoadConfig(); e == nil {
 		t.Fatal("invalid exploration fraction accepted")
+	}
+}
+
+func TestQuotaPoolFreshTTLConfig(t *testing.T) {
+	isolate(t)
+	if got := (QuotaConfig{}).freshTTL("claude"); got != 15*time.Minute {
+		t.Fatalf("default claude fresh TTL %v", got)
+	}
+	if got := (QuotaConfig{}).freshTTL("grok"); got != 5*time.Minute {
+		t.Fatalf("default grok fresh TTL %v", got)
+	}
+	if e := AtomicWrite(ConfigPath(), []byte("[quota]\nfresh_ttl_s = 240\n[quota.pool_fresh_ttl_s]\nclaude = 1200\ngrok = 60\n")); e != nil {
+		t.Fatal(e)
+	}
+	c, e := LoadConfig()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if got := c.Quota.freshTTL("claude"); got != 20*time.Minute {
+		t.Fatalf("pool override %v", got)
+	}
+	if got := c.Quota.freshTTL("grok"); got != time.Minute {
+		t.Fatalf("pool override %v", got)
+	}
+	if got := c.Quota.freshTTL("codex"); got != 4*time.Minute {
+		t.Fatalf("global fallback %v", got)
+	}
+	for _, data := range []string{
+		"[quota.pool_fresh_ttl_s]\nunknown = 60\n",
+		"[quota.pool_fresh_ttl_s]\nclaude = -1\n",
+		"[quota.pool_fresh_ttl_s]\nclaude = 0\n",
+		"[quota.pool_fresh_ttl_s]\nclaude = nan\n",
+	} {
+		if e := AtomicWrite(ConfigPath(), []byte(data)); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := LoadConfig(); e == nil {
+			t.Fatalf("invalid pool fresh TTL accepted: %s", data)
+		}
 	}
 }
