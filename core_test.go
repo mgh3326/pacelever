@@ -1,6 +1,8 @@
 package pacelever
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -71,14 +73,49 @@ func TestManualFallback(t *testing.T) {
 	}
 }
 func TestFreeScope(t *testing.T) {
-	o := observation("devin", 100)
-	o.Buckets = append(o.Buckets, Bucket{Label: "swe-2-high", Scope: Scope{Kind: "model", Name: "swe-2-high"}, UsedPct: Pct(0)})
-	in := Inputs{Now: testNow, Observations: []Observation{o}}
-	if d := Gate(in, Request{Profile: "devin-swe2"}); d.ExitCode != 0 {
-		t.Fatal(d.Reason)
+	// No record: the unmeasurable free bucket is available, even with no
+	// observation and with the account weekly window exhausted.
+	for name, obs := range map[string][]Observation{"none": nil, "weekly100": {observation("devin", 100)}} {
+		in := Inputs{Now: testNow, Observations: obs}
+		for _, profile := range []string{"devin-swe2", "devin-swe2-medium", "devin-swe2-max"} {
+			d := Gate(in, Request{Profile: profile})
+			if d.ExitCode != 0 || d.FreeTag != FreeAvailable || !strings.HasPrefix(d.Reason, FreeAvailable) || strings.Contains(d.Reason, "unmeasur") {
+				t.Fatalf("%s %s: %+v", name, profile, d)
+			}
+		}
 	}
-	if d := Gate(in, Request{Profile: "devin-swe2-medium"}); d.ExitCode != 4 {
-		t.Fatalf("borrowed free sibling: %d", d.ExitCode)
+}
+func TestFreeLimitExceed(t *testing.T) {
+	reset := testNow.Add(time.Hour).Format(time.RFC3339)
+	in := Inputs{Now: testNow, FreeLimit: &LimitRecord{ResetAt: reset, ObservedAt: testNow.Format(time.RFC3339), Source: "job:fixture"}}
+	d := Gate(in, Request{Profile: "devin-swe2"})
+	if d.OK || d.ExitCode != Blocked || d.Unmeasurable || d.Reason != "free limit exceeded until "+reset {
+		t.Fatalf("active exceed: %+v", d)
+	}
+	b, _ := json.Marshal(d)
+	if !strings.Contains(string(b), "free limit exceeded until") {
+		t.Fatalf("json wording: %s", b)
+	}
+	in.Now = testNow.Add(time.Hour)
+	if d := Gate(in, Request{Profile: "devin-swe2"}); d.ExitCode != 0 || d.Reason[:len(FreeAvailable)] != FreeAvailable {
+		t.Fatalf("expired exceed: %+v", d)
+	}
+	b, _ = json.Marshal(Gate(in, Request{Profile: "devin-swe2"}))
+	if !strings.Contains(string(b), `"free_tag":"available (free)"`) {
+		t.Fatalf("json wording: %s", b)
+	}
+}
+func TestFreeLimitDoesNotAffectPaidDevin(t *testing.T) {
+	in := Inputs{Now: testNow, Observations: []Observation{observation("devin", 100)}, FreeLimit: &LimitRecord{ResetAt: testNow.Add(time.Hour).Format(time.RFC3339)}}
+	if d := Gate(in, Request{Profile: "devin-swe2"}); d.ExitCode != Blocked {
+		t.Fatalf("exceed ignored: %+v", d)
+	}
+	cat := BundledCatalog()
+	cat.Rows = []CatalogRow{{Profile: "devin-paid", Effort: "high", ModelID: "devin-paid-model", Pool: "devin", Grade: "A", Gate: "default", Placed: true}}
+	in.Catalog = cat
+	in.FreeLimit = nil
+	if d := Gate(in, Request{Profile: "devin-paid", Effort: "high"}); d.ExitCode != Blocked || !strings.Contains(d.Reason, "quota exhausted") {
+		t.Fatalf("weekly 100%% admitted a non-free rung: %+v", d)
 	}
 }
 func TestPaceAllPaidPools(t *testing.T) {
@@ -123,5 +160,49 @@ func TestCreditRestrictedRungs(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+func TestFreeLimitUnreadableResetFailsClosed(t *testing.T) {
+	observed := testNow.Add(-10 * time.Minute)
+	held := observed.Add(UnknownResetHold).Format(time.RFC3339)
+	for _, reset := range []string{"", "not-a-time"} {
+		in := Inputs{Now: testNow, FreeLimit: &LimitRecord{ResetAt: reset, ObservedAt: observed.Format(time.RFC3339)}}
+		d := Gate(in, Request{Profile: "devin-swe2"})
+		if d.OK || d.ExitCode != Blocked || d.Reason != "free limit exceeded until "+held {
+			t.Fatalf("reset %q: %+v", reset, d)
+		}
+		in.Now = observed.Add(UnknownResetHold)
+		if d := Gate(in, Request{Profile: "devin-swe2"}); !d.OK {
+			t.Fatalf("reset %q: default hold never expired: %+v", reset, d)
+		}
+	}
+	for _, r := range []LimitRecord{{}, {ResetAt: "bad", ObservedAt: "bad"}} {
+		d := Gate(Inputs{Now: testNow, FreeLimit: &r}, Request{Profile: "devin-swe2"})
+		if d.OK || d.ExitCode != Blocked || !strings.Contains(d.Reason, "free limit record unreadable") {
+			t.Fatalf("%+v: %+v", r, d)
+		}
+	}
+}
+func TestActiveFreeLimitReadsDamagedRecordsFromDisk(t *testing.T) {
+	isolate(t)
+	observed := testNow.Add(-5 * time.Minute).Format(time.RFC3339)
+	for _, r := range []LimitRecord{{ObservedAt: observed}, {}} {
+		s := limitStore{Schema: "scopefuel.devin-free-limit.v1", Records: map[string]LimitRecord{limitIdentity("devin"): r}}
+		if e := WriteJSON(limitPath("devin"), s); e != nil {
+			t.Fatal(e)
+		}
+		hold := ActiveFreeLimit(testNow)
+		if hold == nil {
+			t.Fatalf("damaged record %+v dropped", r)
+		}
+		if d := Gate(Inputs{Now: testNow, FreeLimit: hold}, Request{Profile: "devin-swe2"}); d.OK {
+			t.Fatalf("damaged record %+v admitted", r)
+		}
+	}
+	// A readable default hold that has passed no longer applies.
+	s := limitStore{Records: map[string]LimitRecord{limitIdentity("devin"): {ObservedAt: observed}}}
+	_ = WriteJSON(limitPath("devin"), s)
+	if ActiveFreeLimit(testNow.Add(2*time.Hour)) != nil {
+		t.Fatal("expired default hold still active")
 	}
 }
