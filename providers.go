@@ -104,15 +104,24 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 			}
 		}
 	case "codex":
+		// Header and credits handling ported from ClaudeBar (MIT,
+		// github.com/tddworks/ClaudeBar codex.json "api" mapping):
+		// x-codex-*-used-percent headers take precedence over body fields and
+		// the credits balance is read from a header or the credits block.
 		_ = json.Unmarshal(raw["plan_type"], &o.Plan)
 		var limit struct {
 			Primary   *codexWindow `json:"primary_window"`
 			Secondary *codexWindow `json:"secondary_window"`
 		}
 		_ = json.Unmarshal(raw["rate_limit"], &limit)
-		for _, w := range []*codexWindow{limit.Primary, limit.Secondary} {
+		headerNames := []string{"x-codex-primary-used-percent", "x-codex-secondary-used-percent"}
+		for i, w := range []*codexWindow{limit.Primary, limit.Secondary} {
 			if w != nil {
-				o.Buckets = append(o.Buckets, w.bucket(Scope{Kind: "account"}))
+				b := w.bucket(Scope{Kind: "account"}, p.now())
+				if pct := validated(headerFloat(resp.Header, headerNames[i])); pct != nil {
+					b.UsedPct = pct
+				}
+				o.Buckets = append(o.Buckets, b)
 			}
 		}
 		var extra []struct {
@@ -126,8 +135,25 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 		for _, x := range extra {
 			for _, w := range []*codexWindow{x.Limit.Primary, x.Limit.Secondary} {
 				if w != nil {
-					o.Buckets = append(o.Buckets, w.bucket(Scope{Kind: "model", Name: x.Name}))
+					o.Buckets = append(o.Buckets, w.bucket(Scope{Kind: "model", Name: x.Name}, p.now()))
 				}
+			}
+		}
+		var credits struct {
+			Has     bool `json:"has_credits"`
+			Balance any  `json:"balance"`
+		}
+		_ = json.Unmarshal(raw["credits"], &credits)
+		if credits.Has {
+			balance := headerFloat(resp.Header, "x-codex-credits-balance")
+			if balance == nil {
+				balance = anyFloat(credits.Balance)
+			}
+			if balance != nil {
+				// The API reports no limit; ClaudeBar measures the balance
+				// against a fixed 1000.
+				used := 100 - (*balance / 1000 * 100)
+				o.Buckets = append(o.Buckets, Bucket{Label: "credits", Window: "credit", UsedPct: Pct(used), Scope: Scope{Kind: "account"}, Note: fmt.Sprintf("credits remaining %.2f of %.2f", *balance, 1000.0)})
 			}
 		}
 	case "clinepass":
@@ -740,26 +766,35 @@ func validated(p *float64) *float64 {
 }
 
 type codexWindow struct {
-	Used    *float64 `json:"used_percent"`
-	Seconds float64  `json:"limit_window_seconds"`
-	Reset   float64  `json:"reset_at"`
+	Used       *float64 `json:"used_percent"`
+	Seconds    float64  `json:"limit_window_seconds"`
+	Reset      float64  `json:"reset_at"`
+	ResetAfter float64  `json:"reset_after_seconds"`
 }
 
-func (w codexWindow) bucket(scope Scope) Bucket {
-	label := fmt.Sprintf("%gs", w.Seconds)
+func codexWindowLabel(seconds float64) string {
+	label := fmt.Sprintf("%gs", seconds)
 	switch {
-	case w.Seconds >= 28*86400:
+	case seconds >= 28*86400:
 		label = "30d"
-	case w.Seconds >= 6*86400:
+	case seconds >= 6*86400:
 		label = "7d"
-	case w.Seconds >= 20*3600:
+	case seconds >= 20*3600:
 		label = "1d"
-	case w.Seconds >= 4*3600 && w.Seconds <= 6*3600:
+	case seconds >= 4*3600 && seconds <= 6*3600:
 		label = "5h"
 	}
+	return label
+}
+
+func (w codexWindow) bucket(scope Scope, now time.Time) Bucket {
+	label := codexWindowLabel(w.Seconds)
 	reset := ""
-	if w.Reset > 0 {
+	switch {
+	case w.Reset > 0:
 		reset = time.UnixMilli(int64(w.Reset * 1000)).UTC().Format(time.RFC3339Nano)
+	case w.ResetAfter > 0:
+		reset = now.Add(time.Duration(w.ResetAfter) * time.Second).UTC().Format(time.RFC3339Nano)
 	}
 	return Bucket{Label: label, Window: label, UsedPct: validated(w.Used), ResetsAt: reset, Scope: scope, Horizon: horizon(label)}
 }
@@ -821,29 +856,7 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 		return o
 	})
 	result["codex"] = ProviderFunc(func(ctx context.Context) Observation {
-		dir := selectors["CODEX_HOME"]
-		if dir == "" {
-			dir = os.Getenv("CODEX_HOME")
-		}
-		if dir == "" {
-			dir = filepath.Join(home, ".codex")
-		}
-		tokens := object(readObject(filepath.Join(dir, "auth.json"))["tokens"])
-		token := str(tokens["access_token"])
-		if token == "" {
-			return Observation{ID: "codex", Error: "credentials unavailable", ErrorKind: "credentials"}
-		}
-		headers := map[string]string{"Authorization": "Bearer " + token}
-		acct := str(tokens["account_id"])
-		if acct != "" {
-			headers["ChatGPT-Account-Id"] = acct
-		}
-		o := (HTTPProvider{ID: "codex", URL: "https://chatgpt.com/backend-api/wham/usage", Headers: headers}).Fetch(ctx)
-		if acct != "" {
-			o.PublishFP = fingerprint("codex-account", acct)
-			o.PublishFPKind = "account"
-		}
-		return o
+		return fetchCodex(ctx, home, selectors, cfg, nil)
 	})
 	result["clinepass"] = ProviderFunc(func(ctx context.Context) Observation {
 		token := clineToken(home)
@@ -869,6 +882,43 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 		result[pool] = PTYProvider{ID: pool, Binary: ResolveBinary(pool, cfg), Timeout: 35 * time.Second, Env: selectors}
 	}
 	return result
+}
+
+// fetchCodex tries the app-server JSON-RPC source first when it is strictly
+// safer than the API — it writes no credentials and, with a file login already
+// present, cannot open a browser sign-in — and falls back to the wham usage
+// API on any RPC failure.
+func fetchCodex(ctx context.Context, home string, selectors map[string]string, cfg Config, client HTTPDoer) Observation {
+	dir := selectors["CODEX_HOME"]
+	if dir == "" {
+		dir = os.Getenv("CODEX_HOME")
+	}
+	if dir == "" {
+		dir = filepath.Join(home, ".codex")
+	}
+	tokens := object(readObject(filepath.Join(dir, "auth.json"))["tokens"])
+	token := str(tokens["access_token"])
+	if token == "" {
+		return Observation{ID: "codex", Error: "credentials unavailable", ErrorKind: "credentials"}
+	}
+	acct := str(tokens["account_id"])
+	if o, ok := fetchCodexRPC(ctx, home, cfg, dir); ok {
+		if acct != "" {
+			o.PublishFP = fingerprint("codex-account", acct)
+			o.PublishFPKind = "account"
+		}
+		return o
+	}
+	headers := map[string]string{"Authorization": "Bearer " + token}
+	if acct != "" {
+		headers["ChatGPT-Account-Id"] = acct
+	}
+	o := (HTTPProvider{ID: "codex", URL: "https://chatgpt.com/backend-api/wham/usage", Headers: headers, Client: client}).Fetch(ctx)
+	if acct != "" {
+		o.PublishFP = fingerprint("codex-account", acct)
+		o.PublishFPKind = "account"
+	}
+	return o
 }
 
 func commandCodeToken(home string) string {
@@ -1269,6 +1319,39 @@ func chooseOAuth(file, keychain map[string]any, now time.Time) map[string]any {
 		return keychain
 	}
 	return file
+}
+
+// headerFloat parses a numeric response header; absent or unparsable is nil,
+// never a guessed value.
+func headerFloat(header http.Header, name string) *float64 {
+	if header == nil {
+		return nil
+	}
+	s := strings.TrimSpace(header.Get(name))
+	if s == "" {
+		return nil
+	}
+	f, e := strconv.ParseFloat(s, 64)
+	if e != nil {
+		return nil
+	}
+	return &f
+}
+
+// anyFloat accepts a JSON number or a numeric string (the codex credits
+// balance has been observed as "0").
+func anyFloat(value any) *float64 {
+	if s, ok := value.(string); ok {
+		f, e := strconv.ParseFloat(strings.TrimSpace(s), 64)
+		if e != nil {
+			return nil
+		}
+		return &f
+	}
+	if n, ok := finiteNumber(value); ok {
+		return &n
+	}
+	return nil
 }
 
 func finiteNumber(value any) (float64, bool) {
