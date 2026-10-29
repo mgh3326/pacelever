@@ -812,7 +812,10 @@ func fetchDevinWeb(ctx context.Context, token, org string, client HTTPDoer, now 
 		return Observation{ID: "devin", Error: "usage request failed", ErrorKind: "network"}
 	}
 	if resp.Status != 200 {
-		return statusObservation("devin", resp.Status, resp.Header, now(), "auth_failed", "devin authentication failed; set DEVIN_BEARER_TOKEN and pools.devin.org_id", 0)
+		if resp.Status == 401 || resp.Status == 403 {
+			return statusObservation("devin", resp.Status, resp.Header, now(), "auth_failed", "devin authentication failed; set DEVIN_BEARER_TOKEN and pools.devin.org_id", 0)
+		}
+		return statusObservation("devin", resp.Status, resp.Header, now(), "", "", 0)
 	}
 	if resp.ParseError {
 		return Observation{ID: "devin", Error: "invalid usage JSON", ErrorKind: "parse_error"}
@@ -883,6 +886,9 @@ func devinWindow(percentage, resetValue, nestedValue any) (float64, string, bool
 	return 0, "", false
 }
 
+// devinUsedPercent applies the reference convention: a value below one is a
+// fraction (0.12 is 12%), while exactly one is one percent. devinRemainingPercent
+// is intentionally inclusive at one, matching ClaudeBar's devin-quota.js.
 func devinUsedPercent(v any) (float64, bool) {
 	n, ok := devinNumber(v)
 	if !ok || n < 0 {

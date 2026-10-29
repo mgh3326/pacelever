@@ -73,6 +73,27 @@ func TestDevinWebRemainingPercentBoundary(t *testing.T) {
 	}
 }
 
+func TestDevinWebUsedPercentBoundary(t *testing.T) {
+	// The reference treats a value below one as a fraction, so used_percent 1
+	// is one percent rather than a saturation reading.
+	o := parseDevin(mustJSON(t, `{"quota_usage":{"daily_quota":{"used_percent":1},"weekly_quota":{"used_percent":0.5}}}`))
+	if o.Error != "" || len(o.Buckets) != 2 {
+		t.Fatalf("devin used boundary observation %+v", o)
+	}
+	if !pctClose(o.Buckets[0].UsedPct, 1) || !pctClose(o.Buckets[1].UsedPct, 50) {
+		t.Fatalf("devin used boundary buckets %+v", o.Buckets)
+	}
+}
+
+func TestDevinWebServerErrorIsNotAuth(t *testing.T) {
+	o := fetchDevinWeb(context.Background(), "fixture-token", "org-fixture", doFunc(func(*http.Request) (*http.Response, error) {
+		return response(500, `{}`), nil
+	}), fixedNow)
+	if o.ErrorKind == "auth_failed" || strings.Contains(o.Error, "DEVIN_BEARER_TOKEN") {
+		t.Fatalf("server error reported as authentication: %+v", o)
+	}
+}
+
 func TestDevinWebHidesDailyQuota(t *testing.T) {
 	o := parseDevin(mustJSON(t, `{"hide_daily_quota":true,"daily_percentage":80,"weekly_percentage":30}`))
 	if o.Error != "" || len(o.Buckets) != 1 || o.Buckets[0].Window != "7d" || !pctClose(o.Buckets[0].UsedPct, 30) {
