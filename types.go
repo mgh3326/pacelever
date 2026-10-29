@@ -35,6 +35,9 @@ type Bucket struct {
 	Horizon  string   `json:"horizon"`
 	Note     string   `json:"note,omitempty"`
 	Locked   bool     `json:"locked,omitempty"`
+	// RolledOver marks a bucket whose reset passed between measurement and
+	// use: the window restarted, so the reading is 0% and unmeasured.
+	RolledOver bool `json:"rolled_over,omitempty"`
 }
 type Observation struct {
 	Degraded       bool                `json:"degraded,omitempty"`

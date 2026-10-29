@@ -480,10 +480,10 @@ func TestSharedQuotaHTTPWire(t *testing.T) {
 func TestSharedQuotaClockSkew(t *testing.T) {
 	now := time.Now().UTC()
 	key := sharedTestKey
-	if o, ok := sharedAuto(sampleShared(now.Add(20*time.Second)), "grok", key, now, 5*time.Minute); !ok || o.Stale || o.AgeS == nil || *o.AgeS != 0 {
+	if o, ok := sharedAuto(sampleShared(now.Add(20*time.Second)), "grok", key, now, 5*time.Minute, false); !ok || o.Stale || o.AgeS == nil || *o.AgeS != 0 {
 		t.Fatal("small clock skew invalidated fresh observation")
 	}
-	if _, ok := sharedAuto(sampleShared(now.Add(2*time.Minute)), "grok", key, now, 5*time.Minute); ok {
+	if _, ok := sharedAuto(sampleShared(now.Add(2*time.Minute)), "grok", key, now, 5*time.Minute, false); ok {
 		t.Fatal("unbounded future observation accepted")
 	}
 }
@@ -623,5 +623,107 @@ func TestPresenceUsesConfiguredHostID(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.presence) != 1 || f.presence[0].HostID != "desktop" {
 		t.Fatalf("presence %+v", f.presence)
+	}
+}
+
+// A stale shared observation keeps windows whose reset is still in the future;
+// a window whose reset already passed restarted and is kept as a marked 0%
+// rollover instead of dropping the whole last-good reading.
+func TestSharedAutoStaleKeepsUnexpiredBuckets(t *testing.T) {
+	now := testNow
+	past := now.Add(-time.Hour)
+	future := now.Add(120 * time.Hour)
+	key := "claude:0123456789abcdef"
+	x := &SharedObservation{Kind: "auto", MeasuredAt: now.Add(-2 * time.Hour), Buckets: []SharedBucket{
+		{Window: "5h", UsedPct: 55, ResetsAt: &past, Scope: "account"},
+		{Window: "7d", UsedPct: 8, ResetsAt: &future, Scope: "account"},
+	}}
+	if _, ok := sharedAuto(x, "claude", key, now, 365*24*time.Hour, false); ok {
+		t.Fatal("fresh path accepted an expired reset")
+	}
+	o, ok := sharedAuto(x, "claude", key, now, 365*24*time.Hour, true)
+	if !ok || len(o.Buckets) != 2 {
+		t.Fatalf("stale path dropped unexpired buckets: %+v", o)
+	}
+	rolled := o.Buckets[0]
+	if rolled.Window != "5h" || !rolled.RolledOver || rolled.UsedPct == nil || *rolled.UsedPct != 0 || rolled.ResetsAt != "" || rolled.Note == "" {
+		t.Fatalf("expired 5h window not marked rolled over: %+v", rolled)
+	}
+	kept := o.Buckets[1]
+	if kept.Window != "7d" || kept.RolledOver || kept.UsedPct == nil || *kept.UsedPct != 8 || kept.ResetsAt == "" {
+		t.Fatalf("valid 7d window changed: %+v", kept)
+	}
+	// With every reset still in the future the stale path is unchanged.
+	future5h := now.Add(3 * time.Hour)
+	x.Buckets[0].ResetsAt = &future5h
+	o, ok = sharedAuto(x, "claude", key, now, 365*24*time.Hour, true)
+	if !ok || len(o.Buckets) != 2 || o.Buckets[0].RolledOver || o.Buckets[1].RolledOver || *o.Buckets[0].UsedPct != 55 {
+		t.Fatalf("all-valid observation changed: %+v", o)
+	}
+}
+
+// The shared fail path after a rate-limited probe returns the last good
+// reading marked stale, with the expired window rolled over, and the gate
+// accepts it for a pool far from its limit.
+func TestSharedQuotaStaleKeepsUnexpiredBuckets(t *testing.T) {
+	now := time.Now().UTC()
+	past := now.Add(-time.Hour)
+	future := now.Add(120 * time.Hour)
+	f := &fakeHK{latest: SharedLatest{Observation: &SharedObservation{Kind: "auto", MeasuredAt: now.Add(-2 * time.Hour), Buckets: []SharedBucket{
+		{Window: "5h", UsedPct: 55, ResetsAt: &past, Scope: "account"},
+		{Window: "7d", UsedPct: 8, ResetsAt: &future, Scope: "account"},
+	}}}}
+	c := sharedCollector(t, f)
+	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation {
+		return Observation{Error: "usage HTTP 429", ErrorKind: "rate_limited"}
+	})
+	o := collectShared(t, c)
+	if !o.Stale || o.ErrorKind != "rate_limited" || len(o.Buckets) != 2 {
+		t.Fatalf("stale observation %+v", o)
+	}
+	if !o.Buckets[0].RolledOver || *o.Buckets[0].UsedPct != 0 || o.Buckets[0].ResetsAt != "" {
+		t.Fatalf("expired 5h window not rolled over: %+v", o.Buckets[0])
+	}
+	if o.Buckets[1].RolledOver || *o.Buckets[1].UsedPct != 8 || o.Buckets[1].ResetsAt == "" {
+		t.Fatalf("valid 7d window lost: %+v", o.Buckets[1])
+	}
+	d := Gate(Inputs{Now: now, Observations: []Observation{o}}, Request{Profile: "grok-hi"})
+	if !d.OK || !d.StaleAccepted {
+		t.Fatalf("gate refused a pool far from its limit: %+v", d)
+	}
+}
+
+// A required window that rolled over satisfies stale acceptance; a window
+// missing entirely still does not.
+func TestGateStaleRolledOverWindowAccepted(t *testing.T) {
+	o := observation("claude", 8)
+	o.Buckets[0].UsedPct = Pct(0)
+	o.Buckets[0].ResetsAt = ""
+	o.Buckets[0].RolledOver = true
+	o.Buckets[0].Note = rolloverNote
+	o.Stale = true
+	o.Error = "usage HTTP 429"
+	o.ErrorKind = "rate_limited"
+	o.AccountFPMatch = ptr(true)
+	o.AgeS = ptr(60.0)
+	d := Gate(Inputs{Now: testNow, Observations: []Observation{o}}, Request{Profile: "sonnet"})
+	if !d.OK || !d.StaleAccepted {
+		t.Fatalf("rolled-over 5h refused: %+v", d)
+	}
+	o.Buckets = o.Buckets[1:]
+	if d = Gate(Inputs{Now: testNow, Observations: []Observation{o}}, Request{Profile: "sonnet"}); d.ExitCode != Unmeasurable {
+		t.Fatalf("missing required window accepted: %+v", d)
+	}
+	// An expired reset without the rollover mark does not satisfy the window:
+	// its stale reading must not stand in for a restarted one.
+	o = observation("claude", 90)
+	o.Buckets[0].ResetsAt = testNow.Add(-time.Hour).Format(time.RFC3339)
+	o.Stale = true
+	o.Error = "usage HTTP 429"
+	o.ErrorKind = "rate_limited"
+	o.AccountFPMatch = ptr(true)
+	o.AgeS = ptr(60.0)
+	if d = Gate(Inputs{Now: testNow, Observations: []Observation{o}}, Request{Profile: "sonnet"}); d.ExitCode != Unmeasurable {
+		t.Fatalf("unmarked expired reset satisfied a required window: %+v", d)
 	}
 }

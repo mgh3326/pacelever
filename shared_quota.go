@@ -358,10 +358,36 @@ func (c Collector) sharedFallback(pool, key, kind string, entry CacheEntry, now 
 	if entry.FetchedAt > 0 && len(o.Buckets) > 0 {
 		o.FetchedAt = entry.FetchedAt
 		o.AgeS = ptr(now.Sub(time.UnixMilli(int64(entry.FetchedAt * 1000))).Seconds())
+		o.Buckets = rolloverExpired(o.Buckets, now)
 	}
 	return o
 }
-func sharedAuto(x *SharedObservation, pool, key string, now time.Time, ttl time.Duration) (Observation, bool) {
+// rolloverNote marks a bucket whose reset passed between measurement and use:
+// the window restarted, so the reading is 0% and the next reset is unknown.
+const rolloverNote = "reset passed; window restarted at 0%, unmeasured"
+
+// rolloverExpired rewrites buckets whose reset already passed in a stale
+// last-good observation. The window restarted since the measurement, so the
+// old reading no longer applies; the bucket stays as a 0% marker instead of
+// invalidating the windows that still hold.
+func rolloverExpired(buckets []Bucket, now time.Time) []Bucket {
+	out := make([]Bucket, 0, len(buckets))
+	for _, b := range buckets {
+		if reset, e := ParseTime(b.ResetsAt); e == nil && !reset.After(now) {
+			b.UsedPct = Pct(0)
+			b.ResetsAt = ""
+			b.RolledOver = true
+			b.Note = rolloverNote
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+// sharedAuto converts a shared observation. With stale set (the last-good path
+// after a failed probe), a bucket whose reset already passed is kept as a
+// rolled-over 0% marker instead of invalidating the whole observation.
+func sharedAuto(x *SharedObservation, pool, key string, now time.Time, ttl time.Duration, stale bool) (Observation, bool) {
 	if x == nil || x.Kind != "auto" || x.MeasuredAt.IsZero() {
 		return Observation{}, false
 	}
@@ -377,14 +403,20 @@ func sharedAuto(x *SharedObservation, pool, key string, now time.Time, ttl time.
 		if !validPct(&b.UsedPct) || (b.Scope != "account" && b.Scope != "model" && b.Scope != "group") {
 			return Observation{}, false
 		}
-		reset := ""
+		bucket := Bucket{Label: b.Window, Window: b.Window, UsedPct: ptr(b.UsedPct), Scope: Scope{Kind: b.Scope, Name: b.Model}, Horizon: horizon(b.Window)}
 		if b.ResetsAt != nil {
 			if !b.ResetsAt.After(now) {
-				return Observation{}, false
+				if !stale {
+					return Observation{}, false
+				}
+				bucket.UsedPct = Pct(0)
+				bucket.RolledOver = true
+				bucket.Note = rolloverNote
+			} else {
+				bucket.ResetsAt = b.ResetsAt.Format(time.RFC3339Nano)
 			}
-			reset = b.ResetsAt.Format(time.RFC3339Nano)
 		}
-		o.Buckets = append(o.Buckets, Bucket{Label: b.Window, Window: b.Window, UsedPct: ptr(b.UsedPct), ResetsAt: reset, Scope: Scope{Kind: b.Scope, Name: b.Model}, Horizon: horizon(b.Window)})
+		o.Buckets = append(o.Buckets, bucket)
 	}
 	return o, true
 }
@@ -417,7 +449,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		if !reachable {
 			return c.sharedFallback(pool, key, kind, entry, now)
 		}
-		o, _ := sharedAuto(latest.Observation, pool, key, c.quotaNow(), 365*24*time.Hour)
+		o, _ := sharedAuto(latest.Observation, pool, key, c.quotaNow(), 365*24*time.Hour, true)
 		o.ID = pool
 		o.Stale = true
 		o.ErrorKind = kind
@@ -443,7 +475,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	if pool == "anthropic-api" {
 		return finish(fail("manual_only"))
 	}
-	if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL()); ok {
+	if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(), false); ok {
 		_ = updateSnapshot(c.cacheFile(), pool, o, time.UnixMilli(int64(o.FetchedAt*1000)), entry)
 		return finish(o)
 	}
@@ -472,7 +504,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 			reachable = false
 			return fail("shared_unavailable")
 		}
-		if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL()); ok {
+		if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(), false); ok {
 			return finish(o)
 		}
 		return finish(fail("shared_pending"))
@@ -489,7 +521,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		reachable = false
 		return fail("shared_unavailable")
 	}
-	if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL()); ok {
+	if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(), false); ok {
 		return finish(o)
 	}
 	provider := c.Providers[pool]
@@ -504,7 +536,11 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		return finish(fail("account_mismatch"))
 	}
 	if observed.Error != "" || observed.Warning != "" || observed.Stale || len(observed.Buckets) == 0 {
-		return finish(fail("probe_failed"))
+		kind := observed.ErrorKind
+		if kind == "" {
+			kind = "probe_failed"
+		}
+		return finish(fail(kind))
 	}
 	at := c.quotaNow()
 	x := SharedObservation{Kind: "auto", MeasuredAt: at, Plan: observed.Plan, Buckets: []SharedBucket{}}
@@ -526,7 +562,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		reachable = false
 		return finish(fail("shared_publish_failed"))
 	}
-	o, ok := sharedAuto(&x, pool, key, at, c.Config.Quota.freshTTL())
+	o, ok := sharedAuto(&x, pool, key, at, c.Config.Quota.freshTTL(), false)
 	if !ok {
 		return finish(fail("probe_failed"))
 	}
