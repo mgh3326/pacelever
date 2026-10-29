@@ -8,17 +8,22 @@ effort, pool, grade and gate. `Gate` checks roles, subscription, policy and quot
 configuration, launch processes, send messages or write state.
 
 The CLI owns configuration, collection, persistence and rendering. HTTP providers
-return only measurement fields. The remaining PTY providers (Devin, Grok, Kimi
-and Kiro) use an isolated work directory, a 50×200 terminal, bounded output and
-a process-group deadline. No raw screen, credential or HTTP response body is
+return only measurement fields. The remaining PTY providers (Devin, Kimi and
+Kiro) use an isolated work directory, a 50×200 terminal, bounded output and a
+process-group deadline. No raw screen, credential or HTTP response body is
 retained in an error or quota snapshot.
 
-Claude, Codex, ClinePass and Command Code use provider HTTP APIs. A provider
-`429` carries `Retry-After` into the negative cache; Claude uses a 300-second
-default when the header is missing or zero, keeps a 900-second fresh cache, and
-serves its last good value as stale rather than scraping a screen. Command Code
-reads the saved API key and calls `whoami` then `credits`, so a refused
-credential is an immediate `auth_failed` rather than a probe timeout.
+Claude, Codex, ClinePass, Command Code, Grok and Antigravity use provider HTTP
+APIs. A provider `429` carries `Retry-After` into the negative cache; Claude uses
+a 300-second default when the header is missing or zero, keeps a 900-second fresh
+cache, and serves its last good value as stale rather than scraping a screen.
+Command Code reads the saved API key and calls `whoami` then `credits`, so a
+refused credential is an immediate `auth_failed` rather than a probe timeout.
+Grok reads the CLI billing endpoint, and Antigravity reads the cloud quota
+summary (weekly and five-hour buckets) with the `agy` login. Antigravity buckets
+keep their metered group (gemini or Claude/GPT); a profile is never gated on
+another group's numbers. Codex windows are labelled by `limit_window_seconds`,
+never by primary/secondary position.
 
 ## Admission contract
 
@@ -97,7 +102,7 @@ separate `bench push-catalog` operation.
 | Policy list/set/clear/profile/setting | Implemented; preserves unrelated config keys |
 | Boost, subscribed, cutoff, plan, price, capacity, inflight reserve | Read-compatible pool policy |
 | Weekly pace promotion | Implemented for every paid pool; ranking only |
-| Eight retained providers | HTTP/PTY implementations; PTY for Devin, Grok, Kimi and Kiro |
+| Nine retained providers | HTTP-first implementations; PTY only for Devin, Kimi and Kiro |
 | SWE-2 Free model scope | Exact-rung fresh observation; free first |
 | Manual set/list/clear, credit observations | Implemented; legacy JSON read-compatible |
 | Bench catalog, push-catalog, bench grades | Implemented against `/v1/bench/*`; dry-run artifacts available |

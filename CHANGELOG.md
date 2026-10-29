@@ -4,10 +4,12 @@
 
 - Read Command Code quota over HTTP (`whoami` then `credits`) and retire its PTY
   probe; refused credentials are `auth_failed` instead of a probe timeout.
+- Read Grok billing over HTTP and add Antigravity's cloud quota summary as `agy`.
 - Claude keeps a 900-second cache, honours `Retry-After` with a 300-second
   default, and serves its last good value as stale after a rate limit.
 - ClinePass accepts `CLINEPASS_API_KEY` and
   `~/.cline/data/settings/providers.json`.
+- Publish a separate host-presence record after a successful shared measurement.
 
 ## v0.1.1
 

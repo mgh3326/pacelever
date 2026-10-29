@@ -4,8 +4,8 @@
 
 pacelever is a Go CLI and library for quota-aware AI work. It replaces scopefuel's
 core while keeping the command contract that spawners and quota collectors use.
-It supports Claude, Codex, Devin, Kimi, Grok, Kiro, ClinePass and Command Code,
-plus manual observations for credit balances and unavailable probes.
+It supports Claude, Codex, Devin, Kimi, Grok, Kiro, ClinePass, Command Code and
+Antigravity, plus manual observations for credit balances and unavailable probes.
 
 ```sh
 CGO_ENABLED=0 go build -o dist/pacelever ./cmd/pacelever

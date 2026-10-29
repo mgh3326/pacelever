@@ -137,6 +137,8 @@ func ttlFor(pool string) time.Duration {
 	switch pool {
 	case "claude":
 		return 900 * time.Second
+	case "agy":
+		return 300 * time.Second
 	case "devin", "commandcode":
 		return 180 * time.Second
 	}

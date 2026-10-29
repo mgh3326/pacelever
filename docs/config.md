@@ -8,8 +8,8 @@ only the requested values. Comments and formatting may be rewritten.
 
 Unknown pool sections are ignored with a warning naming the section. A malformed
 configuration is reported without echoing values. Retained automatic pools are
-`claude`, `codex`, `devin`, `kimi`, `grok`, `kiro`, `clinepass`, `commandcode`.
-`anthropic-api` is a manual credit pool for `pi-*` profiles.
+`claude`, `codex`, `devin`, `kimi`, `grok`, `kiro`, `clinepass`, `commandcode`
+and `agy`. `anthropic-api` is a manual credit pool for `pi-*` profiles.
 
 ```toml
 [pools.claude]
@@ -71,15 +71,17 @@ Claude reads the existing credentials under `CLAUDE_CONFIG_DIR` or the default
 Claude directory, with a read-only macOS Keychain fallback. Codex reads
 `$CODEX_HOME/auth.json` or its default directory. Command Code reads
 `COMMAND_CODE_API_KEY` or `COMMANDCODE_API_KEY`, then the API key saved by `cmd`
-in `~/.commandcode/auth.json`. ClinePass uses `CLINE_API_KEY` or
-`CLINEPASS_API_KEY`, then `~/.cline/data/settings/providers.json`, the existing
-opencode credential store, or its API-key file. Credentials remain in memory and
-request headers; errors never include their values or HTTP bodies.
+in `~/.commandcode/auth.json`. Grok uses the login saved by the `grok` CLI in
+`$GROK_HOME/auth.json` or its default directory. Antigravity uses the login saved
+by `agy` in `~/.gemini/antigravity-cli/antigravity-oauth-token`. ClinePass uses
+`CLINE_API_KEY` or `CLINEPASS_API_KEY`, then `~/.cline/data/settings/providers.json`,
+the existing opencode credential store, or its API-key file. Credentials remain
+in memory and request headers; errors never include their values or HTTP bodies.
 
-Devin, Grok, Kimi and Kiro still read the existing authenticated CLIs. Set
+Devin, Kimi and Kiro still read the existing authenticated CLIs. Set
 `PACELEVER_<POOL>_BIN` to an explicit executable; the corresponding
-`SCOPEFUEL_<POOL>_BIN` remains supported. Kimi and Grok respect their existing
-location selectors. The tool does not install CLIs or initiate login flows.
+`SCOPEFUEL_<POOL>_BIN` remains supported. Kimi respects its existing location
+selector. The tool does not install CLIs or initiate login flows.
 
 A provider `429` honours `Retry-After` (seconds or an HTTP date). Claude uses a
 300-second wait when the header is missing or zero and keeps a 900-second fresh

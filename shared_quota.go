@@ -68,6 +68,22 @@ type ObservationSource interface {
 }
 type HKObservationSource struct{ Client BenchClient }
 
+// PresenceRecord is host placement metadata. It is deliberately separate from
+// shared quota observations, which carry no host identity.
+type PresenceRecord struct {
+	HostID     string    `json:"host_id"`
+	AccountKey string    `json:"account_key"`
+	LastSeen   time.Time `json:"last_seen"`
+}
+type PresenceSource interface {
+	PublishPresence(context.Context, PresenceRecord) error
+}
+
+func presencePath() string { return "/v1/quota/presence" }
+func (s HKObservationSource) PublishPresence(ctx context.Context, r PresenceRecord) error {
+	return s.Client.Send(ctx, "PUT", presencePath(), "quota_share", r, nil)
+}
+
 func quotaPath(key, suffix string) string { return "/v1/quota/accounts/" + key + "/" + suffix }
 func (s HKObservationSource) Latest(ctx context.Context, key string) (SharedLatest, error) {
 	var out SharedLatest
@@ -146,6 +162,35 @@ func (c Collector) accountKey(pool string) (string, bool) {
 	}
 	return key, allowed
 }
+
+// presenceHostID is stable per host and never the raw hostname when an explicit
+// identifier is absent.
+func presenceHostID() string {
+	if v := strings.TrimSpace(firstEnv("PACELEVER_HOST_ID", "HANDOFFKEEP_HOST_ID")); v != "" {
+		return safeHost(v)
+	}
+	host, _ := os.Hostname()
+	if host == "" {
+		return ""
+	}
+	return "host-" + fingerprint("host", host)
+}
+
+// publishPresence records where an account was measured. It is asynchronous and
+// bounded, so it never adds latency to a collection or changes its verdict.
+func (c Collector) publishPresence(source ObservationSource, key string, at time.Time) {
+	publisher, ok := source.(PresenceSource)
+	host := presenceHostID()
+	if !ok || !accountKeyRE.MatchString(key) || host == "" {
+		return
+	}
+	record := PresenceRecord{HostID: host, AccountKey: key, LastSeen: at}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = publisher.PublishPresence(ctx, record)
+	}()
+}
 func holderToken() (string, error) {
 	var b [16]byte
 	_, e := rand.Read(b[:])
@@ -215,7 +260,7 @@ func sharedAuto(x *SharedObservation, pool, key string, now time.Time, ttl time.
 	}
 	o := Observation{ID: pool, Plan: x.Plan, Source: "handoffkeep", FetchedAt: float64(x.MeasuredAt.UnixMilli()) / 1000, AgeS: ptr(age.Seconds()), AccountFP: strings.SplitN(key, ":", 2)[1], AccountFPKind: "account", AccountFPMatch: ptr(true)}
 	for _, b := range x.Buckets {
-		if !validPct(&b.UsedPct) || (b.Scope != "account" && b.Scope != "model") {
+		if !validPct(&b.UsedPct) || (b.Scope != "account" && b.Scope != "model" && b.Scope != "group") {
 			return Observation{}, false
 		}
 		reset := ""
@@ -366,6 +411,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		reachable = false
 		return finish(fail("shared_publish_failed"))
 	}
+	c.publishPresence(source, key, at)
 	o, ok := sharedAuto(&x, pool, key, at, c.Config.Quota.freshTTL())
 	if !ok {
 		return finish(fail("probe_failed"))

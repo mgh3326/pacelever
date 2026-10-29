@@ -1,7 +1,6 @@
 package pacelever
 
 import (
-	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -77,27 +76,6 @@ func ParseScreen(pool, text string, now time.Time) Observation {
 			}
 		}
 		o.Buckets = []Bucket{screenBucket("30d", 100*used/total, reset)}
-	case "grok":
-		m := regexp.MustCompile(`(?i)Weekly limit[^\n%]*?([0-9]+(?:\.[0-9]+)?)\s*%`).FindStringSubmatch(clean)
-		if m == nil {
-			return fail()
-		}
-		reset := resetIn(clean, now)
-		if reset == "" {
-			m := regexp.MustCompile(`(?i)Next reset[^\n]*?([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{1,2}:\d{2})`).FindStringSubmatch(clean)
-			if m == nil {
-				return fail()
-			}
-			t, e := time.ParseInLocation("2006 January 2 15:04", fmt.Sprintf("%d %s %s %s", now.In(time.Local).Year(), m[1], m[2], m[3]), time.Local)
-			if e != nil {
-				return fail()
-			}
-			if !t.After(now) {
-				t = t.AddDate(1, 0, 0)
-			}
-			reset = t.UTC().Format(time.RFC3339)
-		}
-		o.Buckets = []Bucket{screenBucket("7d", number(m[1]), reset)}
 	case "kimi", "devin":
 		for _, line := range strings.Split(clean, "\n") {
 			lower := strings.ToLower(line)
