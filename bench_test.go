@@ -155,3 +155,24 @@ func TestBundledCatalogMonotonic(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestDecodeCatalogInfersAgyGroupForNewProfiles(t *testing.T) {
+	row := func(profile, model string) map[string]any {
+		return map[string]any{"profile": profile, "effort": "", "model_id": model, "pool": "agy", "grade": "B", "gate": "default"}
+	}
+	rows, err := decodeCatalog([]map[string]any{
+		row("agy-new-flash", "gemini-9-flash-high"),
+		row("agy-new-sonnet", "claude-sonnet-4-6"),
+		row("agy-new-oss", "gpt-oss-120b-medium"),
+		row("agy-new-mystery", "mystery-model"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"agy-new-flash": "gemini", "agy-new-sonnet": "3p", "agy-new-oss": "3p", "agy-new-mystery": ""}
+	for _, r := range rows {
+		if r.Group != want[r.Profile] {
+			t.Errorf("%s group=%q want %q", r.Profile, r.Group, want[r.Profile])
+		}
+	}
+}

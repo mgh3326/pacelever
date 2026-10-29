@@ -292,6 +292,14 @@ func decodeCatalog(rows []map[string]any) ([]CatalogRow, error) {
 				break
 			}
 		}
+		// A remote agy row without a bundled base (a new profile) still
+		// meters against its account group, inferred from the model id;
+		// an unrecognised id stays ungrouped and so fails closed.
+		if r.Pool == "agy" && r.Group == "" {
+			if g := agyGroup(r.ModelID, ""); g != "unknown" {
+				r.Group = g
+			}
+		}
 		out = append(out, r)
 	}
 	if len(out) == 0 {
