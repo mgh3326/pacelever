@@ -81,7 +81,10 @@ Claude directory, with a read-only macOS Keychain fallback. Codex reads
 `$CODEX_HOME/auth.json` or its default directory. Command Code reads
 `COMMAND_CODE_API_KEY` or `COMMANDCODE_API_KEY`, then the API key saved by `cmd`
 in `~/.commandcode/auth.json`. Grok uses the login saved by the `grok` CLI in
-`$GROK_HOME/auth.json` or its default directory. Antigravity uses the login saved
+`$GROK_HOME/auth.json` or its default directory; a login that expired or is
+refused is refreshed once in memory with its saved `refresh_token` at the
+login's own OIDC issuer, and the CLI's `auth.json` is never written back.
+Antigravity uses the login saved
 by `agy` in `~/.gemini/antigravity-cli/antigravity-oauth-token`, falling back to
 the read-only macOS Keychain entry, and a refused token is refreshed once by
 running `agy models` when the `agy` CLI is installed. ClinePass uses

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Refresh an expired or refused Grok login in memory with the `refresh_token`
+  and OIDC issuer from `auth.json`, and read the optional `/v1/settings` tier
+  step; product usage, the on-demand cap share and the prepaid balance become
+  their own buckets. The CLI's `auth.json` is never written back.
 - Track the manual `anthropic-api` organisation credit as a balance with an
   expiry: `manual set --credit-balance/--credit-total/--expires` shows balance,
   days left and the paced daily budget, flags `WASTE` when that budget exceeds
