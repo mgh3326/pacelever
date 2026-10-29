@@ -49,18 +49,6 @@ func TestProviderErrorsRedacted(t *testing.T) {
 		t.Fatal("unsafe HTTP error")
 	}
 }
-func TestCommandcodeExplicitBinary(t *testing.T) {
-	isolate(t)
-	cfg := Config{Pools: map[string]PoolPolicy{"commandcode": {Bin: "/configured/cmd"}}}
-	if ResolveBinary("commandcode", cfg) != "/configured/cmd" {
-		t.Fatal("config ignored")
-	}
-	t.Setenv("PACELEVER_COMMANDCODE_BIN", "/explicit/cmd")
-	if ResolveBinary("commandcode", cfg) != "/explicit/cmd" {
-		t.Fatal("explicit path ignored")
-	}
-}
-
 func TestOAuthChoiceWithDecodedNumbers(t *testing.T) {
 	expired := map[string]any{"accessToken": "fixture-file-placeholder", "expiresAt": json.Number("1")}
 	fresh := map[string]any{"accessToken": "fixture-keychain-placeholder", "expiresAt": float64(testNow.Add(time.Hour).UnixMilli())}

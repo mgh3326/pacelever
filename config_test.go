@@ -20,7 +20,7 @@ func isolate(t *testing.T) {
 func TestConfigLegacy(t *testing.T) {
 	isolate(t)
 	legacy := filepath.Join(configBase(), "scopefuel", "config.toml")
-	b := []byte("[pools.agy]\nsubscribed = false\n[pools.claude]\nclass = 'preserve'\nuntil = 2027-01-01\nboost = 3\n[pools.codex]\nsubscribed = false\n[profiles.sonnet]\nsubscribed = true\n[bench]\nallow_plaintext_catalog = true\n[custom]\nretain = 'keep-me'\n")
+	b := []byte("[pools.retired]\nsubscribed = false\n[pools.claude]\nclass = 'preserve'\nuntil = 2027-01-01\nboost = 3\n[pools.codex]\nsubscribed = false\n[profiles.sonnet]\nsubscribed = true\n[bench]\nallow_plaintext_catalog = true\n[custom]\nretain = 'keep-me'\n")
 	if e := AtomicWrite(legacy, b); e != nil {
 		t.Fatal(e)
 	}
@@ -28,7 +28,7 @@ func TestConfigLegacy(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(c.Warnings) != 1 || !strings.Contains(c.Warnings[0], "agy") {
+	if len(c.Warnings) != 1 || !strings.Contains(c.Warnings[0], "retired") {
 		t.Fatal(c.Warnings)
 	}
 	if c.Pool("claude", testNow).Class != "preserve" {

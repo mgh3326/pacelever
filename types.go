@@ -56,6 +56,9 @@ type Observation struct {
 	AccountFPMatch *bool               `json:"account_fp_match,omitempty"`
 	PublishFP      string              `json:"publish_fp,omitempty"`
 	PublishFPKind  string              `json:"publish_fp_kind,omitempty"`
+	// RetryAfterS carries a server-declared 429 wait to the negative cache. It
+	// is never serialized into snapshots or published observations.
+	RetryAfterS float64 `json:"-"`
 }
 type Request struct {
 	TaskID          string `json:"task_id,omitempty"`

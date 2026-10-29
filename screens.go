@@ -53,8 +53,6 @@ func ParseScreen(pool, text string, now time.Time) Observation {
 		return fail()
 	}
 	switch pool {
-	case "commandcode":
-		return parseCommandcode(clean, now)
 	case "kiro":
 		re := regexp.MustCompile(`(?i)Credits\s*\(\s*([\d.,]+)\s+of\s+([\d.,]+)`)
 		m := re.FindStringSubmatch(clean)
@@ -139,70 +137,6 @@ func ParseScreen(pool, text string, now time.Time) Observation {
 	}
 	if len(o.Buckets) == 0 {
 		return fail()
-	}
-	for _, b := range o.Buckets {
-		if !validPct(b.UsedPct) {
-			return fail()
-		}
-	}
-	return o
-}
-func parseCommandcode(clean string, now time.Time) Observation {
-	o := Observation{ID: "commandcode", Source: "cli:/usage", PoolClass: "spend"}
-	fail := func() Observation {
-		return Observation{ID: "commandcode", Source: "cli:/usage", Error: "cmd usage panel missing a complete monthly, 5-hour or weekly row", ErrorKind: "parse_error"}
-	}
-	five := regexp.MustCompile(`(?i)\b5[- ]?hour\b`).FindStringIndex(clean)
-	week := regexp.MustCompile(`(?i)\bweekly\b`).FindStringIndex(clean)
-	renew := regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*days?\s+to\s+renew`).FindStringSubmatchIndex(clean)
-	if five == nil || week == nil || renew == nil {
-		return fail()
-	}
-	// Each percentage belongs to its own row; a missing value must not borrow
-	// the next row's number or the previous row's reset duration.
-	monthly := clean[:renew[0]]
-	for _, m := range resetsIn.FindAllStringIndex(monthly, -1) {
-		monthly = monthly[m[1]:]
-		break
-	}
-	vals := percent.FindAllStringSubmatch(monthly, -1)
-	if len(vals) == 0 {
-		return fail()
-	}
-	monthlyUsed := number(vals[len(vals)-1][1])
-	days := number(clean[renew[2]:renew[3]])
-	if days <= 0 {
-		return fail()
-	}
-	o.Buckets = append(o.Buckets, screenBucket("30d", monthlyUsed, now.Add(time.Duration(days*24)*time.Hour).UTC().Format(time.RFC3339Nano)))
-	for _, row := range []struct {
-		pos    []int
-		other  []int
-		window string
-	}{{five, week, "5h"}, {week, five, "7d"}} {
-		end := len(clean)
-		if row.other[0] > row.pos[0] {
-			end = row.other[0]
-		}
-		if renew[0] > row.pos[0] && renew[0] < end {
-			end = renew[0]
-		}
-		segment := clean[row.pos[1]:end]
-		m := percent.FindStringSubmatch(segment)
-		reset := resetIn(segment, now)
-		if m == nil || reset == "" {
-			return fail()
-		}
-		used := number(m[1])
-		if strings.EqualFold(m[2], "left") || strings.EqualFold(m[2], "remaining") {
-			used = 100 - used
-		}
-		b := screenBucket(row.window, used, reset)
-		if regexp.MustCompile(`(?i)(?:usage|rate|request) limit (?:reached|exceeded)`).MatchString(segment) {
-			b.UsedPct = Pct(100)
-			b.Locked = true
-		}
-		o.Buckets = append(o.Buckets, b)
 	}
 	for _, b := range o.Buckets {
 		if !validPct(b.UsedPct) {

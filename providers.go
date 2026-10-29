@@ -1,6 +1,7 @@
 package pacelever
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,10 +10,12 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +34,13 @@ type HTTPProvider struct {
 	Headers map[string]string
 	Client  HTTPDoer
 	Now     func() time.Time
+	// RateLimitWaitS is the negative-cache wait applied when a 429 carries no
+	// usable Retry-After. Zero falls back to the collector's default backoff.
+	RateLimitWaitS float64
+	// AuthKind overrides the error kind for 401/403. AuthHint replaces the
+	// generic HTTP message without including the credential.
+	AuthKind string
+	AuthHint string
 }
 
 func (p HTTPProvider) Fetch(ctx context.Context) Observation {
@@ -57,15 +67,7 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		o.Error = fmt.Sprintf("usage HTTP %d", resp.StatusCode)
-		o.ErrorKind = "http"
-		if resp.StatusCode == 401 || resp.StatusCode == 403 {
-			o.ErrorKind = "auth"
-		}
-		if resp.StatusCode == 429 {
-			o.ErrorKind = "rate_limited"
-		}
-		return o
+		return statusObservation(p.ID, resp.StatusCode, resp.Header, p.now(), p.AuthKind, p.AuthHint, p.RateLimitWaitS)
 	}
 	var raw map[string]json.RawMessage
 	if e = json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&raw); e != nil {
@@ -148,6 +150,313 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 	}
 	return o
 }
+func (p HTTPProvider) now() time.Time {
+	if p.Now != nil {
+		return p.Now()
+	}
+	return time.Now().UTC()
+}
+
+// retryAfterSeconds reads a Retry-After header as delay-seconds or an
+// HTTP-date. Missing, zero, negative and unparseable values return 0 so the
+// caller applies its own default wait.
+func retryAfterSeconds(header string, now time.Time) float64 {
+	v := strings.TrimSpace(header)
+	if v == "" {
+		return 0
+	}
+	if n, e := strconv.ParseFloat(v, 64); e == nil {
+		if n <= 0 || math.IsNaN(n) || math.IsInf(n, 0) {
+			return 0
+		}
+		return math.Min(n, 86400)
+	}
+	if at, e := http.ParseTime(v); e == nil {
+		if d := at.Sub(now).Seconds(); d > 0 {
+			return math.Min(d, 86400)
+		}
+	}
+	return 0
+}
+
+// statusObservation is the single mapping from an HTTP status to a safe
+// observation. Response bodies and request URLs never enter the result.
+func statusObservation(id string, status int, header http.Header, now time.Time, authKind, authHint string, rateWait float64) Observation {
+	o := Observation{ID: id, Source: "usage-api"}
+	o.Error = fmt.Sprintf("usage HTTP %d", status)
+	o.ErrorKind = "http"
+	switch status {
+	case 401, 403:
+		o.ErrorKind = authKind
+		if o.ErrorKind == "" {
+			o.ErrorKind = "auth"
+		}
+		if authHint != "" {
+			o.Error = authHint
+		}
+	case 429:
+		o.ErrorKind = "rate_limited"
+		if header != nil {
+			o.RetryAfterS = retryAfterSeconds(header.Get("Retry-After"), now)
+		}
+		if o.RetryAfterS <= 0 {
+			o.RetryAfterS = rateWait
+		}
+	}
+	return o
+}
+
+type httpJSON struct {
+	Status     int
+	Header     http.Header
+	Body       map[string]any
+	ParseError bool
+}
+
+// doJSON performs one allowlisted request. It never returns the endpoint, a
+// credential or a response body in an error.
+func doJSON(ctx context.Context, client HTTPDoer, method, endpoint string, headers map[string]string, payload []byte) (httpJSON, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	}
+	var body io.Reader
+	if payload != nil {
+		body = bytes.NewReader(payload)
+	}
+	req, e := http.NewRequestWithContext(ctx, method, endpoint, body)
+	if e != nil {
+		return httpJSON{}, fmt.Errorf("invalid provider request")
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", "application/json")
+	}
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", "pacelever")
+	}
+	resp, e := client.Do(req)
+	if e != nil {
+		return httpJSON{}, fmt.Errorf("usage request failed")
+	}
+	defer resp.Body.Close()
+	out := httpJSON{Status: resp.StatusCode, Header: resp.Header}
+	// Decode every status so a caller can tell an API error from an HTML edge
+	// rejection. The body is never retained in an observation or an error.
+	if e = json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&out.Body); e != nil {
+		out.ParseError = true
+	}
+	return out, nil
+}
+
+func commandCodeStatus(status int, header http.Header, parseError bool, now time.Time) Observation {
+	if status == 403 && parseError {
+		o := statusObservation("commandcode", status, header, now, "edge_rejected", "", 0)
+		o.Error = "commandcode edge rejected the request; check the client user agent"
+		return o
+	}
+	return statusObservation("commandcode", status, header, now, "auth_failed", "commandcode authentication failed; run cmd login or set COMMAND_CODE_API_KEY", 0)
+}
+
+func fetchCommandCode(ctx context.Context, token string, client HTTPDoer, now func() time.Time) Observation {
+	if token == "" {
+		return Observation{ID: "commandcode", Error: "credentials unavailable", ErrorKind: "credentials"}
+	}
+	// The API's edge rejects generic clients; use the CLI's own user agent.
+	headers := map[string]string{"Authorization": "Bearer " + token, "User-Agent": "cmd/1.88.1"}
+	who, e := doJSON(ctx, client, "GET", "https://api.commandcode.ai/alpha/whoami?limits=1", headers, nil)
+	if e != nil {
+		return Observation{ID: "commandcode", Error: "usage request failed", ErrorKind: "network"}
+	}
+	if who.Status != 200 {
+		return commandCodeStatus(who.Status, who.Header, who.ParseError, now())
+	}
+	if who.ParseError {
+		return Observation{ID: "commandcode", Error: "invalid usage JSON", ErrorKind: "parse_error"}
+	}
+	identity := object(who.Body["data"])
+	if len(identity) == 0 {
+		identity = who.Body
+	}
+	if success, ok := identity["success"].(bool); ok && !success {
+		return Observation{ID: "commandcode", Error: "commandcode rejected the request", ErrorKind: "http"}
+	}
+	orgID := str(object(identity["org"])["id"])
+	endpoint := "https://api.commandcode.ai/alpha/billing/credits"
+	if orgID != "" {
+		endpoint += "?orgId=" + url.QueryEscape(orgID)
+	}
+	billing, e := doJSON(ctx, client, "GET", endpoint, headers, nil)
+	if e != nil {
+		return Observation{ID: "commandcode", Error: "usage request failed", ErrorKind: "network"}
+	}
+	if billing.Status != 200 {
+		return commandCodeStatus(billing.Status, billing.Header, billing.ParseError, now())
+	}
+	if billing.ParseError {
+		return Observation{ID: "commandcode", Error: "invalid usage JSON", ErrorKind: "parse_error"}
+	}
+	o := parseCommandCode(billing.Body)
+	account := str(object(identity["user"])["id"])
+	if account == "" {
+		account = orgID
+	}
+	if fp := fingerprint("commandcode-account", account); fp != "" {
+		o.PublishFP = fp
+		o.PublishFPKind = "account"
+	}
+	return o
+}
+
+func parseCommandCode(raw map[string]any) Observation {
+	o := Observation{ID: "commandcode", Source: "usage-api"}
+	data := object(raw["data"])
+	if len(data) == 0 {
+		data = raw
+	}
+	limits := object(data["windowLimits"])
+	for _, axis := range []struct{ key, window string }{{"fiveHour", "5h"}, {"weekly", "7d"}} {
+		w := object(limits[axis.key])
+		capacity, capacityOK := finiteNumber(w["cap"])
+		if !capacityOK || capacity <= 0 {
+			continue
+		}
+		used, usedOK := finiteNumber(w["used"])
+		if !usedOK || used < 0 {
+			// A malformed used value must never read as an unused window.
+			continue
+		}
+		pct, locked := 100*used/capacity, false
+		if pct > 100 {
+			// A window past its cap is exhausted, not an out-of-range percentage.
+			pct, locked = 100, true
+		}
+		if !validPct(&pct) {
+			continue
+		}
+		o.Buckets = append(o.Buckets, Bucket{Label: axis.window, Window: axis.window, UsedPct: Pct(pct), ResetsAt: resetAtValue(w["resetAt"]), Scope: Scope{Kind: "account"}, Horizon: horizon(axis.window), Locked: locked})
+	}
+	if credits := object(data["credits"]); len(credits) > 0 {
+		o.Plan = str(credits["planId"])
+		monthly, monthlyOK := finiteNumber(credits["monthlyCredits"])
+		if monthlyOK {
+			if monthly < 0 {
+				monthly = 0
+			}
+			purchased := creditAmount(credits["purchasedCredits"])
+			free := creditAmount(credits["freeCredits"])
+			remaining := monthly + purchased + free
+			if total, ok := commandCodeCreditTotal(o.Plan, monthly, purchased, free); ok && total > 0 {
+				pct := 100 * (total - remaining) / total
+				if pct < 0 {
+					pct = 0
+				}
+				if pct > 100 {
+					pct = 100
+				}
+				o.Buckets = append(o.Buckets, Bucket{Label: "30d", Window: "30d", UsedPct: Pct(pct), Scope: Scope{Kind: "account"}, Horizon: "month", Note: fmt.Sprintf("credits remaining %.2f of %.2f USD", remaining, total)})
+			} else if remaining <= 0 {
+				// An unknown plan with no balance is exhausted, not absent.
+				o.Buckets = append(o.Buckets, Bucket{Label: "credits", Window: "credit", UsedPct: Pct(100), Scope: Scope{Kind: "account"}, Locked: true, Note: "credits exhausted"})
+			} else {
+				// A positive balance with no plan ceiling is money, not a percentage.
+				o.Buckets = append(o.Buckets, Bucket{Label: "credits", Window: "credit", Scope: Scope{Kind: "account"}, Note: fmt.Sprintf("credits remaining %.2f USD", remaining)})
+			}
+		}
+	}
+	if len(o.Buckets) == 0 {
+		o.Error = "usage response has no recognized windows"
+		o.ErrorKind = "parse_error"
+	}
+	return o
+}
+
+func commandCodeCreditTotal(plan string, monthly, purchased, free float64) (float64, bool) {
+	plans := map[string]float64{
+		"individual-goat":     70,
+		"individual-provider": 15,
+		"individual-pro-v1":   80,
+		"individual-pro":      30,
+		"individual-max":      150,
+		"individual-ultra":    300,
+		"individual-go":       10,
+		"teams-pro":           40,
+	}
+	normalized := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(plan)), "_", "-")
+	best := ""
+	for name := range plans {
+		if strings.HasPrefix(normalized, name) && len(name) > len(best) {
+			best = name
+		}
+	}
+	if best == "" {
+		return 0, false
+	}
+	return math.Max(plans[best], monthly) + purchased + free, true
+}
+
+func creditAmount(v any) float64 {
+	n, ok := finiteNumber(v)
+	if !ok || n < 0 {
+		return 0
+	}
+	return n
+}
+
+func resetAtValue(v any) string {
+	switch x := v.(type) {
+	case float64:
+		return epochTime(x)
+	case json.Number:
+		n, e := x.Float64()
+		if e != nil {
+			return ""
+		}
+		return epochTime(n)
+	case int64:
+		return epochTime(float64(x))
+	case int:
+		return epochTime(float64(x))
+	case string:
+		text := strings.TrimSpace(x)
+		if text == "" {
+			return ""
+		}
+		if at, e := time.Parse(time.RFC3339Nano, text); e == nil {
+			return at.UTC().Format(time.RFC3339Nano)
+		}
+		if n, e := strconv.ParseFloat(text, 64); e == nil {
+			return epochTime(n)
+		}
+		if at, e := http.ParseTime(text); e == nil {
+			return at.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	return ""
+}
+
+func epochTime(n float64) string {
+	if math.IsNaN(n) || math.IsInf(n, 0) || n <= 0 || n > 9.2e18 {
+		return ""
+	}
+	var at time.Time
+	switch {
+	case n >= 1e14:
+		at = time.UnixMicro(int64(n))
+	case n >= 1e11:
+		at = time.UnixMilli(int64(n))
+	default:
+		at = time.Unix(int64(n), 0)
+	}
+	at = at.UTC()
+	// A quota reset outside this range is a malformed unit, not a real time.
+	if at.Before(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)) || at.After(time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		return ""
+	}
+	return at.Format(time.RFC3339Nano)
+}
+
 func validated(p *float64) *float64 {
 	if !validPct(p) {
 		return nil
@@ -227,7 +536,7 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 		if expires, ok := finiteNumber(oauth["expiresAt"]); ok && expires/1000 < float64(time.Now().Unix()) {
 			return Observation{ID: "claude", Error: "token expired", ErrorKind: "token_expired"}
 		}
-		o := (HTTPProvider{ID: "claude", URL: "https://api.anthropic.com/api/oauth/usage", Headers: map[string]string{"Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20"}}).Fetch(ctx)
+		o := (HTTPProvider{ID: "claude", URL: "https://api.anthropic.com/api/oauth/usage", Headers: map[string]string{"Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20"}, RateLimitWaitS: 300}).Fetch(ctx)
 		acct := object(readObject(identityPath)["oauthAccount"])
 		id := str(acct["accountUuid"])
 		if id != "" && shareable {
@@ -262,23 +571,45 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 		return o
 	})
 	result["clinepass"] = ProviderFunc(func(ctx context.Context) Observation {
-		token := os.Getenv("CLINE_API_KEY")
-		if token == "" {
-			token = str(object(readObject(filepath.Join(dataBase(), "opencode", "auth.json"))["cline-pass"])["key"])
-		}
-		if token == "" {
-			b, _ := os.ReadFile(filepath.Join(configBase(), "cline", "api-key"))
-			token = strings.TrimSpace(string(b))
-		}
+		token := clineToken(home)
 		if token == "" {
 			return Observation{ID: "clinepass", Error: "credentials unavailable", ErrorKind: "credentials"}
 		}
 		return (HTTPProvider{ID: "clinepass", URL: "https://api.cline.bot/api/v1/users/me/plan/usage-limits", Headers: map[string]string{"Authorization": "Bearer " + token}}).Fetch(ctx)
 	})
-	for _, pool := range []string{"devin", "grok", "kimi", "kiro", "commandcode"} {
+	result["commandcode"] = ProviderFunc(func(ctx context.Context) Observation {
+		return fetchCommandCode(ctx, commandCodeToken(home), nil, time.Now)
+	})
+	for _, pool := range []string{"devin", "grok", "kimi", "kiro"} {
 		result[pool] = PTYProvider{ID: pool, Binary: ResolveBinary(pool, cfg), Timeout: 35 * time.Second, Env: selectors}
 	}
 	return result
+}
+
+func commandCodeToken(home string) string {
+	if token := firstEnv("COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"); token != "" {
+		return token
+	}
+	return strings.TrimSpace(str(readObject(filepath.Join(home, ".commandcode", "auth.json"))["apiKey"]))
+}
+
+func clineToken(home string) string {
+	if token := firstEnv("CLINE_API_KEY", "CLINEPASS_API_KEY"); token != "" {
+		return token
+	}
+	providers := object(readObject(filepath.Join(home, ".cline", "data", "settings", "providers.json"))["providers"])
+	for _, name := range []string{"cline-pass", "cline"} {
+		settings := object(providers[name])["settings"]
+		token := strings.TrimSpace(str(object(object(settings)["auth"])["accessToken"]))
+		if token != "" {
+			return token
+		}
+	}
+	if token := str(object(readObject(filepath.Join(dataBase(), "opencode", "auth.json"))["cline-pass"])["key"]); token != "" {
+		return token
+	}
+	b, _ := os.ReadFile(filepath.Join(configBase(), "cline", "api-key"))
+	return strings.TrimSpace(string(b))
 }
 
 func claudeLocations(home string, selectors map[string]string) (credential, identity, service string, shareable bool) {

@@ -32,12 +32,8 @@ type Collector struct {
 	Config          Config
 	Providers       map[string]Provider
 	Now             func() time.Time
-	// DeferredRefresh starts an independent, bounded worker. Used for slow PTY
-	// probes so short-lived display/gate callers cannot starve collection.
-	DeferredRefresh func(string) error
 	TTL             time.Duration
 	NoCache         bool
-	Worker          bool
 }
 
 func LoadSnapshots() (map[string]CacheEntry, error) {
@@ -128,6 +124,9 @@ func updateSnapshot(ownPath, pool string, obs Observation, now time.Time, previo
 			entry.NegativeUntil = entry.LastErrorAt + 30
 			if obs.ErrorKind == "rate_limited" || obs.ErrorKind == "network" {
 				entry.NegativeUntil = entry.LastErrorAt + 60
+				if obs.RetryAfterS > 0 {
+					entry.NegativeUntil = entry.LastErrorAt + obs.RetryAfterS
+				}
 			}
 		}
 		entries[pool] = entry
@@ -136,7 +135,9 @@ func updateSnapshot(ownPath, pool string, obs Observation, now time.Time, previo
 }
 func ttlFor(pool string) time.Duration {
 	switch pool {
-	case "claude", "devin", "commandcode":
+	case "claude":
+		return 900 * time.Second
+	case "devin", "commandcode":
 		return 180 * time.Second
 	}
 	return 60 * time.Second
@@ -237,12 +238,6 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		result := fallback(kind, "provider backoff active")
 		return currentFailureIdentity(result, entry.LastError, entry.Result.AccountFP)
 	}
-	if pool == "commandcode" && !c.Worker && c.DeferredRefresh != nil {
-		if e := c.DeferredRefresh(pool); e != nil {
-			return fallback("probe_deferred", "cannot start deferred probe")
-		}
-		return fallback("probe_in_progress", "bounded refresh started independently")
-	}
 	provider := c.Providers[pool]
 	if provider == nil {
 		return fallback("credentials", "provider not configured")
@@ -272,7 +267,6 @@ func (c Collector) Refresh(ctx context.Context, pool string) (Observation, error
 	if !knownPool(pool) || pool == "anthropic-api" {
 		return Observation{}, fmt.Errorf("unknown automatic pool")
 	}
-	c.Worker = true
 	c.NoCache = true
 	r, e := c.Collect(ctx, []string{pool})
 	if e != nil {

@@ -8,17 +8,17 @@ effort, pool, grade and gate. `Gate` checks roles, subscription, policy and quot
 configuration, launch processes, send messages or write state.
 
 The CLI owns configuration, collection, persistence and rendering. HTTP providers
-return only measurement fields. PTY providers use an isolated work directory,
-a 50×200 terminal, bounded output and a process-group deadline. No raw screen,
-credential or HTTP response body is retained in an error or quota snapshot.
+return only measurement fields. The remaining PTY providers (Devin, Grok, Kimi
+and Kiro) use an isolated work directory, a 50×200 terminal, bounded output and
+a process-group deadline. No raw screen, credential or HTTP response body is
+retained in an error or quota snapshot.
 
-Command Code resolves an explicit environment/config path before PATH and known
-installation directories. Ordinary collection queues an independent refresh
-worker with its own budget. Kernel locks and a bounded live-worker record prevent
-concurrent probes and short-lived callers from starving collection. A watchdog
-pipe closes on parent death and reaps the probe group. `/usage` and Enter are
-separate writes, with an input-settle interval between them. A screen that only
-shows typed `/usage` is not a measurement.
+Claude, Codex, ClinePass and Command Code use provider HTTP APIs. A provider
+`429` carries `Retry-After` into the negative cache; Claude uses a 300-second
+default when the header is missing or zero, keeps a 900-second fresh cache, and
+serves its last good value as stale rather than scraping a screen. Command Code
+reads the saved API key and calls `whoami` then `credits`, so a refused
+credential is an immediate `auth_failed` rather than a probe timeout.
 
 ## Admission contract
 
@@ -97,7 +97,7 @@ separate `bench push-catalog` operation.
 | Policy list/set/clear/profile/setting | Implemented; preserves unrelated config keys |
 | Boost, subscribed, cutoff, plan, price, capacity, inflight reserve | Read-compatible pool policy |
 | Weekly pace promotion | Implemented for every paid pool; ranking only |
-| Eight retained providers | HTTP/PTY implementations, fake-provider and screen tests |
+| Eight retained providers | HTTP/PTY implementations; PTY for Devin, Grok, Kimi and Kiro |
 | SWE-2 Free model scope | Exact-rung fresh observation; free first |
 | Manual set/list/clear, credit observations | Implemented; legacy JSON read-compatible |
 | Bench catalog, push-catalog, bench grades | Implemented against `/v1/bench/*`; dry-run artifacts available |
@@ -136,10 +136,12 @@ Exploration-off keeps every other legacy field and gate verdict unchanged.
 These are contract tests over a representative matrix, not a proof that every
 historical human-readable sentence or ranking score is identical.
 
-Provider fixtures include the recorded unsubmitted Command Code screen, with its
-probe directory generalized, plus sanitized usage panels. PTY tests use short-lived
-helpers only and verify separate Enter, deadlines, killed-owner lock release and
-parent-death cleanup. Backend tests use an injected HTTP client and local files.
+Provider fixtures use recorded, redacted HTTP responses and sanitized usage
+panels. HTTP tests use an injected client and a fake server, including the
+`Retry-After` and `auth_failed` paths. PTY tests cover the remaining providers
+with short-lived helpers only, verifying deadlines, killed-owner lock release
+and parent-death cleanup. Backend tests use an injected HTTP client and local
+files.
 
 ## Migration
 

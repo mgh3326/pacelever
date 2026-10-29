@@ -57,7 +57,7 @@ func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader
 		app.Config.Bench.AllowPlaintextReps = true
 	}
 	app.Bench = pl.NewBenchClient(app.Config)
-	app.Collector = pl.Collector{Config: app.Config, Providers: pl.DefaultProviders(app.Config), DeferredRefresh: pl.StartRefresh, NoCache: a.flags["no-cache"], Worker: a.flags["_worker"]}
+	app.Collector = pl.Collector{Config: app.Config, Providers: pl.DefaultProviders(app.Config), NoCache: a.flags["no-cache"]}
 	for k, p := range app.Collector.Providers {
 		if probe, ok := p.(pl.PTYProvider); ok {
 			probe.Guard = pl.GuardProcess
