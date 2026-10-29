@@ -214,7 +214,7 @@ func (p PTYProvider) screen(ctx context.Context) (string, error) {
 			return "", fmt.Errorf("probe timeout stage=%s bytes=%d", stage, len(out.b))
 		case chunk, ok := <-chunks:
 			if !ok {
-				result := ParseScreen(p.ID, out.String(), time.Now().UTC())
+				result := ParseScreen(p.ID, out.String(), ClockNow(p.Now))
 				if result.Error == "" {
 					return out.String(), nil
 				}
@@ -225,7 +225,7 @@ func (p PTYProvider) screen(ctx context.Context) (string, error) {
 			stage = "no-prompt"
 			if submitted {
 				stage = "unparsed"
-				parsed := ParseScreen(p.ID, out.String(), time.Now().UTC())
+				parsed := ParseScreen(p.ID, out.String(), ClockNow(p.Now))
 				if parsed.Error == "" {
 					return out.String(), nil
 				}
@@ -254,7 +254,7 @@ func (p PTYProvider) screen(ctx context.Context) (string, error) {
 				submitted = true
 			}
 			if submitted && time.Since(lastChange) > 250*time.Millisecond {
-				if parsed := ParseScreen(p.ID, out.String(), time.Now().UTC()); parsed.Error == "" {
+				if parsed := ParseScreen(p.ID, out.String(), ClockNow(p.Now)); parsed.Error == "" {
 					return out.String(), nil
 				}
 			}
@@ -337,7 +337,7 @@ func StartRefresh(pool string) error {
 			return e
 		}
 		active.PID = cmd.Process.Pid
-		active.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		active.StartedAt = ClockNow(nil).Format(time.RFC3339Nano)
 		e = WriteJSON(pidPath, active)
 		_ = cmd.Process.Release()
 		return e

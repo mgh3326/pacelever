@@ -72,7 +72,7 @@ exploration; the baseline resolver has no observations to prove headroom. Caller
 the observation freshness and cancellation context.
 
 Release tags publish standalone binaries for Linux and macOS, each on amd64 and
-arm64, plus `SHA256SUMS`. CI runs vet, race tests, four cross-builds and macOS
+arm64, plus `SHA256SUMS`. CI runs gofmt, vet, staticcheck, race tests, four cross-builds and macOS
 probe tests. Development uses focused tests; `scripts/check.sh` is the final
 verification command. No external database server is needed.
 
