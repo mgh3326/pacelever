@@ -52,13 +52,14 @@ type SharedBucket struct {
 	Model    string     `json:"model,omitempty"`
 }
 type SharedObservation struct {
-	ID         int64          `json:"id"`
-	Kind       string         `json:"kind"`
-	Window     string         `json:"window,omitempty"`
-	MeasuredAt time.Time      `json:"measured_at"`
-	ExpiresAt  *time.Time     `json:"expires_at,omitempty"`
-	Plan       string         `json:"plan,omitempty"`
-	Buckets    []SharedBucket `json:"buckets"`
+	ID         int64            `json:"id"`
+	Kind       string           `json:"kind"`
+	Window     string           `json:"window,omitempty"`
+	MeasuredAt time.Time        `json:"measured_at"`
+	ExpiresAt  *time.Time       `json:"expires_at,omitempty"`
+	Plan       string           `json:"plan,omitempty"`
+	Buckets    []SharedBucket   `json:"buckets"`
+	FreeBucket *FreeBucketState `json:"free_bucket,omitempty"`
 }
 type SharedLatest struct {
 	Observation *SharedObservation  `json:"observation"`
@@ -175,6 +176,8 @@ func localAccountFP(pool string, selectors map[string]string) string {
 			return ""
 		}
 		return fingerprint("claude-account", str(object(readObject(identity)["oauthAccount"])["accountUuid"]))
+	case "devin":
+		return devinAccountFP()
 	}
 	return ""
 }
@@ -194,7 +197,7 @@ func (c Collector) accountKey(pool string) (string, bool) {
 			allowed = true
 		}
 	}
-	if (pool == "claude" || pool == "codex") && local != fp {
+	if (pool == "claude" || pool == "codex" || pool == "devin") && local != fp {
 		allowed = false
 	}
 	return key, allowed
@@ -370,7 +373,7 @@ func (c Collector) sharedLocalFallback(pool, key, kind, message string, entry Ca
 	o.Degraded = degraded
 	o.ErrorKind = kind
 	o.Error = message
-	if entry.FetchedAt > 0 && len(o.Buckets) > 0 {
+	if entry.FetchedAt > 0 && (len(o.Buckets) > 0 || o.FreeBucket != nil) {
 		fetched := time.UnixMilli(int64(entry.FetchedAt * 1000))
 		age := now.Sub(fetched).Seconds()
 		if age < 0 {
@@ -416,13 +419,28 @@ func sharedAuto(x *SharedObservation, pool, key string, now time.Time, ttl time.
 		return Observation{}, false
 	}
 	age := now.Sub(x.MeasuredAt)
-	if age < -time.Minute || age > ttl || len(x.Buckets) == 0 {
+	free, validFree := sharedFreeBucket(x.FreeBucket, pool, now)
+	if age < -time.Minute || age > ttl || !validFree {
+		return Observation{}, false
+	}
+	if len(x.Buckets) == 0 && free == nil {
+		return Observation{}, false
+	}
+	if pool == "devin" && free == nil && !stale {
 		return Observation{}, false
 	}
 	if age < 0 {
 		age = 0
 	}
 	o := Observation{ID: pool, Plan: x.Plan, Source: "handoffkeep", FetchedAt: float64(x.MeasuredAt.UnixMilli()) / 1000, AgeS: ptr(age.Seconds()), AccountFP: strings.SplitN(key, ":", 2)[1], AccountFPKind: "account", AccountFPMatch: ptr(true)}
+	o.FreeBucket = free
+	if pool == "devin" {
+		// Shared organization identity is for publication. Keeping it separate
+		// from AccountFP preserves the existing host-local free-limit identity
+		// when a shared reading is saved to the local cache.
+		o.PublishFP, o.PublishFPKind = o.AccountFP, o.AccountFPKind
+		o.AccountFP, o.AccountFPKind = "", ""
+	}
 	for _, b := range x.Buckets {
 		if !validPct(&b.UsedPct) || (b.Scope != "account" && b.Scope != "model" && b.Scope != "group") {
 			return Observation{}, false
@@ -515,17 +533,25 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		c.maybePresence(source, key, allowed, o)
 		return o
 	}
+	fresh := func() (Observation, bool) {
+		at := c.quotaNow()
+		o, ok := sharedAuto(latest.Observation, pool, key, at, c.Config.Quota.freshTTL(pool), false)
+		if ok && pool == "devin" && allowed && devinFreeNeedsPublish(o.FreeBucket, localDevinFreeBucket(at), at) {
+			return Observation{}, false
+		}
+		return o, ok
+	}
 	if pool == "anthropic-api" {
 		return finish(fail("manual_only"))
 	}
-	if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(pool), false); ok {
+	if o, ok := fresh(); ok {
 		_ = updateSnapshot(c.cacheFile(), pool, o, time.UnixMilli(int64(o.FetchedAt*1000)), entry)
 		return finish(o)
 	}
 	backingOff := sharedRateLimitBackoffActive(entry, pool, key, c.quotaNow())
 	// Read-only hosts also wait briefly for an in-flight publisher.
 	holder := ""
-	if allowed && !backingOff {
+	if allowed && (!backingOff || pool == "devin") {
 		holder, err = holderToken()
 		if err != nil {
 			return fail("shared_unavailable")
@@ -548,7 +574,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 			reachable = false
 			return fail("shared_unavailable")
 		}
-		if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(pool), false); ok {
+		if o, ok := fresh(); ok {
 			return finish(o)
 		}
 		if backingOff {
@@ -568,21 +594,59 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		reachable = false
 		return fail("shared_unavailable")
 	}
-	if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(pool), false); ok {
+	if o, ok := fresh(); ok {
 		return finish(o)
 	}
 	provider := c.Providers[pool]
-	if provider == nil {
+	if provider == nil && pool != "devin" {
 		return finish(fail("credentials"))
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, time.Duration(c.Config.Quota.leaseTTL())*time.Second-200*time.Millisecond)
 	defer cancel()
-	observed := provider.Fetch(probeCtx)
+	observed := Observation{}
+	if provider != nil && !(pool == "devin" && backingOff) {
+		observed = provider.Fetch(probeCtx)
+	}
+	if pool == "devin" && observed.Source == "usage-api" {
+		// The optional web source selects its organization independently of
+		// the CLI login. Never label another organization's paid quota with
+		// the local CLI's shared key.
+		webFP := fingerprint("devin-account", strings.TrimSpace(c.Config.Pools[pool].OrgID))
+		if webFP == "" || pool+":"+webFP != key {
+			return finish(fail("account_mismatch"))
+		}
+	}
 	fp, kind := identity(observed)
 	if (fp != "" && (kind != "account" || pool+":"+fp != key)) || (pool == "codex" || pool == "claude") && fp == "" {
 		return finish(fail("account_mismatch"))
 	}
-	if observed.Error != "" || observed.Warning != "" || observed.Stale || len(observed.Buckets) == 0 {
+	if pool == "devin" {
+		if localAccountFP(pool, c.Selectors) != strings.SplitN(key, ":", 2)[1] {
+			return finish(fail("account_mismatch"))
+		}
+		// The free bucket is unmeasurable and independent of paid-credit
+		// probes. A failed probe contributes no paid percentage or plan.
+		if observed.Error != "" || observed.Warning != "" || observed.Stale {
+			if observed.ErrorKind == "rate_limited" {
+				observed.ID = pool
+				observed.PublishFP, observed.PublishFPKind = strings.SplitN(key, ":", 2)[1], "account"
+				if observed.RetryAfterS <= 0 {
+					observed.RetryAfterS = 300
+				}
+				if err := updateSnapshot(c.cacheFile(), pool, observed, c.quotaNow(), entry); err != nil {
+					return finish(fail("cache_error"))
+				}
+			}
+			observed = Observation{}
+		}
+		var prior *FreeBucketState
+		if latest.Observation != nil {
+			prior = latest.Observation.FreeBucket
+		}
+		at := c.quotaNow()
+		observed.FreeBucket = mergeDevinFreeBucket(prior, localDevinFreeBucket(at), at)
+	}
+	if observed.Error != "" || observed.Warning != "" || observed.Stale || len(observed.Buckets) == 0 && observed.FreeBucket == nil {
 		kind := observed.ErrorKind
 		if kind == "" {
 			kind = "probe_failed"
@@ -609,8 +673,11 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		return finish(fail(kind))
 	}
 	at := c.quotaNow()
-	x := SharedObservation{Kind: "auto", MeasuredAt: at, Plan: observed.Plan, Buckets: []SharedBucket{}}
+	x := SharedObservation{Kind: "auto", MeasuredAt: at, Plan: observed.Plan, Buckets: []SharedBucket{}, FreeBucket: observed.FreeBucket}
 	for _, b := range observed.Buckets {
+		if pool == "devin" && devinFreeTag(b) {
+			continue
+		}
 		// A bucket the provider reports without a value (for example Claude's
 		// per-model weekly bucket with a null utilization) is unmeasured, not
 		// invalid: leave it out instead of discarding the whole observation.
