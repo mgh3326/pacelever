@@ -611,6 +611,13 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	at := c.quotaNow()
 	x := SharedObservation{Kind: "auto", MeasuredAt: at, Plan: observed.Plan, Buckets: []SharedBucket{}}
 	for _, b := range observed.Buckets {
+		// A bucket the provider reports without a value (for example Claude's
+		// per-model weekly bucket with a null utilization) is unmeasured, not
+		// invalid: leave it out instead of discarding the whole observation.
+		// A value outside 0..100 still fails the probe.
+		if b.UsedPct == nil {
+			continue
+		}
 		if !validPct(b.UsedPct) {
 			return finish(fail("probe_failed"))
 		}

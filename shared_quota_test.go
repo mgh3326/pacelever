@@ -855,3 +855,28 @@ func TestGateStaleRolledOverWindowAccepted(t *testing.T) {
 		t.Fatalf("unmarked expired reset satisfied a required window: %+v", d)
 	}
 }
+
+func TestSharedQuotaSkipsUnmeasuredBucket(t *testing.T) {
+	f := &fakeHK{}
+	c := sharedCollector(t, f)
+	c.NoCache = true
+	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation {
+		return Observation{Buckets: []Bucket{
+			{Window: "7d", UsedPct: Pct(24), Scope: Scope{Kind: "account"}},
+			{Window: "7d", Scope: Scope{Kind: "model", Name: "Fable"}},
+		}}
+	})
+	o := collectShared(t, c)
+	if o.Degraded || len(o.Buckets) != 1 || f.published != 1 || len(f.latest.Observation.Buckets) != 1 {
+		t.Fatalf("nil bucket must be skipped, not fail the probe: %+v published=%d", o, f.published)
+	}
+	bad := 120.0
+	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation {
+		return Observation{Buckets: []Bucket{{Window: "7d", UsedPct: &bad, Scope: Scope{Kind: "account"}}}}
+	})
+	f.latest = SharedLatest{}
+	o = collectShared(t, c)
+	if !o.Stale || o.ErrorKind != "probe_failed" {
+		t.Fatalf("out-of-range value must still fail: %+v", o)
+	}
+}
