@@ -198,6 +198,27 @@ func (in Inputs) creditGate(d Decision, now time.Time) (Decision, bool) {
 	if st.Exhausted {
 		return failure(d, Blocked, fmt.Sprintf("credit exhausted pool=%s balance_usd=0.00 expires=%s", st.Pool, st.ExpiresOn)), true
 	}
+	// The same policy steps the automatic path applies: the configured cutoff,
+	// the preserve-class default and any inflight reserve.
+	policy := in.Config.Pool(d.ProviderID, now)
+	cutoff := policy.Cutoff
+	if in.Config.Pools[d.ProviderID].Cutoff == 0 && policy.Class == "preserve" {
+		cutoff = 90
+	}
+	if st.UsedPct != nil && *st.UsedPct >= cutoff {
+		return failure(d, Blocked, fmt.Sprintf("credit cutoff pool=%s used=%g%% cutoff=%g balance=$%.2f of $%.2f", st.Pool, *st.UsedPct, cutoff, st.BalanceUSD, st.TotalUSD)), true
+	}
+	if len(policy.InflightReservePct) > 0 {
+		count := in.Inflight[d.ProviderID]
+		if count == nil {
+			d.Inflight = "inflight=unknown(local|remote)"
+		} else {
+			d.Inflight = fmt.Sprintf("inflight=%d", *count)
+			if reserve := policy.InflightReservePct["credit"]; reserve > 0 && st.UsedPct != nil && *st.UsedPct+float64(*count)*reserve >= cutoff {
+				return failure(d, Blocked, fmt.Sprintf("inflight_headroom window=credit used=%g n=%d reserve=%g cutoff=%g", *st.UsedPct, *count, reserve, cutoff)), true
+			}
+		}
+	}
 	d.OK = true
 	d.ExitCode = Admitted
 	d.Reason = fmt.Sprintf("credit pool=%s balance=$%.2f of $%.2f expires=%s days_left=%.1f daily_budget=$%.2f", st.Pool, st.BalanceUSD, st.TotalUSD, st.ExpiresOn, st.DaysLeft, st.DailyBudgetUSD)

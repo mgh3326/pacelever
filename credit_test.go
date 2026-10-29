@@ -65,16 +65,19 @@ func TestCreditStatusPacing(t *testing.T) {
 
 func TestCreditGate(t *testing.T) {
 	req := Request{Profile: "pi-sonnet55", Effort: "high", Role: "worker"}
-	fresh := creditEntry("new", testNow.Add(-time.Hour), 1, "2026-11-16")
+	fresh := creditEntry("new", testNow.Add(-time.Hour), 5, "2026-11-16")
 
 	d := Gate(Inputs{Now: testNow, Manual: creditStore(fresh)}, req)
 	if d.ExitCode != Admitted || !d.OK || d.Credit == nil {
 		t.Fatalf("positive balance refused: %d %s", d.ExitCode, d.Reason)
 	}
-	if d.Credit.BalanceUSD != 1 || d.UsedPct == nil || *d.UsedPct != 99.5 {
+	if d.Credit.BalanceUSD != 5 || d.UsedPct == nil || *d.UsedPct != 97.5 {
 		t.Fatalf("credit decision fields %+v", d)
 	}
 
+	if d = Gate(Inputs{Now: testNow, Manual: creditStore(creditEntry("new", testNow.Add(-time.Hour), 1, "2026-11-16"))}, req); d.ExitCode != Blocked || d.Credit == nil {
+		t.Fatalf("balance above the default cutoff admitted: %d %s", d.ExitCode, d.Reason)
+	}
 	if d = Gate(Inputs{Now: testNow, Manual: creditStore(creditEntry("new", testNow.Add(-time.Hour), 0, "2026-11-16"))}, req); d.ExitCode != Blocked {
 		t.Fatalf("exhausted credit admitted: %s", d.Reason)
 	}
@@ -83,6 +86,32 @@ func TestCreditGate(t *testing.T) {
 	}
 	if d = Gate(Inputs{Now: testNow}, req); d.ExitCode != Unmeasurable {
 		t.Fatalf("missing balance exit %d", d.ExitCode)
+	}
+
+	// An operator cutoff applies to the balance-derived used percentage.
+	cut := Config{Pools: map[string]PoolPolicy{"anthropic-api": {Cutoff: 80}}}
+	if d = Gate(Inputs{Now: testNow, Config: cut, Manual: creditStore(creditEntry("new", testNow.Add(-time.Hour), 30, "2026-11-16"))}, req); d.ExitCode != Blocked {
+		t.Fatalf("operator cutoff ignored: %s", d.Reason)
+	}
+	if d = Gate(Inputs{Now: testNow, Config: cut, Manual: creditStore(creditEntry("new", testNow.Add(-time.Hour), 45, "2026-11-16"))}, req); d.ExitCode != Admitted {
+		t.Fatalf("cutoff blocked a balance below it: %s", d.Reason)
+	}
+
+	// preserve without an explicit cutoff uses the same 90% default.
+	preserve := Config{Pools: map[string]PoolPolicy{"anthropic-api": {Class: "preserve"}}}
+	if d = Gate(Inputs{Now: testNow, Config: preserve, Manual: creditStore(creditEntry("new", testNow.Add(-time.Hour), 15, "2026-11-16"))}, req); d.ExitCode != Blocked {
+		t.Fatalf("preserve default ignored: %s", d.Reason)
+	}
+	if d = Gate(Inputs{Now: testNow, Config: preserve, Manual: creditStore(creditEntry("new", testNow.Add(-time.Hour), 25, "2026-11-16"))}, req); d.ExitCode != Admitted {
+		t.Fatalf("preserve blocked a balance above 10%%: %s", d.Reason)
+	}
+
+	// A configured inflight reserve participates like any other pool.
+	one := 1
+	reserved := Config{Pools: map[string]PoolPolicy{"anthropic-api": {InflightReservePct: map[string]float64{"credit": 3}}}}
+	in := Inputs{Now: testNow, Config: reserved, Manual: creditStore(fresh), Inflight: map[string]*int{"anthropic-api": &one}}
+	if d = Gate(in, req); d.ExitCode != Blocked || d.Inflight != "inflight=1" {
+		t.Fatalf("inflight reserve ignored: %d %s %s", d.ExitCode, d.Inflight, d.Reason)
 	}
 
 	stale := creditEntry("new", testNow.Add(-96*time.Hour), 150, "2026-11-16")

@@ -150,10 +150,13 @@ A credit entry records the operator's Console balance: `--credit-balance` and
 the balance, expiry, days left and the paced daily budget (`balance ÷ days
 left`), and flags `WASTE` when that budget is above the burn rate derived from
 the two most recent hand-entered balances — credit that would otherwise be left
-unused at expiry, so ranking prefers it. The gate admits a credit pool while the
-balance is positive and unexpired regardless of the derived used percentage;
-`balance ≤ 0` or an expired entry refuses admission. A stale entry still admits,
-with a warning, so the operator can update it by hand.
+unused at expiry, so ranking prefers it. The gate applies the same pool policy as
+any other pool to the balance-derived used percentage: an operator `cutoff`
+(default 99, or 90 for `preserve`) and any `inflight_reserve_pct` headroom.
+It admits while the balance is positive and unexpired and below that cutoff;
+`balance ≤ 0`, a balance at or past the cutoff, or an expired entry refuses
+admission. A stale entry still admits, with a warning, so the operator can
+update it by hand.
 
 `PACELEVER_QUOTA_SHARE=0` disables peer snapshot exchange. `PACELEVER_NOTIFY=0`
 disables exhaustion notices. `PACELEVER_STALE_WARN=0` disables stale-build checks.
