@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -820,9 +821,7 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 		}
 		return o
 	})
-	result["agy"] = ProviderFunc(func(ctx context.Context) Observation {
-		return fetchAgy(ctx, agyToken(home), nil, time.Now)
-	})
+	result["agy"] = newAgyProvider(home, cfg, nil)
 	for _, pool := range []string{"devin", "kimi", "kiro"} {
 		result[pool] = PTYProvider{ID: pool, Binary: ResolveBinary(pool, cfg), Timeout: 35 * time.Second, Env: selectors}
 	}
@@ -969,6 +968,145 @@ func agyToken(home string) string {
 		}
 	}
 	return ""
+}
+
+// agySecrets is an optional credential fallback store. On macOS it is the
+// login keychain entry the Antigravity CLI writes through go-keyring.
+type agySecrets interface {
+	agyToken(context.Context) string
+}
+
+// agyProvider measures Antigravity quota over HTTP. A refused token is re-armed
+// once by running the CLI's model listing, which refreshes the OAuth file as a
+// side effect; the collector's per-pool lock keeps the refresh single-flight.
+type agyProvider struct {
+	client  HTTPDoer
+	now     func() time.Time
+	file    func() string
+	secrets agySecrets
+	wake    func(context.Context) error
+}
+
+func newAgyProvider(home string, cfg Config, client HTTPDoer) agyProvider {
+	p := agyProvider{
+		client: client,
+		now:    time.Now,
+		file:   func() string { return agyToken(home) },
+	}
+	if runtime.GOOS == "darwin" {
+		p.secrets = agyKeychain{}
+	}
+	if binary, e := exec.LookPath(ResolveBinary("agy", cfg)); e == nil {
+		p.wake = agyWake(binary)
+	}
+	return p
+}
+
+func (p agyProvider) fileToken() string {
+	if p.file == nil {
+		return ""
+	}
+	return p.file()
+}
+func (p agyProvider) secretToken(ctx context.Context) string {
+	if p.secrets == nil {
+		return ""
+	}
+	return p.secrets.agyToken(ctx)
+}
+func (p agyProvider) Fetch(ctx context.Context) Observation {
+	now := p.now
+	if now == nil {
+		now = time.Now
+	}
+	token := p.fileToken()
+	usedSecret := false
+	if token == "" {
+		if token = p.secretToken(ctx); token != "" {
+			usedSecret = true
+		}
+	}
+	if token == "" {
+		return Observation{ID: "agy", Error: "credentials unavailable", ErrorKind: "credentials"}
+	}
+	o := fetchAgy(ctx, token, p.client, now)
+	if o.ErrorKind != "auth_failed" {
+		return o
+	}
+	secretRefused := usedSecret
+	switch {
+	case p.wake == nil:
+		o.Error = "antigravity authentication failed; the agy command is unavailable to refresh the login"
+	case p.wake(ctx) != nil:
+		o.Error = "antigravity authentication failed; `agy models` could not refresh the login"
+	default:
+		// The wake refreshes the token file, so re-read before retrying once.
+		if fresh := p.fileToken(); fresh != "" && fresh != token {
+			token, usedSecret = fresh, false
+		}
+		if o = fetchAgy(ctx, token, p.client, now); o.ErrorKind != "auth_failed" {
+			return o
+		}
+		if usedSecret {
+			secretRefused = true
+		}
+	}
+	// A file credential that is missing or still refused after the refresh
+	// falls back to the keychain copy the CLI keeps.
+	if !secretRefused {
+		if secret := p.secretToken(ctx); secret != "" && secret != token {
+			o = fetchAgy(ctx, secret, p.client, now)
+		}
+	}
+	return o
+}
+
+// agyWake re-arms the OAuth token with one model listing. The CLI output may
+// carry account details, so it is discarded and never logged.
+func agyWake(binary string) func(context.Context) error {
+	return func(ctx context.Context) error {
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, binary, "models")
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+		return cmd.Run()
+	}
+}
+
+type agyKeychain struct{}
+
+func (agyKeychain) agyToken(ctx context.Context) string {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, e := exec.CommandContext(ctx, "security", "find-generic-password", "-s", "gemini", "-a", "antigravity", "-w").Output()
+	if e != nil {
+		return ""
+	}
+	return agyEnvelopeToken(strings.TrimSpace(string(out)))
+}
+
+// agyEnvelopeToken unwraps the go-keyring envelope and reads
+// $.token.access_token from the enclosed JSON.
+func agyEnvelopeToken(raw string) string {
+	if s := strings.TrimPrefix(raw, "go-keyring-base64:"); s != raw {
+		decoded, e := base64.StdEncoding.DecodeString(s)
+		if e != nil {
+			return ""
+		}
+		raw = string(decoded)
+	} else if s := strings.TrimPrefix(raw, "go-keyring-encoded:"); s != raw {
+		decoded, e := hex.DecodeString(s)
+		if e != nil {
+			return ""
+		}
+		raw = string(decoded)
+	}
+	var data map[string]any
+	if json.Unmarshal([]byte(raw), &data) != nil {
+		return ""
+	}
+	return strings.TrimSpace(str(object(data["token"])["access_token"]))
 }
 
 func clineToken(home string) string {
