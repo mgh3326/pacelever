@@ -29,13 +29,23 @@ type fakeHK struct {
 	presence  []PresenceRecord
 	onRead    func(int) *SharedObservation
 	reads     int
+	// presenceBlock holds the async publish open; presenceDone signals it ran.
+	presenceBlock chan struct{}
+	presenceDone  chan struct{}
 }
 
 func (f *fakeHK) PublishPresence(ctx context.Context, r PresenceRecord) error {
+	if f.presenceBlock != nil {
+		<-f.presenceBlock
+	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, "presence")
 	f.presence = append(f.presence, r)
+	done := f.presenceDone
+	f.mu.Unlock()
+	if done != nil {
+		done <- struct{}{}
+	}
 	return nil
 }
 
@@ -144,7 +154,7 @@ func TestSharedQuotaFreshBeforeProbe(t *testing.T) {
 	}
 }
 func TestSharedQuotaFleetSingleProbe(t *testing.T) {
-	f := &fakeHK{}
+	f := &fakeHK{presenceDone: make(chan struct{}, 1)}
 	var probes atomic.Int32
 	var wg sync.WaitGroup
 	out := make(chan Observation, 6)
@@ -176,8 +186,43 @@ func TestSharedQuotaFleetSingleProbe(t *testing.T) {
 	if probes.Load() != 1 || f.published != 1 || f.holder != "" {
 		t.Fatalf("probes=%d published=%d holder=%s", probes.Load(), f.published, f.holder)
 	}
+	select {
+	case <-f.presenceDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("presence was not published")
+	}
 	if len(f.presence) != 1 || f.presence[0].AccountKey != sharedTestKey || f.presence[0].HostID == "" || f.presence[0].LastSeen.IsZero() {
 		t.Fatalf("presence %+v", f.presence)
+	}
+}
+
+func TestPresencePublishDoesNotBlockCollection(t *testing.T) {
+	f := &fakeHK{presenceBlock: make(chan struct{}), presenceDone: make(chan struct{}, 1)}
+	c := sharedCollector(t, f)
+	done := make(chan Observation, 1)
+	go func() {
+		obs, err := c.Collect(context.Background(), []string{"grok"})
+		if err != nil {
+			done <- Observation{Error: err.Error()}
+			return
+		}
+		done <- obs[0]
+	}()
+	select {
+	case o := <-done:
+		if o.Error != "" {
+			close(f.presenceBlock)
+			t.Fatal(o.Error)
+		}
+	case <-time.After(500 * time.Millisecond):
+		close(f.presenceBlock)
+		t.Fatal("collection waited for the presence publish")
+	}
+	close(f.presenceBlock)
+	select {
+	case <-f.presenceDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("presence never ran")
 	}
 }
 func TestSharedQuotaRereadAndReadOnly(t *testing.T) {

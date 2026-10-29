@@ -176,17 +176,20 @@ func presenceHostID() string {
 	return "host-" + fingerprint("host", host)
 }
 
-// publishPresence records where an account was measured. It is best-effort:
-// quota collection never fails because host placement metadata is unavailable.
+// publishPresence records where an account was measured. It is asynchronous and
+// bounded, so it never adds latency to a collection or changes its verdict.
 func (c Collector) publishPresence(source ObservationSource, key string, at time.Time) {
 	publisher, ok := source.(PresenceSource)
 	host := presenceHostID()
 	if !ok || !accountKeyRE.MatchString(key) || host == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	_ = publisher.PublishPresence(ctx, PresenceRecord{HostID: host, AccountKey: key, LastSeen: at})
+	record := PresenceRecord{HostID: host, AccountKey: key, LastSeen: at}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = publisher.PublishPresence(ctx, record)
+	}()
 }
 func holderToken() (string, error) {
 	var b [16]byte
@@ -257,7 +260,7 @@ func sharedAuto(x *SharedObservation, pool, key string, now time.Time, ttl time.
 	}
 	o := Observation{ID: pool, Plan: x.Plan, Source: "handoffkeep", FetchedAt: float64(x.MeasuredAt.UnixMilli()) / 1000, AgeS: ptr(age.Seconds()), AccountFP: strings.SplitN(key, ":", 2)[1], AccountFPKind: "account", AccountFPMatch: ptr(true)}
 	for _, b := range x.Buckets {
-		if !validPct(&b.UsedPct) || (b.Scope != "account" && b.Scope != "model") {
+		if !validPct(&b.UsedPct) || (b.Scope != "account" && b.Scope != "model" && b.Scope != "group") {
 			return Observation{}, false
 		}
 		reset := ""

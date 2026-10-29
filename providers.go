@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -572,38 +573,55 @@ func parseAgy(raw map[string]any) Observation {
 		root = response
 	}
 	worst := map[string]Bucket{}
-	add := func(window string, fraction float64, reset string) {
+	add := func(group, window string, fraction float64, reset string) {
+		if group == "" {
+			group = "unknown"
+		}
 		if window == "" || math.IsNaN(fraction) || fraction < 0 || fraction > 1 {
 			return
 		}
-		bucket := Bucket{Label: window, Window: window, UsedPct: Pct(100 * (1 - fraction)), ResetsAt: reset, Scope: Scope{Kind: "account"}, Horizon: horizon(window)}
-		if previous, ok := worst[window]; !ok || (previous.UsedPct != nil && bucket.UsedPct != nil && *bucket.UsedPct > *previous.UsedPct) {
-			worst[window] = bucket
+		h := horizon(window)
+		if window == "unknown" {
+			h = ""
+		}
+		bucket := Bucket{Label: window, Window: window, UsedPct: Pct(100 * (1 - fraction)), ResetsAt: reset, Scope: Scope{Kind: "group", Name: group}, Horizon: h}
+		key := group + "\x00" + window
+		if previous, ok := worst[key]; !ok || (previous.UsedPct != nil && bucket.UsedPct != nil && *bucket.UsedPct > *previous.UsedPct) {
+			worst[key] = bucket
 		}
 	}
-	for _, group := range list(root["groups"]) {
-		for _, value := range list(object(group)["buckets"]) {
+	for _, groupValue := range list(root["groups"]) {
+		group := object(groupValue)
+		display := str(group["displayName"]) + " " + str(group["description"])
+		for _, value := range list(group["buckets"]) {
 			bucket := object(value)
 			fraction, ok := finiteNumber(bucket["remainingFraction"])
 			if !ok {
 				continue
 			}
-			add(agyWindow(str(bucket["window"]), str(bucket["bucketId"])), fraction, resetAtValue(bucket["resetTime"]))
+			id := str(bucket["bucketId"])
+			add(agyGroup(id, display), agyWindow(str(bucket["window"]), id), fraction, resetAtValue(bucket["resetTime"]))
 		}
 	}
 	if len(worst) == 0 {
-		for _, value := range object(root["models"]) {
+		for key, value := range object(root["models"]) {
 			quota := object(object(value)["quotaInfo"])
 			fraction, ok := finiteNumber(quota["remainingFraction"])
 			if !ok {
 				continue
 			}
-			add("5h", fraction, resetAtValue(quota["resetTime"]))
+			window := agyWindow(str(quota["window"]), key)
+			if window == "" {
+				window = "unknown"
+			}
+			add(agyGroup(key, key), window, fraction, resetAtValue(quota["resetTime"]))
 		}
 	}
-	for _, window := range []string{"5h", "7d", "30d", "1d"} {
-		if bucket, ok := worst[window]; ok {
-			o.Buckets = append(o.Buckets, bucket)
+	for _, group := range []string{"gemini", "3p", "unknown"} {
+		for _, window := range []string{"5h", "7d", "30d", "1d", "unknown"} {
+			if bucket, ok := worst[group+"\x00"+window]; ok {
+				o.Buckets = append(o.Buckets, bucket)
+			}
 		}
 	}
 	for _, key := range []string{"planDaily", "plan"} {
@@ -641,6 +659,26 @@ func agyWindow(window, bucketID string) string {
 		return "5h"
 	}
 	return ""
+}
+
+// agyGroup maps a bucket or model identity to the metered account group.
+// A gemini model must never be gated on the Claude/GPT (3p) numbers.
+func agyGroup(id, display string) string {
+	identity := strings.ToLower(strings.TrimSpace(id))
+	switch {
+	case strings.HasPrefix(identity, "gemini"):
+		return "gemini"
+	case strings.HasPrefix(identity, "3p-"), strings.HasPrefix(identity, "3p_"):
+		return "3p"
+	}
+	text := strings.ToLower(display + " " + identity)
+	switch {
+	case strings.Contains(text, "gemini"):
+		return "gemini"
+	case strings.Contains(text, "claude"), strings.Contains(text, "gpt"), strings.Contains(text, "oss"):
+		return "3p"
+	}
+	return "unknown"
 }
 
 func list(v any) []any {
@@ -774,7 +812,13 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 		return fetchCommandCode(ctx, commandCodeToken(home), nil, time.Now)
 	})
 	result["grok"] = ProviderFunc(func(ctx context.Context) Observation {
-		return fetchGrok(ctx, grokToken(home, selectors), nil, time.Now)
+		token, fp := grokCredential(home, selectors, cfg.Quota.Accounts["grok"])
+		o := fetchGrok(ctx, token, nil, time.Now)
+		if fp != "" {
+			o.PublishFP = fp
+			o.PublishFPKind = "account"
+		}
+		return o
 	})
 	result["agy"] = ProviderFunc(func(ctx context.Context) Observation {
 		return fetchAgy(ctx, agyToken(home), nil, time.Now)
@@ -792,7 +836,15 @@ func commandCodeToken(home string) string {
 	return strings.TrimSpace(str(readObject(filepath.Join(home, ".commandcode", "auth.json"))["apiKey"]))
 }
 
-func grokToken(home string, selectors map[string]string) string {
+type grokRecord struct {
+	Token       string
+	Fingerprint string
+	Expires     time.Time
+	HasExpiry   bool
+	Created     time.Time
+}
+
+func grokAuthPath(home string, selectors map[string]string) string {
 	dir := selectors["GROK_HOME"]
 	if dir == "" {
 		dir = os.Getenv("GROK_HOME")
@@ -800,26 +852,110 @@ func grokToken(home string, selectors map[string]string) string {
 	if dir == "" {
 		dir = filepath.Join(home, ".grok")
 	}
-	data := readObject(filepath.Join(dir, "auth.json"))
-	if token := strings.TrimSpace(str(data["key"])); token != "" {
-		return token
+	return filepath.Join(dir, "auth.json")
+}
+
+func grokRecords(home string, selectors map[string]string) []grokRecord {
+	data := readObject(grokAuthPath(home, selectors))
+	var out []grokRecord
+	add := func(token string, fields map[string]any) {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			return
+		}
+		for _, existing := range out {
+			if existing.Token == token {
+				return
+			}
+		}
+		record := grokRecord{Token: token}
+		if user := strings.TrimSpace(str(fields["user_id"])); user != "" {
+			record.Fingerprint = fingerprint("grok-account", user)
+		}
+		if expires := parseOptionalTime(str(fields["expires_at"])); !expires.IsZero() {
+			record.Expires, record.HasExpiry = expires, true
+		}
+		record.Created = parseOptionalTime(str(fields["create_time"]))
+		out = append(out, record)
 	}
-	best, bestRank := "", ""
-	for key, value := range data {
+	keys := make([]string, 0, len(data))
+	for key := range data {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := data[key]
 		record := object(value)
 		token := strings.TrimSpace(str(record["key"]))
 		if token == "" && strings.HasSuffix(key, ".key") {
 			token = strings.TrimSpace(str(value))
 		}
-		if token == "" {
+		add(token, record)
+	}
+	// A flat $.key shape is the fallback when no nested records exist.
+	if len(out) == 0 {
+		add(str(data["key"]), data)
+	}
+	return out
+}
+
+func parseOptionalTime(text string) time.Time {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return time.Time{}
+	}
+	if at, e := time.Parse(time.RFC3339Nano, text); e == nil {
+		return at.UTC()
+	}
+	if at, e := http.ParseTime(text); e == nil {
+		return at.UTC()
+	}
+	return time.Time{}
+}
+
+// selectGrokRecord is deterministic: latest valid expiry, then latest creation,
+// then token. A configured account fingerprint must match exactly.
+func selectGrokRecord(records []grokRecord, wantFP string, now time.Time) (grokRecord, bool) {
+	valid := make([]grokRecord, 0, len(records))
+	for _, record := range records {
+		if record.HasExpiry && !record.Expires.After(now) {
 			continue
 		}
-		rank := str(record["expires_at"]) + str(record["create_time"])
-		if best == "" || rank >= bestRank {
-			best, bestRank = token, rank
-		}
+		valid = append(valid, record)
 	}
-	return best
+	sort.SliceStable(valid, func(i, j int) bool {
+		a, b := valid[i], valid[j]
+		if a.HasExpiry != b.HasExpiry {
+			return a.HasExpiry
+		}
+		if !a.Expires.Equal(b.Expires) {
+			return a.Expires.After(b.Expires)
+		}
+		if !a.Created.Equal(b.Created) {
+			return a.Created.After(b.Created)
+		}
+		return a.Token < b.Token
+	})
+	if wantFP != "" {
+		for _, record := range valid {
+			if record.Fingerprint == wantFP {
+				return record, true
+			}
+		}
+		return grokRecord{}, false
+	}
+	if len(valid) == 0 {
+		return grokRecord{}, false
+	}
+	return valid[0], true
+}
+
+func grokCredential(home string, selectors map[string]string, wantFP string) (string, string) {
+	record, ok := selectGrokRecord(grokRecords(home, selectors), wantFP, time.Now())
+	if !ok {
+		return "", ""
+	}
+	return record.Token, record.Fingerprint
 }
 
 func agyToken(home string) string {

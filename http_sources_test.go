@@ -2,7 +2,9 @@ package pacelever
 
 import (
 	"context"
+	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,6 +16,19 @@ import (
 
 func responseWithHeader(code int, body string, header http.Header) *http.Response {
 	return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body)), Header: header}
+}
+
+func pctClose(p *float64, want float64) bool {
+	return p != nil && math.Abs(*p-want) < 1e-6
+}
+
+func mustJSON(t *testing.T, body string) map[string]any {
+	t.Helper()
+	var value map[string]any
+	if e := json.Unmarshal([]byte(body), &value); e != nil {
+		t.Fatal(e)
+	}
+	return value
 }
 
 func fixedNow() time.Time { return testNow }
@@ -299,17 +314,63 @@ func TestAgyQuotaSummaryWeeklyAndFiveHour(t *testing.T) {
 		return response(200, body), nil
 	})
 	o := fetchAgy(context.Background(), "fixture-token", client, fixedNow)
-	if o.Error != "" || len(o.Buckets) != 2 {
+	if o.Error != "" || len(o.Buckets) != 3 {
 		t.Fatalf("agy buckets %+v", o)
 	}
-	if o.Buckets[0].Window != "5h" || *o.Buckets[0].UsedPct != 50 {
-		t.Fatalf("agy five-hour uses the worst group %+v", o.Buckets[0])
+	if o.Buckets[0].Scope.Name != "gemini" || o.Buckets[0].Window != "5h" || !pctClose(o.Buckets[0].UsedPct, 20) {
+		t.Fatalf("agy gemini five-hour %+v", o.Buckets[0])
 	}
-	if o.Buckets[1].Window != "7d" || *o.Buckets[1].UsedPct != 40 {
-		t.Fatalf("agy weekly bucket %+v", o.Buckets[1])
+	if o.Buckets[1].Scope.Name != "gemini" || o.Buckets[1].Window != "7d" || !pctClose(o.Buckets[1].UsedPct, 40) {
+		t.Fatalf("agy gemini weekly %+v", o.Buckets[1])
+	}
+	if o.Buckets[2].Scope.Name != "3p" || o.Buckets[2].Window != "5h" || !pctClose(o.Buckets[2].UsedPct, 50) {
+		t.Fatalf("agy 3p five-hour %+v", o.Buckets[2])
+	}
+	if len(matching(o.Buckets, "gemini")) != 2 || len(matching(o.Buckets, "3p")) != 1 {
+		t.Fatalf("agy group selection %+v", o.Buckets)
 	}
 	if len(hosts) != 1 || hosts[0] != "daily-cloudcode-pa.googleapis.com" {
 		t.Fatalf("agy host order %v", hosts)
+	}
+}
+
+func TestAgyMissingGroupIsUnknown(t *testing.T) {
+	body := `{"groups":[{"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-5h","window":"5h","remainingFraction":0.5,"resetTime":"2026-10-29T06:18:55Z"}]}]}`
+	o := parseAgy(mustJSON(t, body))
+	if len(matching(o.Buckets, "gemini")) != 0 {
+		t.Fatalf("3p numbers reached the gemini group: %+v", o.Buckets)
+	}
+	if len(matching(o.Buckets, "3p")) != 1 {
+		t.Fatalf("3p group missing: %+v", o.Buckets)
+	}
+}
+
+func TestAgyModelFallbackPeriod(t *testing.T) {
+	body := `{"models":{"gemini-3.7-flash":{"quotaInfo":{"remainingFraction":0.5,"window":"weekly","resetTime":"2026-11-05T01:18:55Z"}},"claude-3.7":{"quotaInfo":{"remainingFraction":0.25}}}}`
+	o := parseAgy(mustJSON(t, body))
+	if o.Error != "" || len(o.Buckets) != 2 {
+		t.Fatalf("agy model fallback %+v", o)
+	}
+	if o.Buckets[0].Scope.Name != "gemini" || o.Buckets[0].Window != "7d" || !pctClose(o.Buckets[0].UsedPct, 50) {
+		t.Fatalf("gemini model period %+v", o.Buckets[0])
+	}
+	if o.Buckets[1].Scope.Name != "3p" || o.Buckets[1].Window != "unknown" || !pctClose(o.Buckets[1].UsedPct, 75) {
+		t.Fatalf("unknown model period %+v", o.Buckets[1])
+	}
+}
+
+func TestAgyGroupMapping(t *testing.T) {
+	for _, tt := range []struct{ id, display, want string }{
+		{"gemini-5h", "Gemini Models", "gemini"},
+		{"3p-5h", "Claude and GPT models", "3p"},
+		{"gemini-argon-wtu-weekly", "", "gemini"},
+		{"claude-3.7", "", "3p"},
+		{"gpt-oss-120b", "", "3p"},
+		{"mystery-5h", "", "unknown"},
+	} {
+		if got := agyGroup(tt.id, tt.display); got != tt.want {
+			t.Fatalf("agyGroup(%q) = %q, want %q", tt.id, got, tt.want)
+		}
 	}
 }
 
@@ -450,7 +511,7 @@ func TestProviderTokens(t *testing.T) {
 	if e := os.WriteFile(filepath.Join(home, ".grok", "auth.json"), []byte(grok), 0600); e != nil {
 		t.Fatal(e)
 	}
-	if token := grokToken(home, nil); token != "fixture-grok" {
+	if token, _ := grokCredential(home, nil, ""); token != "fixture-grok" {
 		t.Fatalf("grok token %q", token)
 	}
 	if e := os.MkdirAll(filepath.Join(home, ".gemini", "antigravity-cli"), 0700); e != nil {
@@ -461,6 +522,40 @@ func TestProviderTokens(t *testing.T) {
 	}
 	if token := agyToken(home); token != "fixture-agy" {
 		t.Fatalf("agy token %q", token)
+	}
+}
+
+func TestGrokRecordDeterministic(t *testing.T) {
+	home := t.TempDir()
+	if e := os.MkdirAll(filepath.Join(home, ".grok"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	body := `{
+	  "https://auth.x.ai::a":{"key":"older","user_id":"fixture-old","expires_at":"2026-11-01T00:00:00Z","create_time":"2026-10-01T00:00:00Z"},
+	  "https://auth.x.ai::b":{"key":"newer","user_id":"fixture-new","expires_at":"2026-12-01T00:00:00Z","create_time":"2026-10-02T00:00:00Z"}
+	}`
+	if e := os.WriteFile(filepath.Join(home, ".grok", "auth.json"), []byte(body), 0600); e != nil {
+		t.Fatal(e)
+	}
+	token, fp := grokCredential(home, nil, "")
+	if token != "newer" || fp != fingerprint("grok-account", "fixture-new") {
+		t.Fatalf("grok picked %q %q", token, fp)
+	}
+	want := fingerprint("grok-account", "fixture-old")
+	token, fp = grokCredential(home, nil, want)
+	if token != "older" || fp != want {
+		t.Fatalf("grok did not honour the account key: %q %q", token, fp)
+	}
+	if token, _ := grokCredential(home, nil, "ffffffffffffffff"); token != "" {
+		t.Fatalf("grok used a record for another account: %q", token)
+	}
+}
+
+func TestSharedAutoAcceptsGroupScope(t *testing.T) {
+	x := &SharedObservation{Kind: "auto", MeasuredAt: testNow, Buckets: []SharedBucket{{Window: "7d", UsedPct: 20, Scope: "group", Model: "gemini"}}}
+	o, ok := sharedAuto(x, "agy", "agy:0123456789abcdef", testNow, time.Hour)
+	if !ok || len(o.Buckets) != 1 || o.Buckets[0].Scope.Kind != "group" || o.Buckets[0].Scope.Name != "gemini" {
+		t.Fatalf("group scope lost: %+v", o)
 	}
 }
 

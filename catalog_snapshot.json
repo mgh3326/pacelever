@@ -1258,7 +1258,7 @@
       "placed": true,
       "billing": "unknown",
       "family": "google",
-      "group": null
+      "group": "gemini"
     }
   ],
   "defaults": {
