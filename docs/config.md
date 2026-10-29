@@ -113,8 +113,10 @@ selector. The tool does not install CLIs or initiate login flows.
 
 A provider `429` honours `Retry-After` (seconds or an HTTP date). Claude uses a
 300-second wait when the header is missing or zero and keeps a 900-second fresh
-cache; a refused refresh serves the last good value as stale. Never fall back to
-screen scraping after a rate limit.
+cache; a refused refresh serves the last good value as stale. When the Claude
+usage API fails, pacelever makes one bounded `claude -p "/usage" --allowed-tools ""`
+attempt in an empty directory and uses that reading only when its session and
+weekly quotas parse cleanly.
 
 Catalog credentials come from `HANDOFFKEEP_URL` plus `HANDOFFKEEP_TOKEN`, or the
 existing handoffkeep `config.env` file. `HANDOFFKEEP_CONFIG` can select that file.
