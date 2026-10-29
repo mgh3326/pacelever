@@ -49,6 +49,7 @@ type QuotaConfig struct {
 	FreshTTLS          float64           `toml:"fresh_ttl_s"`
 	LeaseTTLS          int               `toml:"lease_ttl_s"`
 	WaitS              float64           `toml:"wait_s"`
+	PresenceEveryS     float64           `toml:"presence_every_s"`
 	Accounts           map[string]string `toml:"accounts"`
 	MeasurableAccounts []string          `toml:"measurable_accounts"`
 }
