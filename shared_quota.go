@@ -371,7 +371,7 @@ const rolloverNote = "reset passed; window restarted at 0%, unmeasured"
 // old reading no longer applies; the bucket stays as a 0% marker instead of
 // invalidating the windows that still hold.
 func rolloverExpired(buckets []Bucket, now time.Time) []Bucket {
-	out := buckets[:0]
+	out := make([]Bucket, 0, len(buckets))
 	for _, b := range buckets {
 		if reset, e := ParseTime(b.ResetsAt); e == nil && !reset.After(now) {
 			b.UsedPct = Pct(0)

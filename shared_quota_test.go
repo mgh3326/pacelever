@@ -714,4 +714,16 @@ func TestGateStaleRolledOverWindowAccepted(t *testing.T) {
 	if d = Gate(Inputs{Now: testNow, Observations: []Observation{o}}, Request{Profile: "sonnet"}); d.ExitCode != Unmeasurable {
 		t.Fatalf("missing required window accepted: %+v", d)
 	}
+	// An expired reset without the rollover mark does not satisfy the window:
+	// its stale reading must not stand in for a restarted one.
+	o = observation("claude", 90)
+	o.Buckets[0].ResetsAt = testNow.Add(-time.Hour).Format(time.RFC3339)
+	o.Stale = true
+	o.Error = "usage HTTP 429"
+	o.ErrorKind = "rate_limited"
+	o.AccountFPMatch = ptr(true)
+	o.AgeS = ptr(60.0)
+	if d = Gate(Inputs{Now: testNow, Observations: []Observation{o}}, Request{Profile: "sonnet"}); d.ExitCode != Unmeasurable {
+		t.Fatalf("unmarked expired reset satisfied a required window: %+v", d)
+	}
 }
