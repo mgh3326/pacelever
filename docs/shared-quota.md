@@ -7,6 +7,7 @@ this opt-in configuration in each host's private pacelever config:
 [quota]
 url = "https://YOUR_HK_ENDPOINT"
 credential_env = "HANDOFFKEEP_TOKEN"
+host_id = "mac-work"
 fresh_ttl_s = 300
 lease_ttl_s = 120
 wait_s = 1
@@ -18,8 +19,12 @@ claude = "fedcba9876543210"
 ```
 
 Replace the illustrative fingerprints and endpoint with private configuration.
-Put the credential in the named environment variable, never in TOML. HTTPS is
-required; the existing explicit `bench.allow_plaintext_quota_share` opt-in is
+Never put the credential in TOML. A non-empty value in the environment variable
+named by `credential_env` is used as the token. When that variable is unset or
+empty (agents and daemons usually have no `HANDOFFKEEP_TOKEN`), pacelever keeps
+the token and CF Access pair it loaded from the handoffkeep `config.env`, the same
+file the catalog path reads (see `docs/config.md`, "Catalog credentials"). Tokens
+are never logged. HTTPS is required; the existing explicit `bench.allow_plaintext_quota_share` opt-in is
 available for controlled testing. Existing CF Access credential support applies.
 
 The account key is pool plus the existing 16-hex SHA-256 fingerprint. For Codex
@@ -65,10 +70,13 @@ PUT /v1/quota/presence
 ```
 
 It is a separate record from the quota observation, which deliberately carries
-no host metadata. `host_id` is `PACELEVER_HOST_ID` or `HANDOFFKEEP_HOST_ID` when
-set, otherwise a truncated SHA-256 of the local hostname; the raw hostname is
-never sent. Publication is best-effort: a missing endpoint or an hk error never
-changes a quota verdict and never fails collection. hk must expose this endpoint
+no host metadata. `host_id` is, in order of precedence: `PACELEVER_HOST_ID` or
+`HANDOFFKEEP_HOST_ID` from the environment; `[quota] host_id` from the private
+config (use the machine id placement matches on, e.g. `mac-work`); otherwise a
+truncated SHA-256 of the local hostname. The raw hostname is never sent. The
+configured value may contain only letters, digits, `.`, `_` and `-` (at most 64
+characters); anything else makes the configuration invalid. Publication is
+best-effort: a missing endpoint or an hk error never changes a quota verdict and never fails collection. hk must expose this endpoint
 for records to persist; pacelever does not create it.
 
 Omit `quota.url` to retain the existing local collection behavior. Tests use an

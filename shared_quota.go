@@ -21,6 +21,9 @@ func (q QuotaConfig) Validate() error {
 	if math.IsNaN(q.FreshTTLS) || math.IsInf(q.FreshTTLS, 0) || math.IsNaN(q.WaitS) || math.IsInf(q.WaitS, 0) || q.FreshTTLS < 0 || q.FreshTTLS > 86400 || q.LeaseTTLS < 0 || q.LeaseTTLS > 120 || q.WaitS < 0 || q.WaitS > 10 {
 		return fmt.Errorf("invalid shared quota TTLs")
 	}
+	if q.HostID != "" && safeHost(q.HostID) != q.HostID {
+		return fmt.Errorf("invalid shared quota host_id")
+	}
 	for pool, fp := range q.Accounts {
 		if !knownPool(pool) || !accountFPRE.MatchString(fp) {
 			return fmt.Errorf("invalid shared quota account fingerprint")
@@ -114,7 +117,11 @@ func (c Collector) sharedSource() ObservationSource {
 	if name == "" {
 		name = "HANDOFFKEEP_TOKEN"
 	}
-	b.Token = os.Getenv(name)
+	// An unset or empty variable keeps the token (and CF Access pair) that
+	// NewBenchClient loaded from the handoffkeep config.env.
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		b.Token = v
+	}
 	b.Client = &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return HKObservationSource{Client: b}
 }
@@ -164,9 +171,12 @@ func (c Collector) accountKey(pool string) (string, bool) {
 }
 
 // presenceHostID is stable per host and never the raw hostname when an explicit
-// identifier is absent.
-func presenceHostID() string {
+// identifier is absent. Precedence: environment, then quota.host_id, then a hash.
+func (q QuotaConfig) presenceHostID() string {
 	if v := strings.TrimSpace(firstEnv("PACELEVER_HOST_ID", "HANDOFFKEEP_HOST_ID")); v != "" {
+		return safeHost(v)
+	}
+	if v := strings.TrimSpace(q.HostID); v != "" {
 		return safeHost(v)
 	}
 	host, _ := os.Hostname()
@@ -180,7 +190,7 @@ func presenceHostID() string {
 // bounded, so it never adds latency to a collection or changes its verdict.
 func (c Collector) publishPresence(source ObservationSource, key string, at time.Time) {
 	publisher, ok := source.(PresenceSource)
-	host := presenceHostID()
+	host := c.Config.Quota.presenceHostID()
 	if !ok || !accountKeyRE.MatchString(key) || host == "" {
 		return
 	}

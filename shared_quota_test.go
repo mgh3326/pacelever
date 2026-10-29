@@ -381,3 +381,104 @@ func TestSharedQuotaClockSkew(t *testing.T) {
 		t.Fatal("unbounded future observation accepted")
 	}
 }
+
+func writeHKConfigEnv(t *testing.T) {
+	t.Helper()
+	isolate(t)
+	path := filepath.Join(configBase(), "handoffkeep", "config.env")
+	body := "HANDOFFKEEP_TOKEN=stored-placeholder\nHANDOFFKEEP_CF_ACCESS_CLIENT_ID=stored-id\nHANDOFFKEEP_CF_ACCESS_CLIENT_SECRET=stored-secret\n"
+	if e := AtomicWrite(path, []byte(body)); e != nil {
+		t.Fatal(e)
+	}
+	t.Setenv("HANDOFFKEEP_CONFIG", path)
+	t.Setenv("HANDOFFKEEP_URL", "")
+	t.Setenv("HANDOFFKEEP_TOKEN", "")
+}
+func sharedClient(t *testing.T, c Collector) BenchClient {
+	t.Helper()
+	source, ok := c.sharedSource().(HKObservationSource)
+	if !ok {
+		t.Fatal("no handoffkeep source")
+	}
+	return source.Client
+}
+func TestSharedSourceKeepsStoredTokenWhenEnvEmpty(t *testing.T) {
+	for _, name := range []string{"", "PACELEVER_TEST_QUOTA_TOKEN"} {
+		writeHKConfigEnv(t)
+		t.Setenv("PACELEVER_TEST_QUOTA_TOKEN", "  ")
+		c := Collector{Config: Config{Quota: QuotaConfig{URL: "https://quota.example.invalid", CredentialEnv: name}}}
+		b := sharedClient(t, c)
+		if b.Token != "stored-placeholder" || b.CFClientID != "stored-id" || b.CFClientSecret != "stored-secret" || b.URL != "https://quota.example.invalid" {
+			t.Fatalf("stored credentials lost for credential_env %q", name)
+		}
+	}
+}
+func TestSharedSourceEnvTokenWins(t *testing.T) {
+	writeHKConfigEnv(t)
+	t.Setenv("PACELEVER_TEST_QUOTA_TOKEN", "env-placeholder")
+	c := Collector{Config: Config{Quota: QuotaConfig{URL: "https://quota.example.invalid", CredentialEnv: "PACELEVER_TEST_QUOTA_TOKEN"}}}
+	if b := sharedClient(t, c); b.Token != "env-placeholder" {
+		t.Fatal("explicit credential env did not win")
+	}
+}
+func TestPresenceHostIDPrecedence(t *testing.T) {
+	t.Setenv("PACELEVER_HOST_ID", "")
+	t.Setenv("HANDOFFKEEP_HOST_ID", "")
+	hashed := QuotaConfig{}.presenceHostID()
+	if !strings.HasPrefix(hashed, "host-") {
+		t.Fatalf("fallback %q", hashed)
+	}
+	q := QuotaConfig{HostID: "mac-work"}
+	if got := q.presenceHostID(); got != "mac-work" {
+		t.Fatalf("config host_id %q", got)
+	}
+	t.Setenv("HANDOFFKEEP_HOST_ID", "oci")
+	if got := q.presenceHostID(); got != "oci" {
+		t.Fatalf("env did not override config: %q", got)
+	}
+	t.Setenv("PACELEVER_HOST_ID", "rpi")
+	if got := q.presenceHostID(); got != "rpi" {
+		t.Fatalf("PACELEVER_HOST_ID %q", got)
+	}
+}
+func TestQuotaHostIDFromConfigFile(t *testing.T) {
+	isolate(t)
+	t.Setenv("PACELEVER_HOST_ID", "")
+	t.Setenv("HANDOFFKEEP_HOST_ID", "")
+	path := filepath.Join(configBase(), "pacelever", "config.toml")
+	if e := AtomicWrite(path, []byte("[quota]\nhost_id = \"mac-dev\"\n")); e != nil {
+		t.Fatal(e)
+	}
+	t.Setenv("PACELEVER_CONFIG", path)
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Quota.presenceHostID(); got != "mac-dev" {
+		t.Fatalf("host_id %q", got)
+	}
+	if e := (QuotaConfig{HostID: "bad host/name"}).Validate(); e == nil || strings.Contains(e.Error(), "bad host") {
+		t.Fatalf("invalid host_id accepted or echoed: %v", e)
+	}
+	if e := (QuotaConfig{HostID: strings.Repeat("a", 65)}).Validate(); e == nil {
+		t.Fatal("overlong host_id accepted")
+	}
+}
+func TestPresenceUsesConfiguredHostID(t *testing.T) {
+	t.Setenv("PACELEVER_HOST_ID", "")
+	t.Setenv("HANDOFFKEEP_HOST_ID", "")
+	f := &fakeHK{presenceDone: make(chan struct{}, 1)}
+	c := sharedCollector(t, f)
+	c.Config.Quota.HostID = "desktop"
+	collectShared(t, c)
+	select {
+	case <-f.presenceDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("presence never ran")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.presence) != 1 || f.presence[0].HostID != "desktop" {
+		t.Fatalf("presence %+v", f.presence)
+	}
+}
