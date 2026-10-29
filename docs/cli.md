@@ -11,7 +11,7 @@ Run `pacelever --help` for a compact command list.
 | `policy list`, `set POOL [CLASS]`, `clear POOL` | Pool control plane |
 | `policy profile NAME on\|off\|clear` | Profile subscription override |
 | `policy setting altlane_pace_multiple VALUE\|none` | Pace threshold |
-| `manual set POOL`, `list [POOL]`, `clear POOL` | Bounded fallback observations |
+| `manual set POOL`, `list [POOL]`, `clear POOL` | Bounded fallback observations; `--credit-balance/--credit-total/--expires` records a credit pool |
 | `bench catalog list\|status [--check]` | Canonical catalog and provenance |
 | `bench push-catalog FILE [--dry-run]` | Explicit operator catalog PUT |
 | `bench push-catalog --emit-seed` | Emit bundled catalog without a write |

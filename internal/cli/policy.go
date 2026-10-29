@@ -229,10 +229,24 @@ func (a *App) manual(ctx context.Context, v args) (int, error) {
 		}
 		return 0, a.Collector.ClearManual(ctx, pool)
 	case "set":
-		if e := v.required("measured-at", "reason"); e != nil {
-			return 2, e
+		creditForm := firstValue(v.get("remaining"), v.get("total"), v.get("expires-on"), v.get("credit-balance"), v.get("credit-total"), v.get("expires")) != ""
+		if !creditForm {
+			if e := v.required("measured-at", "reason"); e != nil {
+				return 2, e
+			}
+		} else if pool == "" {
+			return 2, fmt.Errorf("pool required")
 		}
-		m := pl.ManualObservation{Pool: pool, Window: v.get("window"), MeasuredAt: v.get("measured-at"), Reason: v.get("reason"), ResetsAt: v.get("resets-at")}
+		measured, reason := v.get("measured-at"), v.get("reason")
+		if creditForm {
+			if measured == "" {
+				measured = time.Now().UTC().Format(time.RFC3339Nano)
+			}
+			if reason == "" {
+				reason = "credit balance observed"
+			}
+		}
+		m := pl.ManualObservation{Pool: pool, Window: v.get("window"), MeasuredAt: measured, Reason: reason, ResetsAt: v.get("resets-at")}
 		if v.get("used") != "" {
 			used, e := v.float("used", 0)
 			if e != nil {
@@ -240,16 +254,27 @@ func (a *App) manual(ctx context.Context, v args) (int, error) {
 			}
 			m.UsedPct = pl.Pct(used)
 		}
-		if v.get("remaining") != "" || v.get("total") != "" {
-			remaining, e := v.float("remaining", -1)
+		balance, total, expires := v.get("credit-balance"), v.get("credit-total"), v.get("expires")
+		balanceFlag, totalFlag := "credit-balance", "credit-total"
+		if balance == "" {
+			balance, balanceFlag = v.get("remaining"), "remaining"
+		}
+		if total == "" {
+			total, totalFlag = v.get("total"), "total"
+		}
+		if expires == "" {
+			expires = v.get("expires-on")
+		}
+		if balance != "" || total != "" || expires != "" {
+			remaining, e := v.float(balanceFlag, -1)
 			if e != nil {
 				return 2, e
 			}
-			total, e := v.float("total", 0)
+			totalUSD, e := v.float(totalFlag, 0)
 			if e != nil {
 				return 2, e
 			}
-			m.Credit = &pl.Credit{RemainingUSD: remaining, TotalUSD: total, ExpiresOn: v.get("expires-on")}
+			m.Credit = &pl.Credit{RemainingUSD: remaining, TotalUSD: totalUSD, ExpiresOn: expires}
 		}
 		ttl := time.Duration(0)
 		if v.get("ttl") != "" {
@@ -280,6 +305,15 @@ func (a *App) manual(ctx context.Context, v args) (int, error) {
 		return 0, a.json(r)
 	}
 	return 2, fmt.Errorf("unknown manual command")
+}
+
+func firstValue(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func labelID(label pl.ExperimentLabel) string {

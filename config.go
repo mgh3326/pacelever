@@ -24,6 +24,7 @@ type PoolPolicy struct {
 	Plan               string             `toml:"plan" json:"plan,omitempty"`
 	FusionBillingFP    string             `toml:"fusion_billing_fp" json:"-"`
 	InflightReservePct map[string]float64 `toml:"inflight_reserve_pct" json:"inflight_reserve_pct,omitempty"`
+	CreditMaxAgeS      float64            `toml:"credit_max_age_s" json:"credit_max_age_s,omitempty"`
 	OnExhaust          string             `toml:"on_exhaust" json:"on_exhaust,omitempty"`
 	Bin                string             `toml:"bin" json:"bin,omitempty"`
 }
@@ -170,6 +171,9 @@ func LoadConfig() (Config, error) {
 				return c, fmt.Errorf("invalid pools.%s.inflight_reserve_pct.%s", name, window)
 			}
 		}
+		if p.CreditMaxAgeS < 0 {
+			return c, fmt.Errorf("invalid pools.%s.credit_max_age_s", name)
+		}
 		c.Pools[name] = p
 	}
 	sort.Strings(c.Warnings)
@@ -211,6 +215,15 @@ func (c Config) PaceThreshold() float64 {
 		}
 	}
 	return 1.2
+}
+
+// CreditMaxAge bounds how long a hand-entered credit balance is trusted before
+// it is admitted with a staleness warning. It never substitutes a number.
+func (c Config) CreditMaxAge(pool string) time.Duration {
+	if s := c.Pools[pool].CreditMaxAgeS; s > 0 {
+		return time.Duration(s * float64(time.Second))
+	}
+	return 72 * time.Hour
 }
 
 // EditConfig preserves all unrecognized sections and keys. Legacy input is copied

@@ -185,6 +185,11 @@ func gate(in Inputs, req Request) Decision {
 		}
 		return failure(d, Unmeasurable, "swe2_measurement_unavailable: fresh Free tag required for exact rung")
 	}
+	if row.Pool == "anthropic-api" {
+		if decided, handled := in.creditGate(d, now); handled {
+			return decided
+		}
+	}
 	cutoff := policy.Cutoff
 	if in.Config.Pools[row.Pool].Cutoff == 0 && policy.Class == "preserve" {
 		cutoff = 90
@@ -361,6 +366,7 @@ type Recommendation struct {
 	Reason      string            `json:"reason"`
 	UsedPct     *float64          `json:"used_pct"`
 	Promotion   string            `json:"promotion,omitempty"`
+	Credit      *CreditStatus     `json:"credit,omitempty"`
 	Score       float64           `json:"score"`
 	priority    int
 }
@@ -435,6 +441,15 @@ func recommendBase(in Inputs, grade, role, area string) []Recommendation {
 				r.priority = 1
 				pool := triggers[0]
 				r.Promotion = fmt.Sprintf("promoted: %s 7d pace %.2fx >= %.2fx", pool, over[pool], in.Config.PaceThreshold())
+			}
+		}
+		// A paced credit budget above recent use means credit is left on the
+		// table at expiry, so it ranks with the waste promotions.
+		if d.OK && d.Credit != nil {
+			r.Credit = d.Credit
+			if d.Credit.Waste {
+				r.priority = 1
+				r.Promotion = fmt.Sprintf("promoted: credit %s paced $%.2f/d > recent $%.2f/d (expires %s)", row.Pool, d.Credit.DailyBudgetUSD, *d.Credit.RecentDailyUSD, d.Credit.ExpiresOn)
 			}
 		}
 		// Exceptions are tied to the exact current model identity and cannot place
