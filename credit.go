@@ -3,7 +3,6 @@ package pacelever
 import (
 	"fmt"
 	"math"
-	"sort"
 	"time"
 )
 
@@ -43,27 +42,39 @@ func dateOnly(s string) bool {
 
 func round2(v float64) float64 { return math.Round(v*100) / 100 }
 
+// latestCreditObservation returns only the entry the store still points at.
+// History keeps superseded and cleared entries, and a clear removes just the
+// Latest key, so a missing pointer means the balance was cleared.
 func latestCreditObservation(s ManualStore, pool string) (ManualObservation, bool) {
 	id := s.Latest[pool+":credit"]
-	var newest ManualObservation
-	var newestAt time.Time
-	found := false
+	if id == "" {
+		return ManualObservation{}, false
+	}
 	for _, m := range s.History {
-		if m.Pool != pool || m.Window != "credit" || m.Event != "set" || m.Credit == nil {
-			continue
-		}
-		if id != "" && m.ID == id {
+		if m.ID == id && m.Pool == pool && m.Window == "credit" && m.Event == "set" && m.Credit != nil {
 			return m, true
 		}
-		at, e := ParseTime(m.MeasuredAt)
-		if e != nil {
-			continue
-		}
-		if !found || at.After(newestAt) {
-			newest, newestAt, found = m, at, true
-		}
 	}
-	return newest, found
+	return ManualObservation{}, false
+}
+
+// creditLineage walks the supersede chain of the current entry, newest first.
+// A clear breaks the chain, so pre-clear balances never seed a burn rate.
+func creditLineage(s ManualStore, pool string, limit int) []ManualObservation {
+	byID := map[string]ManualObservation{}
+	for _, m := range s.History {
+		byID[m.ID] = m
+	}
+	cur, ok := latestCreditObservation(s, pool)
+	var out []ManualObservation
+	for ok && len(out) < limit {
+		out = append(out, cur)
+		if cur.SupersedesRef == nil {
+			break
+		}
+		cur, ok = byID[*cur.SupersedesRef]
+	}
+	return out
 }
 
 // recentCreditBurn derives a daily spend rate from the two most recent manual
@@ -71,24 +82,17 @@ func latestCreditObservation(s ManualStore, pool string) (ManualObservation, boo
 // stays unknown.
 func recentCreditBurn(s ManualStore, pool string, now time.Time) *float64 {
 	const recent = 7 * 24 * time.Hour
-	var entries []ManualObservation
-	for _, m := range s.History {
-		if m.Pool != pool || m.Window != "credit" || m.Event != "set" || m.Credit == nil {
+	entries := creditLineage(s, pool, 8)
+	for i := 0; i+1 < len(entries); i++ {
+		newer, older := entries[i], entries[i+1]
+		at, e := ParseTime(newer.MeasuredAt)
+		if e != nil || now.Sub(at) > recent || now.Sub(at) < 0 {
 			continue
 		}
-		if _, e := ParseTime(m.MeasuredAt); e != nil {
+		prev, e := ParseTime(older.MeasuredAt)
+		if e != nil {
 			continue
 		}
-		entries = append(entries, m)
-	}
-	sort.SliceStable(entries, func(i, j int) bool { return entries[i].MeasuredAt < entries[j].MeasuredAt })
-	for i := len(entries) - 1; i > 0; i-- {
-		newer, older := entries[i], entries[i-1]
-		at, _ := ParseTime(newer.MeasuredAt)
-		if now.Sub(at) > recent || now.Sub(at) < 0 {
-			continue
-		}
-		prev, _ := ParseTime(older.MeasuredAt)
 		days := at.Sub(prev).Hours() / 24
 		if days < 1.0/24 || newer.Credit.RemainingUSD > older.Credit.RemainingUSD {
 			continue

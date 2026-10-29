@@ -12,6 +12,9 @@ func creditEntry(id string, at time.Time, balance float64, expires string) Manua
 func creditStore(entries ...ManualObservation) ManualStore {
 	s := ManualStore{Latest: map[string]string{}}
 	for _, m := range entries {
+		if prior := s.Latest[m.Pool+":"+m.Window]; prior != "" {
+			m.SupersedesRef = &prior
+		}
 		s.History = append(s.History, m)
 		s.Latest[m.Pool+":"+m.Window] = m.ID
 	}
@@ -91,6 +94,29 @@ func TestCreditGate(t *testing.T) {
 	d = Gate(Inputs{Now: testNow, Config: cfg, Manual: creditStore(stale)}, req)
 	if d.ExitCode != Admitted || d.Credit == nil || d.Credit.Stale {
 		t.Fatalf("configured max age ignored: %s", d.Reason)
+	}
+}
+
+func TestCreditClearBreaksPacing(t *testing.T) {
+	store := creditStore(
+		creditEntry("old", testNow.Add(-72*time.Hour), 170, "2026-11-16"),
+		creditEntry("new", testNow.Add(-24*time.Hour), 150, "2026-11-16"),
+	)
+	delete(store.Latest, "anthropic-api:credit")
+	if _, ok := (Inputs{Now: testNow, Manual: store}).CreditStatus("anthropic-api"); ok {
+		t.Fatal("cleared balance revived from history")
+	}
+	if d := Gate(Inputs{Now: testNow, Manual: store}, Request{Profile: "pi-sonnet55", Effort: "high", Role: "worker"}); d.ExitCode != Unmeasurable {
+		t.Fatalf("cleared credit admitted: %d %s", d.ExitCode, d.Reason)
+	}
+
+	// A balance set after a clear starts a new lineage: the pre-clear entry
+	// cannot seed a burn rate for it.
+	store.History = append(store.History, creditEntry("fresh", testNow.Add(-time.Hour), 150, "2026-11-16"))
+	store.Latest["anthropic-api:credit"] = "fresh"
+	got, ok := (Inputs{Now: testNow, Manual: store}).CreditStatus("anthropic-api")
+	if !ok || got.RecentDailyUSD != nil || got.Waste {
+		t.Fatalf("pre-clear balance seeded the new lineage: %+v", got)
 	}
 }
 
