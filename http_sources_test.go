@@ -567,6 +567,7 @@ func TestAgyWakeRefreshesExpiredToken(t *testing.T) {
 		return response(401, `{}`), nil
 	})
 	p := newAgyProvider(home, Config{}, client)
+	p.localProcs = func(context.Context) []agyLocalProc { return nil }
 	if p.wake == nil {
 		t.Fatal("fake agy binary not resolved")
 	}
@@ -599,6 +600,7 @@ func TestAgyWakeFailureKeepsAuthHint(t *testing.T) {
 		return response(401, `{}`), nil
 	})
 	p := newAgyProvider(home, Config{}, client)
+	p.localProcs = func(context.Context) []agyLocalProc { return nil }
 	p.secrets = stubSecrets{}
 	o := p.Fetch(context.Background())
 	if o.ErrorKind != "auth_failed" || !strings.Contains(o.Error, "agy models") {
@@ -624,6 +626,7 @@ func TestAgyMissingBinaryKeepsAuthHint(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	client := doFunc(func(*http.Request) (*http.Response, error) { return response(401, `{}`), nil })
 	p := newAgyProvider(home, Config{}, client)
+	p.localProcs = func(context.Context) []agyLocalProc { return nil }
 	p.secrets = stubSecrets{}
 	if p.wake != nil {
 		t.Fatal("wake available without an agy binary")

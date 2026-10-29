@@ -1032,13 +1032,21 @@ type agyProvider struct {
 	// directories differ (default runs and herdr events). Empty relies on
 	// the caller's own serialization.
 	wakeLock string
+	// The app's local server source (agy_local.go): running processes,
+	// their listening ports and the loopback client. localProcs nil means
+	// no local source; localPorts nil skips the TLS-port fallback.
+	localProcs func(context.Context) []agyLocalProc
+	localPorts func(context.Context, int) []int
+	localHTTP  HTTPDoer
 }
 
 func newAgyProvider(home string, cfg Config, client HTTPDoer) agyProvider {
 	p := agyProvider{
-		client: client,
-		now:    time.Now,
-		file:   func() string { return agyToken(home) },
+		client:     client,
+		now:        time.Now,
+		file:       func() string { return agyToken(home) },
+		localProcs: agyLocalProcesses,
+		localPorts: agyListenPorts,
 	}
 	if runtime.GOOS == "darwin" {
 		p.secrets = agyKeychain{}
@@ -1066,6 +1074,12 @@ func (p agyProvider) Fetch(ctx context.Context) Observation {
 	now := p.now
 	if now == nil {
 		now = time.Now
+	}
+	// The running app's own server answers without a stored credential, so
+	// it is strictly safer than the token path and goes first; any local
+	// failure falls back to today's cloud source unchanged.
+	if o, ok := p.local(ctx); ok {
+		return o
 	}
 	token := p.fileToken()
 	usedSecret := false
