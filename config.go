@@ -45,6 +45,7 @@ type BenchConfig struct {
 type QuotaConfig struct {
 	URL                string            `toml:"url"`
 	CredentialEnv      string            `toml:"credential_env"`
+	HostID             string            `toml:"host_id"`
 	FreshTTLS          float64           `toml:"fresh_ttl_s"`
 	LeaseTTLS          int               `toml:"lease_ttl_s"`
 	WaitS              float64           `toml:"wait_s"`

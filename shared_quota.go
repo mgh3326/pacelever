@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,6 +21,9 @@ var accountFPRE = regexp.MustCompile(`^[0-9a-f]{16}$`)
 func (q QuotaConfig) Validate() error {
 	if math.IsNaN(q.FreshTTLS) || math.IsInf(q.FreshTTLS, 0) || math.IsNaN(q.WaitS) || math.IsInf(q.WaitS, 0) || q.FreshTTLS < 0 || q.FreshTTLS > 86400 || q.LeaseTTLS < 0 || q.LeaseTTLS > 120 || q.WaitS < 0 || q.WaitS > 10 {
 		return fmt.Errorf("invalid shared quota TTLs")
+	}
+	if q.HostID != "" && safeHost(q.HostID) != q.HostID {
+		return fmt.Errorf("invalid shared quota host_id")
 	}
 	for pool, fp := range q.Accounts {
 		if !knownPool(pool) || !accountFPRE.MatchString(fp) {
@@ -109,14 +113,42 @@ func (c Collector) sharedSource() ObservationSource {
 		return nil
 	}
 	b := NewBenchClient(c.Config)
+	// The stored token and CF Access pair were loaded for b.URL. Reuse them only
+	// when the quota endpoint is the same origin; otherwise they must not leave
+	// for a different (or mistyped, or plaintext) host.
+	if !sameOrigin(b.URL, c.Config.Quota.URL) {
+		b.Token, b.CFClientID, b.CFClientSecret = "", "", ""
+	}
 	b.URL = c.Config.Quota.URL
 	name := c.Config.Quota.CredentialEnv
 	if name == "" {
 		name = "HANDOFFKEEP_TOKEN"
 	}
-	b.Token = os.Getenv(name)
+	// An unset or empty variable keeps the token that NewBenchClient loaded
+	// from config.env (same-origin only, above); a non-empty one always wins.
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		b.Token = v
+	}
 	b.Client = &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return HKObservationSource{Client: b}
+}
+
+// sameOrigin reports whether two URLs share scheme, host and port. An empty or
+// unparsable URL never matches.
+func sameOrigin(a, b string) bool {
+	origin := func(raw string) string {
+		u, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || u.Scheme == "" || u.Hostname() == "" {
+			return ""
+		}
+		scheme, port := strings.ToLower(u.Scheme), u.Port()
+		if port == "" {
+			port = map[string]string{"https": "443", "http": "80"}[scheme]
+		}
+		return scheme + "://" + strings.ToLower(u.Hostname()) + ":" + port
+	}
+	oa := origin(a)
+	return oa != "" && oa == origin(b)
 }
 
 // Resolve identity before any provider request, using exactly the provider hash.
@@ -164,9 +196,12 @@ func (c Collector) accountKey(pool string) (string, bool) {
 }
 
 // presenceHostID is stable per host and never the raw hostname when an explicit
-// identifier is absent.
-func presenceHostID() string {
+// identifier is absent. Precedence: environment, then quota.host_id, then a hash.
+func (q QuotaConfig) presenceHostID() string {
 	if v := strings.TrimSpace(firstEnv("PACELEVER_HOST_ID", "HANDOFFKEEP_HOST_ID")); v != "" {
+		return safeHost(v)
+	}
+	if v := strings.TrimSpace(q.HostID); v != "" {
 		return safeHost(v)
 	}
 	host, _ := os.Hostname()
@@ -180,7 +215,7 @@ func presenceHostID() string {
 // bounded, so it never adds latency to a collection or changes its verdict.
 func (c Collector) publishPresence(source ObservationSource, key string, at time.Time) {
 	publisher, ok := source.(PresenceSource)
-	host := presenceHostID()
+	host := c.Config.Quota.presenceHostID()
 	if !ok || !accountKeyRE.MatchString(key) || host == "" {
 		return
 	}

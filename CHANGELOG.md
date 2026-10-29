@@ -10,6 +10,12 @@
   (default 99, or 90 for preserve), refuses at zero, past the cutoff or past
   expiry, and admits a stale entry with a warning bounded by `credit_max_age_s`
   (default 3 days).
+- Shared quota keeps the handoffkeep `config.env` token and CF Access credentials
+  when the `credential_env` variable is unset or empty instead of blanking the
+  token, but only if `quota.url` is the same origin as the stored
+  `HANDOFFKEEP_URL`; a non-empty variable still wins.
+- Add `[quota] host_id` for the presence host id; precedence is environment, then
+  config, then the hashed hostname.
 - Merge Antigravity's per-model quota list into the `agy` observation so a
   metering group the quota summary omits (e.g. this account's gemini session
   window) still reaches the gate; an unmappable model stays under the `unknown`
