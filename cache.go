@@ -120,8 +120,18 @@ func updateSnapshot(ownPath, pool string, obs Observation, now time.Time, previo
 			entry.FetchedAt = previous.FetchedAt
 			entry.Result = previous.Result
 		}
-		if obs.Error == "" && obs.Warning == "" && len(obs.Buckets) > 0 {
+		if obs.Error == "" && obs.Warning == "" && (len(obs.Buckets) > 0 || obs.FreeBucket != nil) {
+			prior := entry
+			if pool == "devin" && obs.FreeBucket != nil {
+				// Adding the shared organization identity must not move existing
+				// local free-limit records to a different cache identity.
+				obs.AccountFP, obs.AccountFPKind = prior.Result.AccountFP, prior.Result.AccountFPKind
+			}
 			entry = CacheEntry{FetchedAt: float64(now.UnixMilli()) / 1000, Result: obs}
+			if pool == "devin" && obs.FreeBucket != nil && len(obs.Buckets) == 0 && prior.NegativeUntil > entry.FetchedAt && prior.LastError != nil && prior.LastError.ErrorKind == "rate_limited" {
+				// A successful free-state publication does not end paid-probe backoff.
+				entry.LastError, entry.LastErrorAt, entry.NegativeUntil = prior.LastError, prior.LastErrorAt, prior.NegativeUntil
+			}
 		} else if obs.ErrorKind != "probe_in_progress" {
 			entry.LastError = &obs
 			entry.LastErrorAt = float64(now.UnixMilli()) / 1000

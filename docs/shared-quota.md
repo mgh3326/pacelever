@@ -37,12 +37,18 @@ plaintext downgrade) no stored token or CF Access pair is sent; set the variable
 named by `credential_env` explicitly. Tokens are never logged. HTTPS is required; the existing explicit `bench.allow_plaintext_quota_share` opt-in is
 available for controlled testing. Existing CF Access credential support applies.
 
-The account key is pool plus the existing 16-hex SHA-256 fingerprint. For Codex
-and Claude it is resolved before measuring from the selected local CLI identity,
+The account key is pool plus a 16-hex SHA-256 fingerprint. For Codex,
+Claude and Devin it is resolved before measuring from the local CLI identity,
 using the exact existing `codex-account|account_id` or
-`claude-account|accountUuid` hash. Neither raw identity nor tokens are sent.
+`claude-account|accountUuid` hash, or `devin-account|org_id` for Devin.
+Devin reads `devin.org_id` from `$XDG_CONFIG_HOME/devin/config.json` and requires
+a non-empty `windsurf_api_key` in `$XDG_DATA_HOME/devin/credentials.toml` to
+confirm a local login. The XDG defaults are `~/.config` and `~/.local/share`.
+The API key is never a fingerprint input. A missing login, missing organization
+or unreadable file leaves Devin's identity unknown; a token alone is insufficient.
+No identity lookup makes a network request. Neither raw identity nor tokens are sent.
 An explicit `quota.accounts` mapping lets a host read an account without its CLI
-login. Only keys in `measurable_accounts` may probe; for Codex/Claude the selected
+login. Only keys in `measurable_accounts` may probe; for Codex/Claude/Devin the
 local identity must also match. For other pools, configure the fingerprint
 explicitly and list it as measurable only where that account's CLI is logged in.
 The herdr event's CLI selectors also select the identity used for the key.
@@ -53,9 +59,9 @@ Items 1 and 2 gate reads — without them the read fails before any provider is
 contacted. Item 3 gates probing and publishing; a host that only reads fresh
 shared observations does not need it.
 
-1. **An account key for every measured pool.** `claude` and `codex` derive
+1. **An account key for every measured pool.** `claude`, `codex` and `devin` derive
    their fingerprint from the local CLI login; every other pool (`grok`,
-   `commandcode`, `agy`, `devin`, …) has no local derivation and gets its key
+   `commandcode`, `agy`, …) has no local derivation and gets its key
    only from `[quota.accounts]`. Without an entry the account key is empty and
    every read for that pool fails as `account_unknown`.
 2. **Plaintext opt-in for an `http://` hk endpoint.** HTTPS is the default;
@@ -87,7 +93,7 @@ measurable_accounts = [
 
 [quota.accounts]
 grok = "fedcba9876543210"            # required: grok has no local derivation
-# claude/codex derive from the local CLI login; add them here only to pin a
+# claude/codex/devin derive from the local CLI login; add them here only to pin a
 # specific account fingerprint.
 ```
 
@@ -95,7 +101,7 @@ Failure signatures:
 
 | Symptom | Cause |
 |---|---|
-| `account_unknown` | pool has no `quota.accounts` entry and no local claude/codex derivation |
+| `account_unknown` | pool has no `quota.accounts` entry and no local claude/codex/devin derivation |
 | `shared_unavailable` on every read | `http://` url without `allow_plaintext_quota_share = true`, or hk unreachable/not granting |
 | reads but never probes | key missing from `measurable_accounts`, or not granted via `HANDOFFKEEP_QUOTA_<client>` |
 
@@ -124,6 +130,87 @@ Free-form reasons and local legacy audit fields are not transmitted. Host-local
 manual entries are ignored in shared mode; re-enter a valid observation once
 with the shared configuration enabled. Manual expiry and reset checks still
 apply, and a shared outage cannot be hidden by old local manual data.
+
+## Devin SWE-2 free state (runtug wire contract)
+
+**Server prerequisite:** deploy additive handoffkeep support for the optional
+`free_bucket` observation field and allow `kind: "auto"` with `buckets: []` when
+that field is valid. Earlier servers reject the unknown field or the empty
+percentage list. Their rejection follows the existing shared publication failure
+path (`shared_publish_failed`, stale/degraded local fallback); it does not change
+the local SWE-2 gate result. This client change does not deploy the server.
+The server must validate, persist, return and include `free_bucket` in observation
+deduplication. Scope this field to `devin` account keys and automatic observations;
+manual observations and all other pool schemas retain their existing behavior.
+
+Devin's SWE-2 free bucket has no measurable utilization. For `devin:<fingerprint>`,
+an automatic observation therefore carries this additive field alongside the
+existing paid percentage buckets. The same lease and presence paths apply.
+The JSON below is the `observation` object inside the existing publication
+envelope (`{"holder":"<lease-holder>","observation":...}`); `GET .../latest`
+returns it as `observation` with the usual server-assigned `id`.
+
+Available, with no percentage measurement:
+
+```json
+{
+  "kind": "auto",
+  "measured_at": "2026-10-30T00:00:00Z",
+  "buckets": [],
+  "free_bucket": {"state": "available"}
+}
+```
+
+An exceed recorded with `pacelever observe devin-free-limit ...`, held until T:
+
+```json
+{
+  "kind": "auto",
+  "measured_at": "2026-10-30T00:00:00Z",
+  "buckets": [],
+  "free_bucket": {
+    "state": "exhausted",
+    "resets_at": "2026-10-30T01:00:00Z"
+  }
+}
+```
+
+`free_bucket` has exactly these fields:
+
+| Field | Contract |
+|---|---|
+| `state` | `available`, `exhausted`, or `unknown` |
+| `resets_at` | RFC3339 timestamp, required only for `exhausted`; absent for the other states |
+
+`available` means no active exceed is known, not measured 0% usage. `exhausted`
+applies to `devin-swe2`, `devin-swe2-medium` and `devin-swe2-max` until
+`resets_at`; at or after T a reader treats that state as `available`. A damaged
+local record uses the existing conservative `observed_at + 60 minutes` hold
+when possible; if neither time is readable it publishes
+`{"free_bucket":{"state":"unknown"}}`. `unknown`, an absent field, an invalid
+field, or an observation outside the normal freshness window is insufficient
+evidence for automatic free placement. Apply freshness to the observation as
+usual; an expired exhausted reset does not make an old observation fresh.
+
+A new local exceed bypasses an otherwise fresh shared `available` state and
+is published under the normal account lease. Refreshing hosts preserve any
+active shared exceed, choosing the later reset when a local exceed also exists.
+A damaged local record cannot replace an active shared exceed with `unknown`.
+Consequently a local `--clear` does not erase an active hold published by another
+host; shared readers continue to honor its reset. The local `gate -m devin-swe2*`
+still uses its existing local free-limit records and return codes.
+
+A paid probe is not required to publish this free state. Successful paid
+percentage buckets and plan data keep their existing representation; failed
+paid probes contribute no paid measurement. Free model tags from `models list`
+are omitted from `buckets`, and `free_bucket` never contains `used_pct`.
+An optional paid web source must select the same organization as the CLI login;
+a mismatch is refused as `account_mismatch` rather than published under its key.
+Consumers must not use `free_bucket` as evidence about paid credit availability.
+No account ID, credential, host ID, source job or local audit text appears in
+the observation. A matching, locally logged-in measurable host publishes
+presence through the existing separate endpoint after a successful shared read
+or publication.
 
 ## Host presence
 

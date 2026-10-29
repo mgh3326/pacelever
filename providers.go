@@ -791,7 +791,11 @@ func devinWebProvider(cfg Config, client HTTPDoer, now func() time.Time) Provide
 		now = time.Now
 	}
 	return ProviderFunc(func(ctx context.Context) Observation {
-		return fetchDevinWeb(ctx, token, org, client, now)
+		o := fetchDevinWeb(ctx, token, org, client, now)
+		// Attest the organization captured by this provider, independently of
+		// any later changes to the collector's request configuration.
+		o.PublishFP, o.PublishFPKind = fingerprint("devin-account", org), "account"
+		return o
 	})
 }
 
