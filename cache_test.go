@@ -99,6 +99,17 @@ func TestLegacyBackoffDoesNotBlockOwnProvider(t *testing.T) {
 	if e != nil || rows[0].Error != "provider backoff active" || !rows[0].Stale {
 		t.Fatalf("imported backoff lost without a provider: %+v %v", rows, e)
 	}
+	// When the native fetch fails, the imported measurement serves as stale.
+	c.Providers["codex"] = ProviderFunc(func(context.Context) Observation {
+		return Observation{ID: "codex", Error: "usage HTTP 429", ErrorKind: "rate_limited"}
+	})
+	rows, e = c.Collect(context.Background(), []string{"codex"})
+	if e != nil || rows[0].Error != "usage HTTP 429" || rows[0].ErrorKind != "rate_limited" || !rows[0].Stale {
+		t.Fatalf("failed native fetch did not fall back: %+v %v", rows, e)
+	}
+	if len(rows[0].Buckets) != 1 || *rows[0].Buckets[0].UsedPct != 10 {
+		t.Fatalf("imported measurement lost: %+v", rows[0])
+	}
 }
 func TestOwnBackoffStillBlocks(t *testing.T) {
 	isolate(t)

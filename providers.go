@@ -1041,8 +1041,12 @@ func (p agyProvider) Fetch(ctx context.Context) Observation {
 		o.Error = "antigravity authentication failed; `agy models` could not refresh the login"
 	default:
 		// The wake refreshes the token file, so re-read before retrying once.
-		if fresh := p.fileToken(); fresh != "" && fresh != token {
+		// When no file exists the CLI may have refreshed the keychain entry
+		// instead; re-read whichever store supplied the token.
+		if fresh := p.fileToken(); fresh != "" {
 			token, usedSecret = fresh, false
+		} else if fresh := p.secretToken(ctx); usedSecret && fresh != "" {
+			token = fresh
 		}
 		if o = fetchAgy(ctx, token, p.client, now); o.ErrorKind != "auth_failed" {
 			return o
@@ -1052,10 +1056,13 @@ func (p agyProvider) Fetch(ctx context.Context) Observation {
 		}
 	}
 	// A file credential that is missing or still refused after the refresh
-	// falls back to the keychain copy the CLI keeps.
+	// falls back to the keychain copy the CLI keeps. A refused fallback keeps
+	// the refresh hint rather than masking it behind the same auth failure.
 	if !secretRefused {
 		if secret := p.secretToken(ctx); secret != "" && secret != token {
-			o = fetchAgy(ctx, secret, p.client, now)
+			if alt := fetchAgy(ctx, secret, p.client, now); alt.Error == "" {
+				o = alt
+			}
 		}
 	}
 	return o
