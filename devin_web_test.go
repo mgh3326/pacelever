@@ -165,6 +165,25 @@ func TestDevinWebProviderNeedsTokenAndOrg(t *testing.T) {
 	}
 }
 
+func TestDevinWebProviderAttestsSelectedOrganization(t *testing.T) {
+	t.Setenv("DEVIN_BEARER_TOKEN", "fixture-token")
+	cfg := Config{Pools: map[string]PoolPolicy{"devin": {OrgID: "org-fixture"}}}
+	provider := devinWebProvider(cfg, doFunc(func(r *http.Request) (*http.Response, error) {
+		if !strings.Contains(r.URL.Path, "/org-fixture/") {
+			t.Error("provider changed its selected organization")
+		}
+		return response(200, `{"weekly_percentage":42}`), nil
+	}), fixedNow)
+	// Collector configuration may change after constructing a provider. Its
+	// attestation must still identify the organization that supplied this value.
+	cfg.Pools["devin"] = PoolPolicy{OrgID: "org-other-fixture"}
+	o := provider.Fetch(context.Background())
+	fp, kind := identity(o)
+	if o.Error != "" || fp != fingerprint("devin-account", "org-fixture") || kind != "account" {
+		t.Fatalf("provider identity did not attest its actual selection: %+v", o)
+	}
+}
+
 func TestDevinProviderPrefersWeb(t *testing.T) {
 	t.Setenv("DEVIN_BEARER_TOKEN", "fixture-token")
 	cfg := Config{Pools: map[string]PoolPolicy{"devin": {OrgID: "org-fixture"}}}

@@ -41,6 +41,7 @@ type Bucket struct {
 }
 type Observation struct {
 	Degraded       bool                `json:"degraded,omitempty"`
+	FreeBucket     *FreeBucketState    `json:"free_bucket,omitempty"`
 	SharedManual   []ManualObservation `json:"-"`
 	ID             string              `json:"id"`
 	Plan           string              `json:"plan,omitempty"`
