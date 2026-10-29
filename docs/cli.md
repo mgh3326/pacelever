@@ -11,7 +11,7 @@ Run `pacelever --help` for a compact command list.
 | `policy list`, `set POOL [CLASS]`, `clear POOL` | Pool control plane |
 | `policy profile NAME on\|off\|clear` | Profile subscription override |
 | `policy setting altlane_pace_multiple VALUE\|none` | Pace threshold |
-| `manual set POOL`, `list [POOL]`, `clear POOL` | Bounded fallback observations |
+| `manual set POOL`, `list [POOL]`, `clear POOL` | Bounded fallback observations; `--credit-balance/--credit-total/--expires` records a credit pool |
 | `bench catalog list\|status [--check]` | Canonical catalog and provenance |
 | `bench push-catalog FILE [--dry-run]` | Explicit operator catalog PUT |
 | `bench push-catalog --emit-seed` | Emit bundled catalog without a write |
@@ -55,8 +55,13 @@ the server's operator credential.
 ```sh
 pacelever observe devin-free-limit --reset '<RFC3339_RESET>' \
   --observed '<RFC3339_OBSERVATION>' --rung devin-swe2 --source job:example
+pacelever observe devin-free-limit --unparsed --observed '<RFC3339_OBSERVATION>' \
+  --rung devin-swe2 --source job:example   # reset unreadable: held 60 minutes
 pacelever observe devin-free-limit --clear
 ```
+
+The recorded exceed makes the SWE-2 free rungs refuse with
+`free limit exceeded until <reset>` (exit 3) until the reset passes.
 
 `models verify` sends a minimal one-token completion to compare the serving model
 with its recorded baseline. It returns 0 for matches, 1 for drift, 2 for unknown.

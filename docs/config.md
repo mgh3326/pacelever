@@ -53,6 +53,15 @@ profile override can re-enable that profile on an unsubscribed pool.
 `fusion_billing_fp` optionally selects the billing account for a Fusion lead;
 its value is not printed by policy list.
 
+Credit pools (`anthropic-api`) accept `credit_max_age_s`, defaulting to 259200
+(three days). A hand-entered balance older than that still admits with a
+`credit_stale` warning; pacelever never replaces an old balance with a guess.
+
+```toml
+[pools.anthropic-api]
+credit_max_age_s = 259200
+```
+
 ```sh
 pacelever policy set claude spend --until 2027-01-01 --boost 10
 pacelever policy set codex --inflight-reserve 5h=2 --inflight-reserve 7d=1
@@ -121,6 +130,8 @@ pacelever manual set claude --window 5h --used 20 \
   --measured-at '<RFC3339_TIME>' --ttl 30m --reason 'operator observation'
 pacelever manual set claude --window 7d --used 30 \
   --measured-at '<RFC3339_TIME>' --ttl 30m --reason 'operator observation'
+pacelever manual set --pool anthropic-api --credit-balance 150 --credit-total 200 \
+  --expires '2026-11-16T00:00:00Z' --reason 'console balance'
 pacelever manual set anthropic-api --window credit --remaining 75 --total 100 \
   --expires-on 2027-01-01 --measured-at '<RFC3339_TIME>' --reason 'balance observed'
 pacelever manual list
@@ -130,7 +141,43 @@ Non-credit observations default to 30 minutes and are limited to two hours.
 Credit observations last until their recorded expiry. Reset timestamps cap the
 observation's effective life. Required-window coverage must be complete for a
 manual fallback. It is visibly self-reported and unverified; it cannot hide a
-confirmed automatic cutoff or prove a SWE-2 Free tag.
+confirmed automatic cutoff.
+
+### SWE-2 free bucket
+
+The SWE-2 free bucket (`devin-swe2`, `devin-swe2-medium`, `devin-swe2-max`)
+cannot be measured, so the gate never asks for a fresh measurement of it. A rung
+is admitted as `available (free)` unless a free-limit exceed is on record. The
+exceed is stored by `pacelever observe devin-free-limit` with its reset time and
+covers all three rungs. Until that reset passes, the gate refuses with exit 3 and
+`free limit exceeded until <reset>`; afterwards the rung is admitted again. The
+same wording appears in the text output, `--json` and `--gate-output`.
+
+An observation whose reset time cannot be read (`--unparsed` with no `--reset`)
+is held for a conservative 60 minutes from its observed time (now, when
+`--observed` is omitted), and the hold is logged to stderr. A malformed
+`--observed` or `--reset` is refused; an empty reset is never stored. The gate
+also fails closed on a stored record whose `reset_at` is empty or unreadable: it
+holds for 60 minutes after `observed_at`, and refuses with
+`free limit record unreadable` when `observed_at` is unusable too (clear it with
+`observe devin-free-limit --clear`). Account-level daily and weekly measurements are untouched:
+they still gate every non-free Devin rung, and are only echoed on an admitted
+free rung.
+
+A credit entry records the operator's Console balance: `--credit-balance` and
+`--credit-total` (aliases `--remaining` and `--total`) plus `--expires` (alias
+`--expires-on`), which accepts RFC3339 or `YYYY-MM-DD`. The credit form defaults
+`--measured-at` to now and `--reason` to `credit balance observed`. Status shows
+the balance, expiry, days left and the paced daily budget (`balance ÷ days
+left`), and flags `WASTE` when that budget is above the burn rate derived from
+the two most recent hand-entered balances — credit that would otherwise be left
+unused at expiry, so ranking prefers it. The gate applies the same pool policy as
+any other pool to the balance-derived used percentage: an operator `cutoff`
+(default 99, or 90 for `preserve`) and any `inflight_reserve_pct` headroom.
+It admits while the balance is positive and unexpired and below that cutoff;
+`balance ≤ 0`, a balance at or past the cutoff, or an expired entry refuses
+admission. A stale entry still admits, with a warning, so the operator can
+update it by hand.
 
 `PACELEVER_QUOTA_SHARE=0` disables peer snapshot exchange. `PACELEVER_NOTIFY=0`
 disables exhaustion notices. `PACELEVER_STALE_WARN=0` disables stale-build checks.

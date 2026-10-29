@@ -64,6 +64,28 @@ func TestConfigMalformedDoesNotLeak(t *testing.T) {
 	}
 }
 
+func TestCreditMaxAgeConfig(t *testing.T) {
+	isolate(t)
+	if e := AtomicWrite(ConfigPath(), []byte("[pools.anthropic-api]\ncredit_max_age_s = 7200\n")); e != nil {
+		t.Fatal(e)
+	}
+	c, e := LoadConfig()
+	if e != nil || c.CreditMaxAge("anthropic-api").Hours() != 2 {
+		t.Fatalf("configured max age %v %v", c.CreditMaxAge("anthropic-api"), e)
+	}
+	if c.CreditMaxAge("claude").Hours() != 72 {
+		t.Fatalf("default max age %v", c.CreditMaxAge("claude"))
+	}
+	for _, value := range []string{"-1", "inf", "nan", "1e12"} {
+		if e := AtomicWrite(ConfigPath(), []byte("[pools.anthropic-api]\ncredit_max_age_s = "+value+"\n")); e != nil {
+			t.Fatal(e)
+		}
+		if _, e = LoadConfig(); e == nil {
+			t.Fatalf("credit_max_age_s = %s accepted", value)
+		}
+	}
+}
+
 func TestLegacyManualAuditPreserved(t *testing.T) {
 	isolate(t)
 	path := filepath.Join(filepath.Dir(legacyCachePath()), "manual.json")

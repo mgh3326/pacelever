@@ -16,7 +16,14 @@ type Inputs struct {
 	// nil denotes an unknown count, which is visible and never invents a reserve.
 	Inflight       map[string]*int
 	AreaExceptions []AreaException
+	// FreeLimit is the recorded SWE-2 free-limit exceed, if any. The gate
+	// refuses the free rungs until its reset time passes.
+	FreeLimit *LimitRecord
 }
+
+// FreeAvailable is the gate wording for an admitted SWE-2 free rung.
+const FreeAvailable = "available (free)"
+
 type AreaException struct {
 	Profile string `json:"profile"`
 	Effort  string `json:"effort"`
@@ -159,31 +166,47 @@ func gate(in Inputs, req Request) Decision {
 	}
 	isFree := canonical == "devin-swe2" || canonical == "devin-swe2-medium" || canonical == "devin-swe2-max"
 	if isFree {
+		// The SWE-2 free bucket cannot be measured. It is available unless a
+		// free-limit exceed is on record and its reset time has not passed.
 		rung := map[string]string{"devin-swe2": "swe-2-high", "devin-swe2-medium": "swe-2-medium", "devin-swe2-max": "swe-2-max"}[canonical]
-		if !obs.Stale && (obs.FetchedAt == 0 || now.Sub(time.UnixMilli(int64(obs.FetchedAt*1000))) <= 180*time.Second) {
-			for _, b := range obs.Buckets {
-				if b.Scope.Kind == "model" && b.Scope.Name == rung && validPct(b.UsedPct) && !b.Locked && *b.UsedPct == 0 {
-					d.OK = true
-					d.ExitCode = Admitted
-					d.UsedPct = Pct(0)
-					d.GateBasis = "model-scope:" + rung
-					d.FreeTag = "Free"
-					d.Reason = "SWE-2 free bucket; account credits do not constrain this rung"
-					for _, a := range obs.Buckets {
-						if a.Scope.Kind == "account" {
-							if a.Window == "1d" {
-								d.AccountDailyPct = a.UsedPct
-							}
-							if a.Window == "7d" {
-								d.AccountWeeklyPct = a.UsedPct
-							}
-						}
-					}
-					return d
+		if in.FreeLimit != nil {
+			reset, e := in.FreeLimit.EffectiveReset()
+			if e != nil {
+				return failure(d, Blocked, "free limit record unreadable ("+e.Error()+"); refusing until it is cleared with observe devin-free-limit --clear")
+			}
+			if reset.After(now) {
+				until := in.FreeLimit.ResetAt
+				if _, pe := ParseTime(until); pe != nil {
+					until = reset.Format(time.RFC3339)
+				}
+				return failure(d, Blocked, "free limit exceeded until "+until)
+			}
+		}
+		d.OK = true
+		d.ExitCode = Admitted
+		d.UsedPct = Pct(0)
+		d.GateBasis = "free-bucket:" + rung
+		d.FreeTag = FreeAvailable
+		d.Reason = FreeAvailable + ": SWE-2 free bucket; account credits do not constrain this rung"
+		for _, b := range obs.Buckets {
+			if b.Scope.Kind == "account" && !obs.Stale {
+				if b.Window == "1d" {
+					d.AccountDailyPct = b.UsedPct
+				}
+				if b.Window == "7d" {
+					d.AccountWeeklyPct = b.UsedPct
 				}
 			}
 		}
-		return failure(d, Unmeasurable, "swe2_measurement_unavailable: fresh Free tag required for exact rung")
+		return d
+	}
+	if row.Pool == "anthropic-api" {
+		if decided, handled := in.creditGate(d, now); handled {
+			if decided.OK && row.Gate == "escalation" && req.OperatorRequest != "" {
+				decided.EscalationOverride = true
+			}
+			return decided
+		}
 	}
 	cutoff := policy.Cutoff
 	if in.Config.Pools[row.Pool].Cutoff == 0 && policy.Class == "preserve" {
@@ -361,6 +384,7 @@ type Recommendation struct {
 	Reason      string            `json:"reason"`
 	UsedPct     *float64          `json:"used_pct"`
 	Promotion   string            `json:"promotion,omitempty"`
+	Credit      *CreditStatus     `json:"credit,omitempty"`
 	Score       float64           `json:"score"`
 	priority    int
 }
@@ -435,6 +459,15 @@ func recommendBase(in Inputs, grade, role, area string) []Recommendation {
 				r.priority = 1
 				pool := triggers[0]
 				r.Promotion = fmt.Sprintf("promoted: %s 7d pace %.2fx >= %.2fx", pool, over[pool], in.Config.PaceThreshold())
+			}
+		}
+		// A paced credit budget above recent use means credit is left on the
+		// table at expiry, so it ranks with the waste promotions.
+		if d.OK && d.Credit != nil {
+			r.Credit = d.Credit
+			if d.Credit.Waste {
+				r.priority = 1
+				r.Promotion = fmt.Sprintf("promoted: credit %s paced $%.2f/d > recent $%.2f/d (expires %s)", row.Pool, d.Credit.DailyBudgetUSD, *d.Credit.RecentDailyUSD, d.Credit.ExpiresOn)
 			}
 		}
 		// Exceptions are tied to the exact current model identity and cannot place

@@ -73,7 +73,7 @@ func (s ManualStore) Valid(pool string, now time.Time) []ManualObservation {
 			continue
 		}
 		if m.Credit != nil {
-			expiry, e := time.Parse("2006-01-02", m.Credit.ExpiresOn)
+			expiry, e := ParseCreditExpiry(m.Credit.ExpiresOn)
 			if e != nil || !expiry.After(now) {
 				continue
 			}
@@ -115,11 +115,14 @@ func prepareManual(m ManualObservation, ttl time.Duration, now time.Time) (Manua
 	expires := measured.Add(ttl)
 	if m.Window == "credit" {
 		if m.Credit == nil || m.Credit.TotalUSD <= 0 || m.Credit.RemainingUSD < 0 || m.Credit.RemainingUSD > m.Credit.TotalUSD {
-			return m, fmt.Errorf("credit requires valid --remaining, --total and --expires-on")
+			return m, fmt.Errorf("credit requires valid --credit-balance, --credit-total and --expires")
 		}
-		expiry, e := time.Parse("2006-01-02", m.Credit.ExpiresOn)
+		expiry, e := ParseCreditExpiry(m.Credit.ExpiresOn)
 		if e != nil || !expiry.After(now) {
 			return m, fmt.Errorf("credit already expired or invalid expiry")
+		}
+		if !dateOnly(m.Credit.ExpiresOn) {
+			m.Credit.ExpiresOn = expiry.UTC().Format(time.RFC3339)
 		}
 		m.UsedPct = Pct(100 * (1 - m.Credit.RemainingUSD/m.Credit.TotalUSD))
 		expires = expiry
