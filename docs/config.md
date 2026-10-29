@@ -73,7 +73,9 @@ Claude directory, with a read-only macOS Keychain fallback. Codex reads
 `COMMAND_CODE_API_KEY` or `COMMANDCODE_API_KEY`, then the API key saved by `cmd`
 in `~/.commandcode/auth.json`. Grok uses the login saved by the `grok` CLI in
 `$GROK_HOME/auth.json` or its default directory. Antigravity uses the login saved
-by `agy` in `~/.gemini/antigravity-cli/antigravity-oauth-token`. ClinePass uses
+by `agy` in `~/.gemini/antigravity-cli/antigravity-oauth-token`, falling back to
+the read-only macOS Keychain entry, and a refused token is refreshed once by
+running `agy models` when the `agy` CLI is installed. ClinePass uses
 `CLINE_API_KEY` or `CLINEPASS_API_KEY`, then `~/.cline/data/settings/providers.json`,
 the existing opencode credential store, or its API-key file. Credentials remain
 in memory and request headers; errors never include their values or HTTP bodies.

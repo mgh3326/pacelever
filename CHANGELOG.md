@@ -5,6 +5,10 @@
 - Read Command Code quota over HTTP (`whoami` then `credits`) and retire its PTY
   probe; refused credentials are `auth_failed` instead of a probe timeout.
 - Read Grok billing over HTTP and add Antigravity's cloud quota summary as `agy`.
+- Refresh a refused Antigravity token by running `agy models` once and retrying,
+  with a read-only macOS Keychain fallback when the token file is missing or
+  stays refused. A legacy scopefuel backoff no longer blocks pools pacelever
+  measures itself; imported measurements still serve as stale fallbacks.
 - Claude keeps a 900-second cache, honours `Retry-After` with a 300-second
   default, and serves its last good value as stale after a rate limit.
 - ClinePass accepts `CLINEPASS_API_KEY` and

@@ -2,7 +2,10 @@ package pacelever
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -401,6 +404,244 @@ func TestAgyAuthFailure(t *testing.T) {
 	o := fetchAgy(context.Background(), "fixture-token", client, fixedNow)
 	if o.ErrorKind != "auth_failed" || !strings.Contains(o.Error, "agy") {
 		t.Fatalf("agy auth %+v", o)
+	}
+}
+
+var agyQuotaBody = `{"groups":[{"displayName":"Gemini Models","buckets":[{"bucketId":"gemini-5h","window":"5h","remainingFraction":0.8,"resetTime":"2026-10-29T06:18:55Z"},{"bucketId":"gemini-weekly","window":"weekly","remainingFraction":0.6,"resetTime":"2026-11-05T01:18:55Z"}]}]}`
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+func writeFakeAgy(t *testing.T, script string) (dir, marker string) {
+	t.Helper()
+	for _, k := range []string{"PACELEVER_AGY_BIN", "SCOPEFUEL_AGY_BIN"} {
+		t.Setenv(k, "")
+	}
+	dir = t.TempDir()
+	marker = filepath.Join(dir, "wake-count")
+	script = "#!/bin/sh\n[ \"$1\" = \"models\" ] || exit 3\necho wake >> " + shellQuote(marker) + "\n" + script
+	if e := os.WriteFile(filepath.Join(dir, "agy"), []byte(script), 0755); e != nil {
+		t.Fatal(e)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return dir, marker
+}
+
+func wakeCount(t *testing.T, marker string) int {
+	t.Helper()
+	b, e := os.ReadFile(marker)
+	if e != nil {
+		return 0
+	}
+	return strings.Count(strings.TrimSpace(string(b)), "\n") + 1
+}
+
+func TestAgyWakeRefreshesExpiredToken(t *testing.T) {
+	isolate(t)
+	home := t.TempDir()
+	dir := filepath.Join(home, ".gemini", "antigravity-cli")
+	if e := os.MkdirAll(dir, 0700); e != nil {
+		t.Fatal(e)
+	}
+	tokenPath := filepath.Join(dir, "antigravity-oauth-token")
+	if e := os.WriteFile(tokenPath, []byte(`{"token":{"access_token":"fixture-expired"}}`), 0600); e != nil {
+		t.Fatal(e)
+	}
+	_, marker := writeFakeAgy(t, "printf '%s' '{\"token\":{\"access_token\":\"fixture-fresh\"}}' > "+shellQuote(tokenPath)+"\n")
+	var tokens []string
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		tokens = append(tokens, token)
+		if token == "fixture-fresh" {
+			return response(200, agyQuotaBody), nil
+		}
+		return response(401, `{}`), nil
+	})
+	p := newAgyProvider(home, Config{}, client)
+	if p.wake == nil {
+		t.Fatal("fake agy binary not resolved")
+	}
+	o := p.Fetch(context.Background())
+	if o.Error != "" || len(o.Buckets) == 0 {
+		t.Fatalf("refresh did not recover: %+v", o)
+	}
+	if len(tokens) != 2 || tokens[0] != "fixture-expired" || tokens[1] != "fixture-fresh" {
+		t.Fatalf("unexpected token sequence %v", tokens)
+	}
+	if wakeCount(t, marker) != 1 {
+		t.Fatal("agy models ran more than once")
+	}
+}
+
+func TestAgyWakeFailureKeepsAuthHint(t *testing.T) {
+	isolate(t)
+	home := t.TempDir()
+	dir := filepath.Join(home, ".gemini", "antigravity-cli")
+	if e := os.MkdirAll(dir, 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.WriteFile(filepath.Join(dir, "antigravity-oauth-token"), []byte(`{"token":{"access_token":"fixture-dead"}}`), 0600); e != nil {
+		t.Fatal(e)
+	}
+	_, marker := writeFakeAgy(t, "exit 1\n")
+	var calls atomic.Int32
+	client := doFunc(func(*http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return response(401, `{}`), nil
+	})
+	p := newAgyProvider(home, Config{}, client)
+	p.secrets = stubSecrets{}
+	o := p.Fetch(context.Background())
+	if o.ErrorKind != "auth_failed" || !strings.Contains(o.Error, "agy models") {
+		t.Fatalf("failed wake did not keep a clear hint: %+v", o)
+	}
+	if calls.Load() != 1 || wakeCount(t, marker) != 1 {
+		t.Fatalf("unexpected retries calls=%d wakes=%d", calls.Load(), wakeCount(t, marker))
+	}
+}
+
+func TestAgyMissingBinaryKeepsAuthHint(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".gemini", "antigravity-cli")
+	if e := os.MkdirAll(dir, 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.WriteFile(filepath.Join(dir, "antigravity-oauth-token"), []byte(`{"token":{"access_token":"fixture-dead"}}`), 0600); e != nil {
+		t.Fatal(e)
+	}
+	for _, k := range []string{"PACELEVER_AGY_BIN", "SCOPEFUEL_AGY_BIN"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("PATH", t.TempDir())
+	client := doFunc(func(*http.Request) (*http.Response, error) { return response(401, `{}`), nil })
+	p := newAgyProvider(home, Config{}, client)
+	p.secrets = stubSecrets{}
+	if p.wake != nil {
+		t.Fatal("wake available without an agy binary")
+	}
+	o := p.Fetch(context.Background())
+	if o.ErrorKind != "auth_failed" || !strings.Contains(o.Error, "agy") {
+		t.Fatalf("missing binary hint lost: %+v", o)
+	}
+}
+
+type stubSecrets struct{ token string }
+
+func (s stubSecrets) agyToken(context.Context) string { return s.token }
+
+type secretFunc func(context.Context) string
+
+func (f secretFunc) agyToken(ctx context.Context) string { return f(ctx) }
+
+func TestAgyKeychainFallbackAfterRefusedFile(t *testing.T) {
+	var tokens []string
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		tokens = append(tokens, token)
+		if token == "fixture-keychain" {
+			return response(200, agyQuotaBody), nil
+		}
+		return response(401, `{}`), nil
+	})
+	p := agyProvider{
+		client:  client,
+		file:    func() string { return "fixture-file" },
+		secrets: stubSecrets{"fixture-keychain"},
+		wake:    func(context.Context) error { return nil },
+	}
+	o := p.Fetch(context.Background())
+	if o.Error != "" || len(o.Buckets) == 0 {
+		t.Fatalf("keychain fallback failed: %+v", o)
+	}
+	if len(tokens) != 3 || tokens[0] != "fixture-file" || tokens[1] != "fixture-file" || tokens[2] != "fixture-keychain" {
+		t.Fatalf("unexpected token order %v", tokens)
+	}
+}
+
+func TestAgyWakeRefreshesKeychainToken(t *testing.T) {
+	current := "fixture-secret-old"
+	var tokens []string
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		tokens = append(tokens, token)
+		if token == "fixture-secret-new" {
+			return response(200, agyQuotaBody), nil
+		}
+		return response(401, `{}`), nil
+	})
+	p := agyProvider{
+		client:  client,
+		file:    func() string { return "" },
+		secrets: secretFunc(func(context.Context) string { return current }),
+		wake: func(context.Context) error {
+			current = "fixture-secret-new"
+			return nil
+		},
+	}
+	o := p.Fetch(context.Background())
+	if o.Error != "" || len(o.Buckets) == 0 {
+		t.Fatalf("refreshed keychain token not picked up: %+v", o)
+	}
+	if len(tokens) != 2 || tokens[0] != "fixture-secret-old" || tokens[1] != "fixture-secret-new" {
+		t.Fatalf("unexpected token order %v", tokens)
+	}
+}
+
+func TestAgyKeychainFailureKeepsHint(t *testing.T) {
+	var calls atomic.Int32
+	client := doFunc(func(*http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return response(401, `{}`), nil
+	})
+	p := agyProvider{
+		client:  client,
+		file:    func() string { return "fixture-file" },
+		secrets: stubSecrets{"fixture-keychain"},
+		wake:    func(context.Context) error { return fmt.Errorf("exit 1") },
+	}
+	o := p.Fetch(context.Background())
+	if o.ErrorKind != "auth_failed" || !strings.Contains(o.Error, "agy models") {
+		t.Fatalf("refused keychain masked the refresh hint: %+v", o)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("unexpected request count %d", calls.Load())
+	}
+}
+
+func TestAgyKeychainUsedWhenFileMissing(t *testing.T) {
+	var tokens []string
+	client := doFunc(func(r *http.Request) (*http.Response, error) {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		tokens = append(tokens, token)
+		return response(200, agyQuotaBody), nil
+	})
+	p := agyProvider{
+		client:  client,
+		file:    func() string { return "" },
+		secrets: stubSecrets{"fixture-keychain"},
+	}
+	o := p.Fetch(context.Background())
+	if o.Error != "" || len(tokens) != 1 || tokens[0] != "fixture-keychain" {
+		t.Fatalf("missing file did not read the keychain: %+v %v", o, tokens)
+	}
+}
+
+func TestAgyEnvelopeToken(t *testing.T) {
+	body := `{"token":{"access_token":"fixture-secret"}}`
+	for _, raw := range []string{
+		"go-keyring-base64:" + base64.StdEncoding.EncodeToString([]byte(body)),
+		"go-keyring-encoded:" + hex.EncodeToString([]byte(body)),
+		body,
+	} {
+		if token := agyEnvelopeToken(raw); token != "fixture-secret" {
+			t.Fatalf("envelope %q decoded to %q", raw, token)
+		}
+	}
+	for _, raw := range []string{"", "go-keyring-base64:!!!", "go-keyring-base64:aGVsbG8=", `{"other":1}`} {
+		if token := agyEnvelopeToken(raw); token != "" {
+			t.Fatalf("envelope %q leaked %q", raw, token)
+		}
 	}
 }
 

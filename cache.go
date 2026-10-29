@@ -23,6 +23,9 @@ type CacheEntry struct {
 	LastError     *Observation `json:"last_error,omitempty"`
 	LastErrorAt   float64      `json:"last_error_at,omitempty"`
 	NegativeUntil float64      `json:"negative_until,omitempty"`
+	// legacy marks an entry imported from the scopefuel cache. Its negative
+	// state must not block a pool pacelever measures with its own provider.
+	legacy bool
 }
 type Collector struct {
 	Shared          ObservationSource
@@ -41,7 +44,7 @@ func LoadSnapshots() (map[string]CacheEntry, error) {
 }
 func loadSnapshots(ownPath, legacyPath string) (map[string]CacheEntry, error) {
 	merged := map[string]CacheEntry{}
-	for _, path := range []string{legacyPath, ownPath} {
+	for i, path := range []string{legacyPath, ownPath} {
 		if path == "" {
 			continue
 		}
@@ -65,6 +68,7 @@ func loadSnapshots(ownPath, legacyPath string) (map[string]CacheEntry, error) {
 				entry.FetchedAt = previous.FetchedAt
 				entry.Result = previous.Result
 			}
+			entry.legacy = i == 0
 			merged[pool] = entry
 		}
 	}
@@ -232,7 +236,10 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		o.PoolClass = p.Class
 		return o
 	}
-	if entry.NegativeUntil > float64(now.UnixMilli())/1000 {
+	provider := c.Providers[pool]
+	// A legacy scopefuel backoff describes scopefuel's own probe, not
+	// pacelever's; a pool with a native provider fetches through it anyway.
+	if entry.NegativeUntil > float64(now.UnixMilli())/1000 && !(entry.legacy && provider != nil) {
 		kind := "backoff"
 		if entry.LastError != nil && entry.LastError.ErrorKind != "" {
 			kind = entry.LastError.ErrorKind
@@ -240,7 +247,6 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		result := fallback(kind, "provider backoff active")
 		return currentFailureIdentity(result, entry.LastError, entry.Result.AccountFP)
 	}
-	provider := c.Providers[pool]
 	if provider == nil {
 		return fallback("credentials", "provider not configured")
 	}

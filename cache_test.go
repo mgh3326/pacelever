@@ -2,6 +2,7 @@ package pacelever
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -75,6 +76,60 @@ func TestLegacySnapshotCompatibility(t *testing.T) {
 	}
 }
 
+func TestLegacyBackoffDoesNotBlockOwnProvider(t *testing.T) {
+	isolate(t)
+	entry := `{"fetched_at":%d,"result":{"id":"%s","buckets":[{"window":"7d","used_pct":10,"scope":{"kind":"account"}}]},"last_error":"provider backoff active","last_error_at":%d,"negative_until":%d}`
+	legacy := fmt.Sprintf(`{"agy":`+entry+`,"codex":`+entry+`}`,
+		testNow.Add(-5*time.Hour).Unix(), "agy", testNow.Add(-time.Minute).Unix(), testNow.Add(time.Hour).Unix(),
+		testNow.Add(-5*time.Hour).Unix(), "codex", testNow.Add(-time.Minute).Unix(), testNow.Add(time.Hour).Unix())
+	if e := AtomicWrite(legacyCachePath(), []byte(legacy)); e != nil {
+		t.Fatal(e)
+	}
+	var calls atomic.Int32
+	c := Collector{Providers: map[string]Provider{"agy": ProviderFunc(func(context.Context) Observation {
+		calls.Add(1)
+		return observation("agy", 40)
+	})}, Now: func() time.Time { return testNow }}
+	rows, e := c.Collect(context.Background(), []string{"agy"})
+	if e != nil || calls.Load() != 1 || rows[0].Error != "" || rows[0].Stale || *rows[0].Buckets[0].UsedPct != 40 {
+		t.Fatalf("legacy backoff blocked the own provider: %+v %v", rows, e)
+	}
+	// A pool without a native provider still honours the imported backoff.
+	rows, e = c.Collect(context.Background(), []string{"codex"})
+	if e != nil || rows[0].Error != "provider backoff active" || !rows[0].Stale {
+		t.Fatalf("imported backoff lost without a provider: %+v %v", rows, e)
+	}
+	// When the native fetch fails, the imported measurement serves as stale.
+	c.Providers["codex"] = ProviderFunc(func(context.Context) Observation {
+		return Observation{ID: "codex", Error: "usage HTTP 429", ErrorKind: "rate_limited"}
+	})
+	rows, e = c.Collect(context.Background(), []string{"codex"})
+	if e != nil || rows[0].Error != "usage HTTP 429" || rows[0].ErrorKind != "rate_limited" || !rows[0].Stale {
+		t.Fatalf("failed native fetch did not fall back: %+v %v", rows, e)
+	}
+	if len(rows[0].Buckets) != 1 || *rows[0].Buckets[0].UsedPct != 10 {
+		t.Fatalf("imported measurement lost: %+v", rows[0])
+	}
+}
+func TestOwnBackoffStillBlocks(t *testing.T) {
+	isolate(t)
+	if e := WriteJSON(CachePath(), map[string]CacheEntry{"agy": {
+		NegativeUntil: float64(testNow.Add(time.Hour).Unix()),
+		LastErrorAt:   float64(testNow.Add(-time.Minute).Unix()),
+		LastError:     &Observation{Error: "usage HTTP 429", ErrorKind: "rate_limited"},
+	}}); e != nil {
+		t.Fatal(e)
+	}
+	var calls atomic.Int32
+	c := Collector{Providers: map[string]Provider{"agy": ProviderFunc(func(context.Context) Observation {
+		calls.Add(1)
+		return observation("agy", 40)
+	})}, Now: func() time.Time { return testNow }}
+	rows, e := c.Collect(context.Background(), []string{"agy"})
+	if e != nil || calls.Load() != 0 || rows[0].Error != "provider backoff active" || rows[0].ErrorKind != "rate_limited" {
+		t.Fatalf("own backoff bypassed: %+v %v", rows, e)
+	}
+}
 func TestLegacyTextFailureMetadata(t *testing.T) {
 	isolate(t)
 	path := legacyCachePath()
