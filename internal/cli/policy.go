@@ -33,7 +33,7 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 		d, e := pl.ResolveLaunch(catalog, a.Config, req)
 		if e == nil && a.Config.Pools[d.Pool].Exploration.Active() {
 			inputs := pl.Inputs{Catalog: catalog, Config: a.Config, Now: time.Now().UTC()}
-			inputs.FreeLimit = pl.ActiveLimit("devin", inputs.Now)
+			inputs.FreeLimit = pl.ActiveFreeLimit(inputs.Now)
 			if strings.TrimSpace(req.TaskID) != "" && req.RequiredGrade != "" {
 				var inputErr error
 				inputs, inputErr = a.inputs(ctx, catalog, []string{d.Pool})

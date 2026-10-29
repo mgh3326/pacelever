@@ -162,3 +162,47 @@ func TestCreditRestrictedRungs(t *testing.T) {
 		}
 	}
 }
+func TestFreeLimitUnreadableResetFailsClosed(t *testing.T) {
+	observed := testNow.Add(-10 * time.Minute)
+	held := observed.Add(UnknownResetHold).Format(time.RFC3339)
+	for _, reset := range []string{"", "not-a-time"} {
+		in := Inputs{Now: testNow, FreeLimit: &LimitRecord{ResetAt: reset, ObservedAt: observed.Format(time.RFC3339)}}
+		d := Gate(in, Request{Profile: "devin-swe2"})
+		if d.OK || d.ExitCode != Blocked || d.Reason != "free limit exceeded until "+held {
+			t.Fatalf("reset %q: %+v", reset, d)
+		}
+		in.Now = observed.Add(UnknownResetHold)
+		if d := Gate(in, Request{Profile: "devin-swe2"}); !d.OK {
+			t.Fatalf("reset %q: default hold never expired: %+v", reset, d)
+		}
+	}
+	for _, r := range []LimitRecord{{}, {ResetAt: "bad", ObservedAt: "bad"}} {
+		d := Gate(Inputs{Now: testNow, FreeLimit: &r}, Request{Profile: "devin-swe2"})
+		if d.OK || d.ExitCode != Blocked || !strings.Contains(d.Reason, "free limit record unreadable") {
+			t.Fatalf("%+v: %+v", r, d)
+		}
+	}
+}
+func TestActiveFreeLimitReadsDamagedRecordsFromDisk(t *testing.T) {
+	isolate(t)
+	observed := testNow.Add(-5 * time.Minute).Format(time.RFC3339)
+	for _, r := range []LimitRecord{{ObservedAt: observed}, {}} {
+		s := limitStore{Schema: "scopefuel.devin-free-limit.v1", Records: map[string]LimitRecord{limitIdentity("devin"): r}}
+		if e := WriteJSON(limitPath("devin"), s); e != nil {
+			t.Fatal(e)
+		}
+		hold := ActiveFreeLimit(testNow)
+		if hold == nil {
+			t.Fatalf("damaged record %+v dropped", r)
+		}
+		if d := Gate(Inputs{Now: testNow, FreeLimit: hold}, Request{Profile: "devin-swe2"}); d.OK {
+			t.Fatalf("damaged record %+v admitted", r)
+		}
+	}
+	// A readable default hold that has passed no longer applies.
+	s := limitStore{Records: map[string]LimitRecord{limitIdentity("devin"): {ObservedAt: observed}}}
+	_ = WriteJSON(limitPath("devin"), s)
+	if ActiveFreeLimit(testNow.Add(2*time.Hour)) != nil {
+		t.Fatal("expired default hold still active")
+	}
+}

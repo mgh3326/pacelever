@@ -252,6 +252,21 @@ type LimitRecord struct {
 	Source     string `json:"source"`
 	Unparsed   bool   `json:"unparsed"`
 }
+
+// EffectiveReset is when the record stops holding. An unreadable reset falls
+// back to UnknownResetHold after the observation, so a damaged record holds
+// instead of admitting. It errors only when neither time is usable.
+func (r LimitRecord) EffectiveReset() (time.Time, error) {
+	if reset, e := ParseTime(r.ResetAt); e == nil {
+		return reset, nil
+	}
+	observed, e := ParseTime(r.ObservedAt)
+	if e != nil {
+		return time.Time{}, fmt.Errorf("reset_at and observed_at are both unusable")
+	}
+	return observed.Add(UnknownResetHold), nil
+}
+
 type limitStore struct {
 	Schema  string                 `json:"schema"`
 	Records map[string]LimitRecord `json:"records"`
@@ -334,6 +349,21 @@ func ActiveLimit(pool string, now time.Time) *LimitRecord {
 	reset, e := ParseTime(r.ResetAt)
 	observed, e2 := ParseTime(r.ObservedAt)
 	if e != nil || e2 != nil || !reset.After(now) || observed.After(now) {
+		return nil
+	}
+	return &r
+}
+
+// ActiveFreeLimit returns the Devin free-limit exceed that still holds at now.
+// Unlike ActiveLimit it fails closed: a record whose times cannot be read is
+// returned so the gate refuses it, rather than being dropped.
+func ActiveFreeLimit(now time.Time) *LimitRecord {
+	s := readLimits("devin")
+	r, ok := s.Records[limitIdentity("devin")]
+	if !ok {
+		return nil
+	}
+	if reset, e := r.EffectiveReset(); e == nil && !reset.After(now) {
 		return nil
 	}
 	return &r

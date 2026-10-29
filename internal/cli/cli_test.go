@@ -191,3 +191,57 @@ func TestGateSwe2FreeBucket(t *testing.T) {
 		t.Fatalf("cleared: %d", code)
 	}
 }
+func TestObserveFreeLimitNeverStoresEmptyReset(t *testing.T) {
+	isolated(t)
+	app := App{Commit: "unknown", Bench: pl.BenchClient{}, Collector: pl.Collector{Providers: map[string]pl.Provider{}}}
+	run := func(args ...string) error {
+		app.Out, app.Err = &bytes.Buffer{}, &bytes.Buffer{}
+		v, _ := parse(append([]string{"observe", "devin-free-limit"}, args...))
+		_, e := app.run(context.Background(), v)
+		return e
+	}
+	gateCode := func() int {
+		app.Out, app.Err = &bytes.Buffer{}, &bytes.Buffer{}
+		v, _ := parse([]string{"gate", "-m", "devin-swe2", "--role", "worker"})
+		code, _ := app.run(context.Background(), v)
+		return code
+	}
+	for _, args := range [][]string{
+		{"--unparsed", "--observed", "garbage", "--source", "job:x"},
+		{"--observed", "garbage", "--source", "job:x"},
+		{"--source", "job:x"},
+		{"--unparsed", "--reset", "garbage", "--source", "job:x"},
+	} {
+		if e := run(args...); e == nil {
+			t.Fatalf("%v stored silently", args)
+		}
+		if gateCode() != 0 {
+			t.Fatalf("%v left a record behind", args)
+		}
+	}
+	// No --observed with an unreadable reset: observed defaults to now.
+	if e := run("--unparsed", "--source", "job:x"); e != nil {
+		t.Fatal(e)
+	}
+	if gateCode() != 3 {
+		t.Fatal("default hold not applied")
+	}
+	var s struct {
+		Records map[string]pl.LimitRecord `json:"records"`
+	}
+	if e := pl.ReadJSON(filepath.Join(pl.CacheDir(), "devin-free-limit.json"), &s); e != nil || len(s.Records) != 1 {
+		t.Fatalf("store: %v %+v", e, s)
+	}
+	for _, r := range s.Records {
+		if r.ResetAt == "" || r.ObservedAt == "" {
+			t.Fatalf("empty time stored: %+v", r)
+		}
+	}
+}
+func TestFreeTagTextKeepsLegacyFormat(t *testing.T) {
+	for tag, want := range map[string]string{"Free": "Free", "observed": "observed", "available (free)": `"available (free)"`} {
+		if got := freeTagText(tag); got != want {
+			t.Fatalf("%q: %s", tag, got)
+		}
+	}
+}

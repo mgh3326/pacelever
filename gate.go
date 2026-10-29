@@ -170,8 +170,16 @@ func gate(in Inputs, req Request) Decision {
 		// free-limit exceed is on record and its reset time has not passed.
 		rung := map[string]string{"devin-swe2": "swe-2-high", "devin-swe2-medium": "swe-2-medium", "devin-swe2-max": "swe-2-max"}[canonical]
 		if in.FreeLimit != nil {
-			if reset, e := ParseTime(in.FreeLimit.ResetAt); e == nil && reset.After(now) {
-				return failure(d, Blocked, "free limit exceeded until "+in.FreeLimit.ResetAt)
+			reset, e := in.FreeLimit.EffectiveReset()
+			if e != nil {
+				return failure(d, Blocked, "free limit record unreadable ("+e.Error()+"); refusing until it is cleared with observe devin-free-limit --clear")
+			}
+			if reset.After(now) {
+				until := in.FreeLimit.ResetAt
+				if _, pe := ParseTime(until); pe != nil {
+					until = reset.Format(time.RFC3339)
+				}
+				return failure(d, Blocked, "free limit exceeded until "+until)
 			}
 		}
 		d.OK = true

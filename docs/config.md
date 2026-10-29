@@ -143,8 +143,13 @@ covers all three rungs. Until that reset passes, the gate refuses with exit 3 an
 same wording appears in the text output, `--json` and `--gate-output`.
 
 An observation whose reset time cannot be read (`--unparsed` with no `--reset`)
-is held for a conservative 60 minutes from its observed time, and the hold is
-logged to stderr. Account-level daily and weekly measurements are untouched:
+is held for a conservative 60 minutes from its observed time (now, when
+`--observed` is omitted), and the hold is logged to stderr. A malformed
+`--observed` or `--reset` is refused; an empty reset is never stored. The gate
+also fails closed on a stored record whose `reset_at` is empty or unreadable: it
+holds for 60 minutes after `observed_at`, and refuses with
+`free limit record unreadable` when `observed_at` is unusable too (clear it with
+`observe devin-free-limit --clear`). Account-level daily and weekly measurements are untouched:
 they still gate every non-free Devin rung, and are only echoed on an admitted
 free rung.
 
