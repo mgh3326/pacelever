@@ -43,19 +43,13 @@ func TestCollectorSingleFlight(t *testing.T) {
 		t.Fatal("fresh cache did not suppress provider")
 	}
 }
-func TestCommandcodeDeferredBudget(t *testing.T) {
+func TestCommandcodeCollectsSynchronously(t *testing.T) {
 	isolate(t)
-	var deferred, probed atomic.Int32
-	c := Collector{Providers: map[string]Provider{"commandcode": ProviderFunc(func(context.Context) Observation { probed.Add(1); return observation("commandcode", 1) })}, DeferredRefresh: func(pool string) error { deferred.Add(1); return nil }, Now: func() time.Time { return testNow }}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	rows, e := c.Collect(ctx, []string{"commandcode"})
-	if e != nil || deferred.Load() != 1 || probed.Load() != 0 || rows[0].ErrorKind != "probe_in_progress" {
-		t.Fatalf("short budget started probe %+v %v", rows, e)
-	}
-	c.Worker = true
-	if _, e = c.Refresh(context.Background(), "commandcode"); e != nil || probed.Load() != 1 {
-		t.Fatal("independent worker did not probe")
+	var probed atomic.Int32
+	c := Collector{Providers: map[string]Provider{"commandcode": ProviderFunc(func(context.Context) Observation { probed.Add(1); return observation("commandcode", 1) })}, Now: func() time.Time { return testNow }}
+	rows, e := c.Collect(context.Background(), []string{"commandcode"})
+	if e != nil || probed.Load() != 1 || rows[0].Error != "" {
+		t.Fatalf("command code did not collect synchronously %+v %v", rows, e)
 	}
 }
 func TestLegacySnapshotCompatibility(t *testing.T) {
@@ -84,7 +78,7 @@ func TestLegacySnapshotCompatibility(t *testing.T) {
 func TestLegacyTextFailureMetadata(t *testing.T) {
 	isolate(t)
 	path := legacyCachePath()
-	body := `{"claude":{"fetched_at":1793145600,"result":{"id":"claude","pool_class":"spend","buckets":[{"window":"7d","used_pct":10,"scope":{"kind":"account"}}]},"last_error":"legacy probe failure","last_error_at":1793145610},"agy":{"result":"retired provider shape","last_error":["ignored"]}}`
+	body := `{"claude":{"fetched_at":1793145600,"result":{"id":"claude","pool_class":"spend","buckets":[{"window":"7d","used_pct":10,"scope":{"kind":"account"}}]},"last_error":"legacy probe failure","last_error_at":1793145610},"retired":{"result":"retired provider shape","last_error":["ignored"]}}`
 	if e := AtomicWrite(path, []byte(body)); e != nil {
 		t.Fatal(e)
 	}
@@ -125,7 +119,7 @@ func TestFailedRefreshRetainsLegacyMeasurementAndIdentity(t *testing.T) {
 			if !same {
 				currentFP = "fp-current"
 			}
-			c := Collector{Now: func() time.Time { return testNow.Add(5 * time.Minute) }, Providers: map[string]Provider{"claude": ProviderFunc(func(context.Context) Observation {
+			c := Collector{TTL: time.Minute, Now: func() time.Time { return testNow.Add(5 * time.Minute) }, Providers: map[string]Provider{"claude": ProviderFunc(func(context.Context) Observation {
 				return Observation{ID: "claude", Error: "usage HTTP 429", ErrorKind: "rate_limited", AccountFP: currentFP, AccountFPKind: "account"}
 			})}}
 			for attempt := 0; attempt < 2; attempt++ {

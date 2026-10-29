@@ -25,9 +25,9 @@ type PTYProvider struct {
 }
 
 func ResolveBinary(pool string, cfg Config) string {
-	name := map[string]string{"commandcode": "cmd", "kiro": "kiro-cli"}[pool]
-	if name == "" {
-		name = pool
+	name := pool
+	if pool == "kiro" {
+		name = "kiro-cli"
 	}
 	explicit := firstEnv("PACELEVER_"+strings.ToUpper(pool)+"_BIN", "SCOPEFUEL_"+strings.ToUpper(pool)+"_BIN")
 	if explicit == "" {
@@ -38,14 +38,6 @@ func ResolveBinary(pool string, cfg Config) string {
 	}
 	if path, e := exec.LookPath(name); e == nil {
 		return path
-	}
-	if pool == "commandcode" {
-		for _, dir := range []string{"~/.hermes/node/bin", "~/.local/bin", "~/.npm-global/bin", "/usr/local/bin", "/opt/homebrew/bin"} {
-			p := filepath.Join(expandHome(dir), name)
-			if info, e := os.Stat(p); e == nil && info.Mode()&0111 != 0 {
-				return p
-			}
-		}
 	}
 	return name
 }
@@ -141,9 +133,6 @@ func (p PTYProvider) screen(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("probe repository unavailable")
 	}
 	args := []string{}
-	if p.ID == "commandcode" {
-		args = append(args, "--no-session")
-	}
 	if p.ID == "devin" {
 		args = append(args, "--respect-workspace-trust", "false")
 	}

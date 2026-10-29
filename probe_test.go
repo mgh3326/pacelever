@@ -19,24 +19,6 @@ func TestProbeHelper(t *testing.T) {
 		return
 	}
 	switch mode {
-	case "tui":
-		cmd := exec.Command("stty", "raw", "-echo")
-		cmd.Stdin = os.Stdin
-		_ = cmd.Run()
-		fmt.Fprint(os.Stdout, "❯ ")
-		time.Sleep(250 * time.Millisecond)
-		buffer := make([]byte, 4096)
-		n, _ := os.Stdin.Read(buffer)
-		if !strings.Contains(string(buffer[:n]), "/usage") || strings.ContainsAny(string(buffer[:n]), "\r\n") {
-			os.Exit(7)
-		}
-		fmt.Fprint(os.Stdout, "❯ /usage\n")
-		n, _ = os.Stdin.Read(buffer)
-		if !strings.ContainsAny(string(buffer[:n]), "\r\n") {
-			os.Exit(8)
-		}
-		fmt.Fprint(os.Stdout, "0% used · 31 days to renew / 5-hour 1% · resets in 3h / Weekly 1% · resets in 6d\n")
-		time.Sleep(time.Minute)
 	case "lock":
 		_ = WithFileLock(os.Getenv("PACELEVER_TEST_LOCK"), false, func() error {
 			_ = os.WriteFile(os.Getenv("PACELEVER_TEST_READY"), []byte("ready"), 0600)
@@ -92,14 +74,6 @@ func waitFile(t *testing.T, path string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("helper did not create %s", filepath.Base(path))
-}
-func TestCommandcodeSeparateEnter(t *testing.T) {
-	isolate(t)
-	p := PTYProvider{ID: "commandcode", Binary: helperBinary(t, "tui"), Timeout: 4 * time.Second}
-	o := p.Fetch(context.Background())
-	if o.Error != "" || len(o.Buckets) != 3 {
-		t.Fatalf("probe failed: %+v", o)
-	}
 }
 func TestKilledCallerReleasesLock(t *testing.T) {
 	isolate(t)

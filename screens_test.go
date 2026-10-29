@@ -2,7 +2,6 @@ package pacelever
 
 import (
 	"os"
-	"strings"
 	"testing"
 )
 
@@ -12,8 +11,6 @@ func TestScreenFixtures(t *testing.T) {
 		want       []float64
 		fail       bool
 	}{
-		{"commandcode", "commandcode_usage.txt", []float64{0, 1, 1}, false},
-		{"commandcode", "commandcode_unsubmitted.txt", nil, true},
 		{"kimi", "kimi_usage.txt", []float64{20, 25, 10}, false},
 		{"devin", "devin_usage.txt", []float64{10, 25}, false},
 		{"grok", "grok_usage.txt", []float64{24}, false},
@@ -37,22 +34,6 @@ func TestScreenFixtures(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-func TestCommandcodeNoBorrowing(t *testing.T) {
-	for _, screen := range []string{
-		"0% used · 31 days to renew / 5-hour · resets in 3h / Weekly 1% · resets in 6d",
-		"0% used · 31 days to renew / 5-hour 1% / Weekly 1% · resets in 6d",
-		"31 days to renew / 5-hour 1% · resets in 3h / Weekly 1% · resets in 6d",
-		"0% used · 31 days to renew / 5-hour 101% · resets in 3h / Weekly 1% · resets in 6d",
-	} {
-		o := ParseScreen("commandcode", screen, testNow)
-		if o.Error == "" {
-			t.Fatalf("incomplete panel admitted: %s", screen)
-		}
-		if strings.Contains(o.Error, screen) {
-			t.Fatal("raw screen leaked")
-		}
 	}
 }
 func TestDevinFreeExactUID(t *testing.T) {

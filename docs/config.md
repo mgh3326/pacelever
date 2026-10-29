@@ -27,8 +27,8 @@ on_exhaust = "block"            # block | operator-switch
 "5h" = 2.0
 "7d" = 1.0
 
-[pools.commandcode]
-bin = "/path/to/cmd"
+[pools.kimi]
+bin = "/path/to/kimi"
 
 [profiles.sonnet]
 subscribed = true              # overrides the pool flag in either direction
@@ -69,15 +69,22 @@ metadata such as plan, price, capacity and cutoff can be edited in TOML.
 
 Claude reads the existing credentials under `CLAUDE_CONFIG_DIR` or the default
 Claude directory, with a read-only macOS Keychain fallback. Codex reads
-`$CODEX_HOME/auth.json` or its default directory. ClinePass uses `CLINE_API_KEY`,
-the existing opencode credential store, or its API-key file. Credentials remain
-in memory and request headers; errors never include their values or HTTP bodies.
+`$CODEX_HOME/auth.json` or its default directory. Command Code reads
+`COMMAND_CODE_API_KEY` or `COMMANDCODE_API_KEY`, then the API key saved by `cmd`
+in `~/.commandcode/auth.json`. ClinePass uses `CLINE_API_KEY` or
+`CLINEPASS_API_KEY`, then `~/.cline/data/settings/providers.json`, the existing
+opencode credential store, or its API-key file. Credentials remain in memory and
+request headers; errors never include their values or HTTP bodies.
 
-PTY providers use existing authenticated CLIs. Set `PACELEVER_<POOL>_BIN` to an
-explicit executable; the corresponding `SCOPEFUEL_<POOL>_BIN` remains supported.
-Command Code also reads `pools.commandcode.bin`, then searches PATH and known
-installation directories. Kimi and Grok respect their existing location selectors.
-The tool does not install CLIs or initiate login flows.
+Devin, Grok, Kimi and Kiro still read the existing authenticated CLIs. Set
+`PACELEVER_<POOL>_BIN` to an explicit executable; the corresponding
+`SCOPEFUEL_<POOL>_BIN` remains supported. Kimi and Grok respect their existing
+location selectors. The tool does not install CLIs or initiate login flows.
+
+A provider `429` honours `Retry-After` (seconds or an HTTP date). Claude uses a
+300-second wait when the header is missing or zero and keeps a 900-second fresh
+cache; a refused refresh serves the last good value as stale. Never fall back to
+screen scraping after a rate limit.
 
 Catalog credentials come from `HANDOFFKEEP_URL` plus `HANDOFFKEEP_TOKEN`, or the
 existing handoffkeep `config.env` file. `HANDOFFKEEP_CONFIG` can select that file.
