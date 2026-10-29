@@ -241,6 +241,10 @@ func (b BenchClient) PublishInflight(ctx context.Context, pool, fp string, jobs 
 	return b.Send(ctx, "PUT", "/v1/documents/"+url.PathEscape(key), "quota_share", map[string]any{"key": key, "kind": "note", "session": "scopefuel-quota-share", "job": "", "body": string(body)}, nil)
 }
 
+// UnknownResetHold is how long a limit observation with no readable reset time
+// stays active.
+const UnknownResetHold = 60 * time.Minute
+
 type LimitRecord struct {
 	ResetAt    string `json:"reset_at"`
 	ObservedAt string `json:"observed_at"`

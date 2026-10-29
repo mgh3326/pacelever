@@ -143,3 +143,51 @@ func TestStatusProviderContract(t *testing.T) {
 		t.Fatalf("quota collector contract: %s", data)
 	}
 }
+func TestGateSwe2FreeBucket(t *testing.T) {
+	isolated(t)
+	app := App{Commit: "unknown", Bench: pl.BenchClient{}, Collector: pl.Collector{Providers: map[string]pl.Provider{}}}
+	gate := func(args ...string) (int, string, string) {
+		var out, err bytes.Buffer
+		app.Out, app.Err = &out, &err
+		v, _ := parse(append([]string{"gate", "-m", "devin-swe2", "--role", "worker"}, args...))
+		code, e := app.run(context.Background(), v)
+		if e != nil {
+			t.Fatal(e)
+		}
+		return code, out.String(), err.String()
+	}
+	if code, out, _ := gate(); code != 0 || !strings.Contains(out, `free_tag="available (free)"`) || !strings.Contains(out, "available (free)") {
+		t.Fatalf("no record: %d %s", code, out)
+	}
+	observe := func(args ...string) string {
+		var out, err bytes.Buffer
+		app.Out, app.Err = &out, &err
+		v, _ := parse(append([]string{"observe", "devin-free-limit"}, args...))
+		if code, e := app.run(context.Background(), v); code != 0 || e != nil {
+			t.Fatalf("observe %d %v", code, e)
+		}
+		return err.String()
+	}
+	// An unreadable reset holds the rung for the conservative default.
+	now := time.Now().UTC()
+	log := observe("--unparsed", "--observed", now.Format(time.RFC3339), "--rung", "devin-swe2", "--source", "job:fixture")
+	hold := now.Add(pl.UnknownResetHold).Format(time.RFC3339)
+	if !strings.Contains(log, "reset time unknown") || !strings.Contains(log, hold) {
+		t.Fatalf("unknown reset not logged: %q", log)
+	}
+	code, _, stderr := gate()
+	if code != 3 || !strings.HasPrefix(stderr, "free limit exceeded until "+hold) {
+		t.Fatalf("active exceed: %d %q", code, stderr)
+	}
+	app.Out = &bytes.Buffer{}
+	var jsonOut bytes.Buffer
+	app.Out, app.Err = &jsonOut, &bytes.Buffer{}
+	v, _ := parse([]string{"gate", "-m", "devin-swe2", "--role", "worker", "--json"})
+	if code, e := app.run(context.Background(), v); code != 3 || e != nil || !strings.Contains(jsonOut.String(), "free limit exceeded until "+hold) {
+		t.Fatalf("json: %d %v %s", code, e, jsonOut.String())
+	}
+	observe("--clear")
+	if code, _, _ := gate(); code != 0 {
+		t.Fatalf("cleared: %d", code)
+	}
+}

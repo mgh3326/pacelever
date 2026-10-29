@@ -31,9 +31,10 @@ shape and returns 3 when resolution is refused.
 
 Pace affects ordering and warnings, never admission eligibility. At a configurable
 weekly pace multiple of 1.2, alternatives from other pools move ahead of the
-triggering paid pool, within the requested grade's placements. An observed SWE-2
-Free bucket comes first. Account credit exhaustion does not block a proven Free
-rung, and a sibling rung's Free tag cannot stand in for it.
+triggering paid pool, within the requested grade's placements. An available SWE-2
+Free rung comes first. The SWE-2 free bucket cannot be measured, so it is
+`available (free)` unless a free-limit exceed is on record. Account credit
+exhaustion does not block it.
 
 Credit profiles require an explicit effort and seat. A placed, default-gate
 `pi-*` or `cmd-dsflash41` rung permits builder, worker and tester seats. Other

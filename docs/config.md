@@ -130,7 +130,23 @@ Non-credit observations default to 30 minutes and are limited to two hours.
 Credit observations last until their recorded expiry. Reset timestamps cap the
 observation's effective life. Required-window coverage must be complete for a
 manual fallback. It is visibly self-reported and unverified; it cannot hide a
-confirmed automatic cutoff or prove a SWE-2 Free tag.
+confirmed automatic cutoff.
+
+### SWE-2 free bucket
+
+The SWE-2 free bucket (`devin-swe2`, `devin-swe2-medium`, `devin-swe2-max`)
+cannot be measured, so the gate never asks for a fresh measurement of it. A rung
+is admitted as `available (free)` unless a free-limit exceed is on record. The
+exceed is stored by `pacelever observe devin-free-limit` with its reset time and
+covers all three rungs. Until that reset passes, the gate refuses with exit 3 and
+`free limit exceeded until <reset>`; afterwards the rung is admitted again. The
+same wording appears in the text output, `--json` and `--gate-output`.
+
+An observation whose reset time cannot be read (`--unparsed` with no `--reset`)
+is held for a conservative 60 minutes from its observed time, and the hold is
+logged to stderr. Account-level daily and weekly measurements are untouched:
+they still gate every non-free Devin rung, and are only echoed on an admitted
+free rung.
 
 `PACELEVER_QUOTA_SHARE=0` disables peer snapshot exchange. `PACELEVER_NOTIFY=0`
 disables exhaustion notices. `PACELEVER_STALE_WARN=0` disables stale-build checks.
