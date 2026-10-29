@@ -49,8 +49,9 @@ The herdr event's CLI selectors also select the identity used for the key.
 
 ## Per-host setup checklist
 
-Each host that participates in shared quota needs all three of these, or the
-read fails before any provider is contacted:
+Items 1 and 2 gate reads — without them the read fails before any provider is
+contacted. Item 3 gates probing and publishing; a host that only reads fresh
+shared observations does not need it.
 
 1. **An account key for every measured pool.** `claude` and `codex` derive
    their fingerprint from the local CLI login; every other pool (`grok`,
