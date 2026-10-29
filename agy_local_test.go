@@ -161,6 +161,7 @@ func TestAgyLocalIsServer(t *testing.T) {
 		{"/opt/codeium/language_server_macos --csrf_token x", false},
 		{"language_server --manager_dir /tmp/other", false},
 		{"grep language_server", false},
+		{"agy models --csrf_token fixture-csrf --extension_server_port 5678", false},
 	} {
 		if got := agyLocalIsServer(tt.argv); got != tt.want {
 			t.Fatalf("agyLocalIsServer(%q) = %v, want %v", tt.argv, got, tt.want)

@@ -25,8 +25,9 @@ import (
 // process or anywhere else.
 var (
 	agyLocalNames = []string{"language_server", "language_server_macos", "language_server_macos_arm", "agy"}
+	// A bare `agy` argv is the CLI, not the app's server: the match must
+	// carry an antigravity marker, never just the binary name.
 	agyLocalMatch = []*regexp.Regexp{
-		regexp.MustCompile(`(^|/|\s)agy(\s|$)`),
 		regexp.MustCompile(`--app_data_dir.*antigravity`),
 		regexp.MustCompile(`antigravity.*--app_data_dir`),
 		regexp.MustCompile(`/antigravity/`),
