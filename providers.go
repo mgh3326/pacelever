@@ -583,8 +583,12 @@ func grokRefresh(ctx context.Context, record grokRecord, client HTTPDoer, now fu
 	if next := strings.TrimSpace(str(resp.Body["refresh_token"])); next != "" {
 		renewed.RefreshToken = next
 	}
-	if seconds, ok := finiteNumber(resp.Body["expires_in"]); ok && seconds > 0 && seconds <= 10*365*24*3600 {
+	if seconds, ok := grokAmount(resp.Body["expires_in"]); ok && seconds > 0 && seconds <= 10*365*24*3600 {
 		renewed.Expires, renewed.HasExpiry = now().Add(time.Duration(seconds*float64(time.Second))), true
+	} else {
+		// A renewed token with no stated lifetime is used until the API refuses
+		// it; keeping the old expiry would make every probe refresh again.
+		renewed.Expires, renewed.HasExpiry = time.Time{}, false
 	}
 	return renewed, Observation{}, true
 }

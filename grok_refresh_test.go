@@ -263,6 +263,26 @@ func TestGrokUsableLoginSurvivesRefreshOutage(t *testing.T) {
 	}
 }
 
+func TestGrokRefreshExpiryHandling(t *testing.T) {
+	base := grokRecord{Token: "stale-token", RefreshToken: "fixture-refresh", Issuer: "https://auth.x.ai", HasExpiry: true, Expires: testNow.Add(-time.Hour)}
+	refresh := func(body string) (grokRecord, bool) {
+		client := doFunc(func(*http.Request) (*http.Response, error) { return response(200, body), nil })
+		next, _, ok := grokRefresh(context.Background(), base, client, fixedNow)
+		return next, ok
+	}
+	// No stated lifetime: the old expiry must not survive, or every probe
+	// would treat the renewed login as due again.
+	next, ok := refresh(`{"access_token":"fresh-token"}`)
+	if !ok || next.Token != "fresh-token" || next.HasExpiry || grokRefreshDue(next, testNow) {
+		t.Fatalf("renewed login kept a stale expiry: %+v", next)
+	}
+	// A numeric-string lifetime is accepted.
+	next, ok = refresh(`{"access_token":"fresh-token","expires_in":"3600"}`)
+	if !ok || !next.HasExpiry || !next.Expires.Equal(testNow.Add(time.Hour)) {
+		t.Fatalf("renewed login expiry: %+v", next)
+	}
+}
+
 func TestGrokRefreshRefused(t *testing.T) {
 	record := grokRecord{Token: "stale-token", RefreshToken: "fixture-refresh", Issuer: "https://auth.x.ai", HasExpiry: true, Expires: testNow.Add(-time.Hour)}
 	billingCalled := false
