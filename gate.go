@@ -187,6 +187,9 @@ func gate(in Inputs, req Request) Decision {
 	}
 	if row.Pool == "anthropic-api" {
 		if decided, handled := in.creditGate(d, now); handled {
+			if decided.OK && row.Gate == "escalation" && req.OperatorRequest != "" {
+				decided.EscalationOverride = true
+			}
 			return decided
 		}
 	}

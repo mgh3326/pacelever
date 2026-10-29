@@ -54,6 +54,22 @@ func TestCreditStatusPacing(t *testing.T) {
 	}
 
 	store = creditStore(
+		creditEntry("old", testNow.Add(-96*time.Hour), 100, "2026-11-02"),
+		creditEntry("mid", testNow.Add(-48*time.Hour), 90, "2026-11-02"),
+		creditEntry("topup", testNow.Add(-time.Hour), 95, "2026-11-02"),
+	)
+	got, _ = Inputs{Now: testNow, Manual: store}.CreditStatus("anthropic-api")
+	if got == nil || got.RecentDailyUSD != nil || got.Waste {
+		t.Fatalf("a top-up fell back to an older pair: %+v", got)
+	}
+
+	tiny := creditStore(creditEntry("tiny", testNow.Add(-time.Hour), 0.001, "2026-11-16"))
+	got, _ = Inputs{Now: testNow, Manual: tiny}.CreditStatus("anthropic-api")
+	if got.BalanceUSD != 0.001 || got.Exhausted || USD(got.BalanceUSD) != "0.001" {
+		t.Fatalf("sub-cent balance lost: %+v (%s)", got, USD(got.BalanceUSD))
+	}
+
+	store = creditStore(
 		creditEntry("old", testNow.Add(-72*time.Hour), 170, "2026-11-02"),
 		creditEntry("new", testNow.Add(-24*time.Hour), 150, "2026-11-02"),
 	)
@@ -123,6 +139,31 @@ func TestCreditGate(t *testing.T) {
 	d = Gate(Inputs{Now: testNow, Config: cfg, Manual: creditStore(stale)}, req)
 	if d.ExitCode != Admitted || d.Credit == nil || d.Credit.Stale {
 		t.Fatalf("configured max age ignored: %s", d.Reason)
+	}
+
+	// An admitted escalation rung keeps its operator override.
+	esc := Gate(Inputs{Now: testNow, Manual: creditStore(fresh)}, Request{Profile: "pi-opus55", Effort: "max", Role: "worker", OperatorRequest: "hk:task/1"})
+	if esc.ExitCode != Admitted || !esc.EscalationOverride {
+		t.Fatalf("credit escalation override lost: %d %s", esc.ExitCode, esc.Reason)
+	}
+
+	// The stored life can be capped by a reset earlier than the credit expiry.
+	held := creditEntry("new", testNow.Add(-time.Hour), 150, "2026-11-16")
+	held.ExpiresAt = testNow.Add(-time.Minute).Format(time.RFC3339)
+	if d = Gate(Inputs{Now: testNow, Manual: creditStore(held)}, req); d.ExitCode != Blocked {
+		t.Fatalf("observation past its stored expiry admitted: %s", d.Reason)
+	}
+}
+
+func TestCreditLineageToleratesBarePredecessor(t *testing.T) {
+	id := "old"
+	bare := ManualObservation{ID: id, Event: "set", Pool: "anthropic-api", Window: "credit", MeasuredAt: testNow.Add(-48 * time.Hour).Format(time.RFC3339)}
+	newest := creditEntry("new", testNow.Add(-time.Hour), 150, "2026-11-16")
+	newest.SupersedesRef = &id
+	store := ManualStore{History: []ManualObservation{bare, newest}, Latest: map[string]string{"anthropic-api:credit": "new"}}
+	got, ok := (Inputs{Now: testNow, Manual: store}).CreditStatus("anthropic-api")
+	if !ok || got.RecentDailyUSD != nil {
+		t.Fatalf("credit-less predecessor %+v", got)
 	}
 }
 

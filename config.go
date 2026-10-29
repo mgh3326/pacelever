@@ -2,6 +2,7 @@ package pacelever
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -171,7 +172,7 @@ func LoadConfig() (Config, error) {
 				return c, fmt.Errorf("invalid pools.%s.inflight_reserve_pct.%s", name, window)
 			}
 		}
-		if p.CreditMaxAgeS < 0 {
+		if p.CreditMaxAgeS < 0 || math.IsNaN(p.CreditMaxAgeS) || math.IsInf(p.CreditMaxAgeS, 0) || p.CreditMaxAgeS > 1e9 {
 			return c, fmt.Errorf("invalid pools.%s.credit_max_age_s", name)
 		}
 		c.Pools[name] = p

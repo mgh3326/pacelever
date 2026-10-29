@@ -3,6 +3,8 @@ package pacelever
 import (
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -42,6 +44,20 @@ func dateOnly(s string) bool {
 
 func round2(v float64) float64 { return math.Round(v*100) / 100 }
 
+// USD keeps a sub-cent balance visible; rounding it to $0.00 would contradict
+// a positive-balance admission.
+func USD(v float64) string {
+	s := strconv.FormatFloat(v, 'f', -1, 64)
+	i := strings.IndexByte(s, '.')
+	if i < 0 {
+		return s + ".00"
+	}
+	if len(s)-i == 2 {
+		return s + "0"
+	}
+	return s
+}
+
 // latestCreditObservation returns only the entry the store still points at.
 // History keeps superseded and cleared entries, and a clear removes just the
 // Latest key, so a missing pointer means the balance was cleared.
@@ -72,38 +88,42 @@ func creditLineage(s ManualStore, pool string, limit int) []ManualObservation {
 		if cur.SupersedesRef == nil {
 			break
 		}
-		cur, ok = byID[*cur.SupersedesRef]
+		next, found := byID[*cur.SupersedesRef]
+		if !found || next.Credit == nil {
+			break
+		}
+		cur = next
 	}
 	return out
 }
 
-// recentCreditBurn derives a daily spend rate from the two most recent manual
-// balances. Top-ups and pairs closer than an hour are ignored; an unknown rate
-// stays unknown.
+// recentCreditBurn derives a daily spend rate from the newest pair of manual
+// balances. A top-up or a pair closer than an hour makes the recent rate
+// unknown; older pairs are not substituted for it.
 func recentCreditBurn(s ManualStore, pool string, now time.Time) *float64 {
 	const recent = 7 * 24 * time.Hour
-	entries := creditLineage(s, pool, 8)
-	for i := 0; i+1 < len(entries); i++ {
-		newer, older := entries[i], entries[i+1]
-		at, e := ParseTime(newer.MeasuredAt)
-		if e != nil || now.Sub(at) > recent || now.Sub(at) < 0 {
-			continue
-		}
-		prev, e := ParseTime(older.MeasuredAt)
-		if e != nil {
-			continue
-		}
-		days := at.Sub(prev).Hours() / 24
-		if days < 1.0/24 || newer.Credit.RemainingUSD > older.Credit.RemainingUSD {
-			continue
-		}
-		burn := (older.Credit.RemainingUSD - newer.Credit.RemainingUSD) / days
-		if burn < 0 {
-			continue
-		}
-		return &burn
+	entries := creditLineage(s, pool, 2)
+	if len(entries) < 2 {
+		return nil
 	}
-	return nil
+	newer, older := entries[0], entries[1]
+	at, e := ParseTime(newer.MeasuredAt)
+	if e != nil || now.Sub(at) > recent || now.Sub(at) < 0 {
+		return nil
+	}
+	prev, e := ParseTime(older.MeasuredAt)
+	if e != nil {
+		return nil
+	}
+	days := at.Sub(prev).Hours() / 24
+	if days < 1.0/24 || newer.Credit.RemainingUSD > older.Credit.RemainingUSD {
+		return nil
+	}
+	burn := (older.Credit.RemainingUSD - newer.Credit.RemainingUSD) / days
+	if burn < 0 {
+		return nil
+	}
+	return &burn
 }
 
 func creditStatusFor(s ManualStore, pool string, now time.Time) (*CreditStatus, bool) {
@@ -126,8 +146,8 @@ func creditStatusFor(s ManualStore, pool string, now time.Time) (*CreditStatus, 
 	days := expiry.Sub(now).Hours() / 24
 	st := &CreditStatus{
 		Pool:       pool,
-		BalanceUSD: round2(c.RemainingUSD),
-		TotalUSD:   round2(c.TotalUSD),
+		BalanceUSD: c.RemainingUSD,
+		TotalUSD:   c.TotalUSD,
 		UsedPct:    Pct(100 * (1 - c.RemainingUSD/c.TotalUSD)),
 		ExpiresOn:  c.ExpiresOn,
 		DaysLeft:   round2(days),
@@ -192,6 +212,9 @@ func (in Inputs) creditGate(d Decision, now time.Time) (Decision, bool) {
 		d.RemainingEffectS = ptr(expiry.Sub(now).Seconds())
 	}
 	d.ObservedAgeS = ptr(st.AgeS)
+	if stored, e := ParseTime(m.ExpiresAt); e == nil && !stored.After(now) {
+		return failure(d, Blocked, fmt.Sprintf("credit observation expired pool=%s; record the current balance", st.Pool)), true
+	}
 	if st.Expired {
 		return failure(d, Blocked, fmt.Sprintf("credit expired pool=%s expires=%s; record the current balance", st.Pool, st.ExpiresOn)), true
 	}
@@ -206,7 +229,7 @@ func (in Inputs) creditGate(d Decision, now time.Time) (Decision, bool) {
 		cutoff = 90
 	}
 	if st.UsedPct != nil && *st.UsedPct >= cutoff {
-		return failure(d, Blocked, fmt.Sprintf("credit cutoff pool=%s used=%g%% cutoff=%g balance=$%.2f of $%.2f", st.Pool, *st.UsedPct, cutoff, st.BalanceUSD, st.TotalUSD)), true
+		return failure(d, Blocked, fmt.Sprintf("credit cutoff pool=%s used=%g%% cutoff=%g balance=$%s of $%s", st.Pool, *st.UsedPct, cutoff, USD(st.BalanceUSD), USD(st.TotalUSD))), true
 	}
 	if len(policy.InflightReservePct) > 0 {
 		count := in.Inflight[d.ProviderID]
@@ -221,9 +244,9 @@ func (in Inputs) creditGate(d Decision, now time.Time) (Decision, bool) {
 	}
 	d.OK = true
 	d.ExitCode = Admitted
-	d.Reason = fmt.Sprintf("credit pool=%s balance=$%.2f of $%.2f expires=%s days_left=%.1f daily_budget=$%.2f", st.Pool, st.BalanceUSD, st.TotalUSD, st.ExpiresOn, st.DaysLeft, st.DailyBudgetUSD)
+	d.Reason = fmt.Sprintf("credit pool=%s balance=$%s of $%s expires=%s days_left=%.1f daily_budget=$%s", st.Pool, USD(st.BalanceUSD), USD(st.TotalUSD), st.ExpiresOn, st.DaysLeft, USD(st.DailyBudgetUSD))
 	if st.RecentDailyUSD != nil {
-		d.Reason += fmt.Sprintf(" recent_daily=$%.2f", *st.RecentDailyUSD)
+		d.Reason += fmt.Sprintf(" recent_daily=$%s", USD(*st.RecentDailyUSD))
 	}
 	if st.Waste {
 		d.Reason += " waste=true paced budget exceeds recent use; spend it before expiry"

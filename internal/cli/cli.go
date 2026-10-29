@@ -367,9 +367,9 @@ func percentText(p *float64) string {
 }
 
 func creditText(c *pl.CreditStatus) string {
-	s := fmt.Sprintf("credit=$%.2f/$%.2f expires=%s days_left=%.1f daily_budget=$%.2f", c.BalanceUSD, c.TotalUSD, c.ExpiresOn, c.DaysLeft, c.DailyBudgetUSD)
+	s := fmt.Sprintf("credit=$%s/$%s expires=%s days_left=%.1f daily_budget=$%s", pl.USD(c.BalanceUSD), pl.USD(c.TotalUSD), c.ExpiresOn, c.DaysLeft, pl.USD(c.DailyBudgetUSD))
 	if c.RecentDailyUSD != nil {
-		s += fmt.Sprintf(" recent_daily=$%.2f", *c.RecentDailyUSD)
+		s += fmt.Sprintf(" recent_daily=$%s", pl.USD(*c.RecentDailyUSD))
 	}
 	switch {
 	case c.Expired:
@@ -525,7 +525,7 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 			fmt.Fprintf(a.Out, " pace_override_ref=%s", *d.PaceOverrideRef)
 		}
 		if d.Credit != nil {
-			fmt.Fprintf(a.Out, " credit_balance=$%.2f credit_expires=%s credit_days_left=%.1f credit_daily_budget=$%.2f", d.Credit.BalanceUSD, d.Credit.ExpiresOn, d.Credit.DaysLeft, d.Credit.DailyBudgetUSD)
+			fmt.Fprintf(a.Out, " credit_balance=$%s credit_expires=%s credit_days_left=%.1f credit_daily_budget=$%s", pl.USD(d.Credit.BalanceUSD), d.Credit.ExpiresOn, d.Credit.DaysLeft, pl.USD(d.Credit.DailyBudgetUSD))
 			if d.Credit.Waste {
 				fmt.Fprint(a.Out, " credit_waste=true")
 			}
