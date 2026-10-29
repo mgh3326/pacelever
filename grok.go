@@ -23,15 +23,22 @@ type grokRecord struct {
 	Created      time.Time
 }
 
+// grokTrustedIssuer is the only OIDC issuer a refresh token may be sent to.
+// The auth file is writable local data, so an issuer it names is never trusted
+// implicitly: a modified file could otherwise aim the refresh token at an
+// attacker host. A new xAI issuer is added here deliberately.
+const grokTrustedIssuer = "auth.x.ai"
+
 // refreshable is true when the login file holds everything the OIDC token
 // endpoint needs. A key without both fields is a setup or API-key login and
-// stays unusable once expired. A refresh token is never sent over plain HTTP.
+// stays unusable once expired. A refresh token is sent only to the trusted
+// issuer over HTTPS, never to another host or over plain HTTP.
 func (r grokRecord) refreshable() bool {
 	if r.RefreshToken == "" || r.Issuer == "" {
 		return false
 	}
 	issuer, e := url.Parse(r.Issuer)
-	return e == nil && issuer.Scheme == "https" && issuer.Host != ""
+	return e == nil && issuer.Scheme == "https" && strings.EqualFold(issuer.Host, grokTrustedIssuer)
 }
 
 func grokAuthPath(home string, selectors map[string]string) string {
@@ -237,7 +244,12 @@ func grokSettingsPlan(ctx context.Context, token string, client HTTPDoer) string
 
 // grokRefresh trades the refresh token for a new access token (RFC 6749 §6).
 // It returns the renewed record in memory; nothing is written back to the
-// login file. Failures carry no response body, URL or credential.
+// login file. That is deliberate (#18): writing another program's credential
+// file would race a concurrent `grok` process and could drop a refresh it
+// performed. The cost is token rotation: a renewed refresh token lives only
+// for this process, so when the issuer rotates it the stored one goes stale,
+// a later run's refresh is refused, and the user is told to run `grok login`
+// again. Failures carry no response body, URL or credential.
 func grokRefresh(ctx context.Context, record grokRecord, client HTTPDoer, now func() time.Time) (grokRecord, Observation, bool) {
 	fail := func(message, kind string) (grokRecord, Observation, bool) {
 		return record, Observation{ID: "grok", Error: message, ErrorKind: kind}, false
