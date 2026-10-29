@@ -55,13 +55,13 @@ func (p ClaudeCLIProvider) Fetch(ctx context.Context) Observation {
 	base := filepath.Join(CacheDir(), "probes", "claude-cli")
 	if e := os.MkdirAll(base, 0700); e != nil {
 		result.Error = "usage CLI directory unavailable"
-		result.ErrorKind = "probe_error"
+		result.ErrorKind = ErrKindProbe
 		return result
 	}
 	dir, e := os.MkdirTemp(base, "run-")
 	if e != nil {
 		result.Error = "usage CLI directory unavailable"
-		result.ErrorKind = "probe_error"
+		result.ErrorKind = ErrKindProbe
 		return result
 	}
 	defer os.RemoveAll(dir)
@@ -72,7 +72,7 @@ func (p ClaudeCLIProvider) Fetch(ctx context.Context) Observation {
 	text, e := run(probeCtx, p.Binary, dir, p.Env)
 	if e != nil {
 		result.Error = "usage CLI unavailable"
-		result.ErrorKind = "probe_error"
+		result.ErrorKind = ErrKindProbe
 		return result
 	}
 	return ParseClaudeUsageScreen(text, ClockNow(p.Now))
@@ -118,7 +118,7 @@ func ParseClaudeUsageScreen(text string, now time.Time) Observation {
 	o := Observation{ID: "claude", Source: "cli:/usage"}
 	fail := func() Observation {
 		o.Error = "usage panel incomplete or unrecognized"
-		o.ErrorKind = "parse_error"
+		o.ErrorKind = ErrKindParse
 		return o
 	}
 	lines := strings.Split(CleanScreen(text), "\n")
@@ -130,10 +130,7 @@ func ParseClaudeUsageScreen(text string, now time.Time) Observation {
 	if !ok {
 		return fail()
 	}
-	o.Buckets = []Bucket{
-		{Label: "5h", Window: "5h", UsedPct: Pct(session), ResetsAt: sessionReset, Scope: Scope{Kind: "account"}, Horizon: "now"},
-		{Label: "7d", Window: "7d", UsedPct: Pct(weekly), ResetsAt: weeklyReset, Scope: Scope{Kind: "account"}, Horizon: "week"},
-	}
+	o.Buckets = []Bucket{accountBucket("5h", Pct(session), sessionReset), accountBucket("7d", Pct(weekly), weeklyReset)}
 	seen := map[string]bool{}
 	for i, line := range lines {
 		lower := strings.ToLower(line)
@@ -165,7 +162,7 @@ func ParseClaudeUsageScreen(text string, now time.Time) Observation {
 			reset = weeklyReset
 		}
 		seen[key] = true
-		o.Buckets = append(o.Buckets, Bucket{Label: name, Window: "7d", UsedPct: Pct(used), ResetsAt: reset, Scope: Scope{Kind: "model", Name: name}, Horizon: "week"})
+		o.Buckets = append(o.Buckets, modelBucket(name, "7d", Pct(used), reset))
 	}
 	return o
 }

@@ -72,7 +72,7 @@ func mergeDevinFreeBucket(shared, local *FreeBucketState, now time.Time) *FreeBu
 }
 
 func devinFreeTag(b Bucket) bool {
-	if b.Scope.Kind != "model" || b.Window != "" {
+	if b.Scope.Kind != ScopeModel || b.Window != "" {
 		return false
 	}
 	switch b.Scope.Name {

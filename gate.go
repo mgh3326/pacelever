@@ -189,7 +189,7 @@ func gate(in Inputs, req Request) Decision {
 		d.FreeTag = FreeAvailable
 		d.Reason = FreeAvailable + ": SWE-2 free bucket; account credits do not constrain this rung"
 		for _, b := range obs.Buckets {
-			if b.Scope.Kind == "account" && !obs.Stale {
+			if b.Scope.Kind == ScopeAccount && !obs.Stale {
 				if b.Window == "1d" {
 					d.AccountDailyPct = b.UsedPct
 				}
@@ -227,8 +227,8 @@ func gate(in Inputs, req Request) Decision {
 		}
 	}
 	if automaticFailed {
-		accepted := obs.Stale && obs.AgeS != nil && *obs.AgeS <= 21600 && obs.ErrorKind == "probe_in_progress" && (obs.AccountFPMatch == nil || *obs.AccountFPMatch)
-		if !accepted && obs.Stale && obs.AgeS != nil && *obs.AgeS <= 21600 && obs.AccountFPMatch != nil && *obs.AccountFPMatch && (obs.ErrorKind == "rate_limited" || obs.ErrorKind == "network") {
+		accepted := obs.Stale && obs.AgeS != nil && *obs.AgeS <= 21600 && obs.ErrorKind == ErrKindProbeInProgress && (obs.AccountFPMatch == nil || *obs.AccountFPMatch)
+		if !accepted && obs.Stale && obs.AgeS != nil && *obs.AgeS <= 21600 && obs.AccountFPMatch != nil && *obs.AccountFPMatch && (obs.ErrorKind == ErrKindRateLimited || obs.ErrorKind == ErrKindNetwork) {
 			accepted = true
 		}
 		if accepted {
@@ -269,7 +269,7 @@ func gate(in Inputs, req Request) Decision {
 			var oldest time.Time
 			var expires time.Time
 			for _, m := range manual {
-				buckets = append(buckets, Bucket{Label: m.Window, Window: m.Window, UsedPct: m.UsedPct, ResetsAt: m.ResetsAt, Scope: Scope{Kind: "account"}, Horizon: horizon(m.Window)})
+				buckets = append(buckets, accountBucket(m.Window, m.UsedPct, m.ResetsAt))
 				d.ManualObservationIDs = append(d.ManualObservationIDs, m.ID)
 				d.ManualObservations = append(d.ManualObservations, m)
 				t, _ := ParseTime(m.MeasuredAt)
@@ -368,7 +368,7 @@ func gate(in Inputs, req Request) Decision {
 func matching(buckets []Bucket, group string) []Bucket {
 	var out []Bucket
 	for _, b := range buckets {
-		if (b.Scope.Kind == "account" || b.Scope.Kind == "" || (b.Scope.Kind == "group" && b.Scope.Name == group)) && (validPct(b.UsedPct) || b.Locked) {
+		if (b.Scope.Kind == ScopeAccount || b.Scope.Kind == "" || (b.Scope.Kind == ScopeGroup && b.Scope.Name == group)) && (validPct(b.UsedPct) || b.Locked) {
 			out = append(out, b)
 		}
 	}
@@ -415,7 +415,7 @@ func recommendBase(in Inputs, grade, role, area string) []Recommendation {
 			continue
 		}
 		for _, b := range o.Buckets {
-			if b.Window == "7d" && b.Scope.Kind == "account" {
+			if b.Window == "7d" && b.Scope.Kind == ScopeAccount {
 				if p := Pace(b, now); p != nil && *p >= in.Config.PaceThreshold() {
 					over[o.ID] = *p
 				}

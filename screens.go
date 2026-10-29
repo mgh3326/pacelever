@@ -36,15 +36,12 @@ func resetIn(s string, now time.Time) string {
 	}
 	return now.Add(d).UTC().Format(time.RFC3339Nano)
 }
-func screenBucket(window string, used float64, reset string) Bucket {
-	return Bucket{Label: window, Window: window, UsedPct: Pct(used), ResetsAt: reset, Scope: Scope{Kind: "account"}, Horizon: horizon(window)}
-}
 func ParseScreen(pool, text string, now time.Time) Observation {
 	o := Observation{ID: pool, Source: "cli:/usage"}
 	clean := CleanScreen(text)
 	fail := func() Observation {
 		o.Error = "usage panel incomplete or unrecognized"
-		o.ErrorKind = "parse_error"
+		o.ErrorKind = ErrKindParse
 		o.Buckets = nil
 		return o
 	}
@@ -75,7 +72,7 @@ func ParseScreen(pool, text string, now time.Time) Observation {
 				reset = t.UTC().Format(time.RFC3339)
 			}
 		}
-		o.Buckets = []Bucket{screenBucket("30d", 100*used/total, reset)}
+		o.Buckets = []Bucket{accountBucket("30d", Pct(100*used/total), reset)}
 	case "kimi", "devin":
 		for _, line := range strings.Split(clean, "\n") {
 			lower := strings.ToLower(line)
@@ -104,12 +101,12 @@ func ParseScreen(pool, text string, now time.Time) Observation {
 			if strings.EqualFold(m[2], "left") || strings.EqualFold(m[2], "remaining") {
 				used = 100 - used
 			}
-			o.Buckets = append(o.Buckets, screenBucket(window, used, resetIn(line, now)))
+			o.Buckets = append(o.Buckets, accountBucket(window, Pct(used), resetIn(line, now)))
 		}
 		if pool == "devin" && len(o.Buckets) == 0 {
 			m := regexp.MustCompile(`(?i)(?:Pro|Ultra|Free)[^\n]*?([0-9]+(?:\.[0-9]+)?)%\s+remaining`).FindStringSubmatch(clean)
 			if m != nil {
-				o.Buckets = []Bucket{screenBucket("7d", 100-number(m[1]), resetIn(clean, now))}
+				o.Buckets = []Bucket{accountBucket("7d", Pct(100-number(m[1])), resetIn(clean, now))}
 			}
 		}
 	}
@@ -131,7 +128,7 @@ func ParseDevinModels(text string) []Bucket {
 		if m == nil || !regexp.MustCompile(`(?i)\bFree\b`).MatchString(line) {
 			continue
 		}
-		out = append(out, Bucket{Label: m[1], Window: "", UsedPct: Pct(0), Scope: Scope{Kind: "model", Name: m[1]}, Horizon: "now", Note: "Free tag observed"})
+		out = append(out, Bucket{Label: m[1], Window: "", UsedPct: Pct(0), Scope: Scope{Kind: ScopeModel, Name: m[1]}, Horizon: "now", Note: "Free tag observed"})
 	}
 	return out
 }

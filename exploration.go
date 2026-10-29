@@ -174,7 +174,7 @@ func explorationHeadroom(in Inputs, req Request, pool string) (bool, *float64, s
 	}
 	var multiple *float64
 	for _, bucket := range observation.Buckets {
-		if bucket.Window != "7d" || bucket.Scope.Kind != "account" {
+		if bucket.Window != "7d" || bucket.Scope.Kind != ScopeAccount {
 			continue
 		}
 		pace := Pace(bucket, in.clock())

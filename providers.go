@@ -65,7 +65,7 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 	resp, e := client.Do(req)
 	if e != nil {
 		o.Error = "usage request failed"
-		o.ErrorKind = "network"
+		o.ErrorKind = ErrKindNetwork
 		return o
 	}
 	defer resp.Body.Close()
@@ -75,7 +75,7 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 	var raw map[string]json.RawMessage
 	if e = json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&raw); e != nil {
 		o.Error = "invalid usage JSON"
-		o.ErrorKind = "parse_error"
+		o.ErrorKind = ErrKindParse
 		return o
 	}
 	switch p.ID {
@@ -86,7 +86,7 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 				ResetsAt    string   `json:"resets_at"`
 			}
 			if json.Unmarshal(raw[axis.key], &w) == nil {
-				o.Buckets = append(o.Buckets, Bucket{Label: axis.window, Window: axis.window, UsedPct: validated(w.Utilization), ResetsAt: w.ResetsAt, Scope: Scope{Kind: "account"}, Horizon: horizon(axis.window)})
+				o.Buckets = append(o.Buckets, accountBucket(axis.window, validated(w.Utilization), w.ResetsAt))
 			}
 		}
 		var limits []struct {
@@ -101,7 +101,7 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 		_ = json.Unmarshal(raw["limits"], &limits)
 		for _, w := range limits {
 			if w.Scope.Model.DisplayName != "" {
-				o.Buckets = append(o.Buckets, Bucket{Label: w.Scope.Model.DisplayName, Window: "7d", UsedPct: validated(w.Utilization), ResetsAt: w.ResetsAt, Scope: Scope{Kind: "model", Name: w.Scope.Model.DisplayName}, Horizon: "week"})
+				o.Buckets = append(o.Buckets, modelBucket(w.Scope.Model.DisplayName, "7d", validated(w.Utilization), w.ResetsAt))
 			}
 		}
 	case "codex":
@@ -118,7 +118,7 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 		headerNames := []string{"x-codex-primary-used-percent", "x-codex-secondary-used-percent"}
 		for i, w := range []*codexWindow{limit.Primary, limit.Secondary} {
 			if w != nil {
-				b := w.bucket(Scope{Kind: "account"}, p.now())
+				b := w.bucket(Scope{Kind: ScopeAccount}, p.now())
 				if pct := validated(headerFloat(resp.Header, headerNames[i])); pct != nil {
 					b.UsedPct = pct
 				}
@@ -136,7 +136,7 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 		for _, x := range extra {
 			for _, w := range []*codexWindow{x.Limit.Primary, x.Limit.Secondary} {
 				if w != nil {
-					o.Buckets = append(o.Buckets, w.bucket(Scope{Kind: "model", Name: x.Name}, p.now()))
+					o.Buckets = append(o.Buckets, w.bucket(Scope{Kind: ScopeModel, Name: x.Name}, p.now()))
 				}
 			}
 		}
@@ -154,7 +154,7 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 				// The API reports no limit; ClaudeBar measures the balance
 				// against a fixed 1000.
 				used := 100 - (*balance / 1000 * 100)
-				o.Buckets = append(o.Buckets, Bucket{Label: "credits", Window: "credit", UsedPct: Pct(used), Scope: Scope{Kind: "account"}, Note: fmt.Sprintf("credits remaining %.2f of %.2f", *balance, 1000.0)})
+				o.Buckets = append(o.Buckets, Bucket{Label: "credits", Window: "credit", UsedPct: Pct(used), Scope: Scope{Kind: ScopeAccount}, Note: fmt.Sprintf("credits remaining %.2f of %.2f", *balance, 1000.0)})
 			}
 		}
 	case "clinepass":
@@ -169,13 +169,13 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 		for _, w := range data.Limits {
 			window := map[string]string{"five_hour": "5h", "weekly": "7d", "monthly": "30d"}[w.Type]
 			if window != "" {
-				o.Buckets = append(o.Buckets, Bucket{Label: w.Type, Window: window, UsedPct: validated(w.Used), ResetsAt: w.Reset, Scope: Scope{Kind: "account"}, Horizon: horizon(window)})
+				o.Buckets = append(o.Buckets, Bucket{Label: w.Type, Window: window, UsedPct: validated(w.Used), ResetsAt: w.Reset, Scope: Scope{Kind: ScopeAccount}, Horizon: horizon(window)})
 			}
 		}
 	}
 	if len(o.Buckets) == 0 {
 		o.Error = "usage response has no recognized windows"
-		o.ErrorKind = "parse_error"
+		o.ErrorKind = ErrKindParse
 	}
 	return o
 }
@@ -208,18 +208,18 @@ func retryAfterSeconds(header string, now time.Time) float64 {
 func statusObservation(id string, status int, header http.Header, now time.Time, authKind, authHint string, rateWait float64) Observation {
 	o := Observation{ID: id, Source: "usage-api"}
 	o.Error = fmt.Sprintf("usage HTTP %d", status)
-	o.ErrorKind = "http"
+	o.ErrorKind = ErrKindHTTP
 	switch status {
 	case 401, 403:
 		o.ErrorKind = authKind
 		if o.ErrorKind == "" {
-			o.ErrorKind = "auth"
+			o.ErrorKind = ErrKindAuth
 		}
 		if authHint != "" {
 			o.Error = authHint
 		}
 	case 429:
-		o.ErrorKind = "rate_limited"
+		o.ErrorKind = ErrKindRateLimited
 		if header != nil {
 			o.RetryAfterS = retryAfterSeconds(header.Get("Retry-After"), now)
 		}
@@ -276,35 +276,35 @@ func doJSON(ctx context.Context, client HTTPDoer, method, endpoint string, heade
 
 func commandCodeStatus(status int, header http.Header, parseError bool, now time.Time) Observation {
 	if status == 403 && parseError {
-		o := statusObservation("commandcode", status, header, now, "edge_rejected", "", 0)
+		o := statusObservation("commandcode", status, header, now, ErrKindEdgeRejected, "", 0)
 		o.Error = "commandcode edge rejected the request; check the client user agent"
 		return o
 	}
-	return statusObservation("commandcode", status, header, now, "auth_failed", "commandcode authentication failed; run cmd login or set COMMAND_CODE_API_KEY", 0)
+	return statusObservation("commandcode", status, header, now, ErrKindAuthFailed, "commandcode authentication failed; run cmd login or set COMMAND_CODE_API_KEY", 0)
 }
 
 func fetchCommandCode(ctx context.Context, token string, client HTTPDoer, now func() time.Time) Observation {
 	if token == "" {
-		return Observation{ID: "commandcode", Error: "credentials unavailable", ErrorKind: "credentials"}
+		return Observation{ID: "commandcode", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
 	}
 	// The API's edge rejects generic clients; use the CLI's own user agent.
 	headers := map[string]string{"Authorization": "Bearer " + token, "User-Agent": "cmd/1.88.1"}
 	who, e := doJSON(ctx, client, "GET", "https://api.commandcode.ai/alpha/whoami?limits=1", headers, nil)
 	if e != nil {
-		return Observation{ID: "commandcode", Error: "usage request failed", ErrorKind: "network"}
+		return Observation{ID: "commandcode", Error: "usage request failed", ErrorKind: ErrKindNetwork}
 	}
 	if who.Status != 200 {
 		return commandCodeStatus(who.Status, who.Header, who.ParseError, now())
 	}
 	if who.ParseError {
-		return Observation{ID: "commandcode", Error: "invalid usage JSON", ErrorKind: "parse_error"}
+		return Observation{ID: "commandcode", Error: "invalid usage JSON", ErrorKind: ErrKindParse}
 	}
 	identity := object(who.Body["data"])
 	if len(identity) == 0 {
 		identity = who.Body
 	}
 	if success, ok := identity["success"].(bool); ok && !success {
-		return Observation{ID: "commandcode", Error: "commandcode rejected the request", ErrorKind: "http"}
+		return Observation{ID: "commandcode", Error: "commandcode rejected the request", ErrorKind: ErrKindHTTP}
 	}
 	orgID := str(object(identity["org"])["id"])
 	endpoint := "https://api.commandcode.ai/alpha/billing/credits"
@@ -313,13 +313,13 @@ func fetchCommandCode(ctx context.Context, token string, client HTTPDoer, now fu
 	}
 	billing, e := doJSON(ctx, client, "GET", endpoint, headers, nil)
 	if e != nil {
-		return Observation{ID: "commandcode", Error: "usage request failed", ErrorKind: "network"}
+		return Observation{ID: "commandcode", Error: "usage request failed", ErrorKind: ErrKindNetwork}
 	}
 	if billing.Status != 200 {
 		return commandCodeStatus(billing.Status, billing.Header, billing.ParseError, now())
 	}
 	if billing.ParseError {
-		return Observation{ID: "commandcode", Error: "invalid usage JSON", ErrorKind: "parse_error"}
+		return Observation{ID: "commandcode", Error: "invalid usage JSON", ErrorKind: ErrKindParse}
 	}
 	o := parseCommandCode(billing.Body)
 	account := str(object(identity["user"])["id"])
@@ -359,7 +359,9 @@ func parseCommandCode(raw map[string]any) Observation {
 		if !validPct(&pct) {
 			continue
 		}
-		o.Buckets = append(o.Buckets, Bucket{Label: axis.window, Window: axis.window, UsedPct: Pct(pct), ResetsAt: resetAtValue(w["resetAt"]), Scope: Scope{Kind: "account"}, Horizon: horizon(axis.window), Locked: locked})
+		b := accountBucket(axis.window, Pct(pct), resetAtValue(w["resetAt"]))
+		b.Locked = locked
+		o.Buckets = append(o.Buckets, b)
 	}
 	if credits := object(data["credits"]); len(credits) > 0 {
 		o.Plan = str(credits["planId"])
@@ -379,19 +381,21 @@ func parseCommandCode(raw map[string]any) Observation {
 				if pct > 100 {
 					pct = 100
 				}
-				o.Buckets = append(o.Buckets, Bucket{Label: "30d", Window: "30d", UsedPct: Pct(pct), Scope: Scope{Kind: "account"}, Horizon: "month", Note: fmt.Sprintf("credits remaining %.2f of %.2f USD", remaining, total)})
+				b := accountBucket("30d", Pct(pct), "")
+				b.Note = fmt.Sprintf("credits remaining %.2f of %.2f USD", remaining, total)
+				o.Buckets = append(o.Buckets, b)
 			} else if remaining <= 0 {
 				// An unknown plan with no balance is exhausted, not absent.
-				o.Buckets = append(o.Buckets, Bucket{Label: "credits", Window: "credit", UsedPct: Pct(100), Scope: Scope{Kind: "account"}, Locked: true, Note: "credits exhausted"})
+				o.Buckets = append(o.Buckets, Bucket{Label: "credits", Window: "credit", UsedPct: Pct(100), Scope: Scope{Kind: ScopeAccount}, Locked: true, Note: "credits exhausted"})
 			} else {
 				// A positive balance with no plan ceiling is money, not a percentage.
-				o.Buckets = append(o.Buckets, Bucket{Label: "credits", Window: "credit", Scope: Scope{Kind: "account"}, Note: fmt.Sprintf("credits remaining %.2f USD", remaining)})
+				o.Buckets = append(o.Buckets, Bucket{Label: "credits", Window: "credit", Scope: Scope{Kind: ScopeAccount}, Note: fmt.Sprintf("credits remaining %.2f USD", remaining)})
 			}
 		}
 	}
 	if len(o.Buckets) == 0 {
 		o.Error = "usage response has no recognized windows"
-		o.ErrorKind = "parse_error"
+		o.ErrorKind = ErrKindParse
 	}
 	return o
 }
@@ -437,7 +441,7 @@ func fetchGrok(ctx context.Context, token string, client HTTPDoer, now func() ti
 // concurrent `grok` process is not raced and a refresh it performs is kept.
 func fetchGrokRecord(ctx context.Context, record grokRecord, client HTTPDoer, now func() time.Time) Observation {
 	if strings.TrimSpace(record.Token) == "" {
-		return Observation{ID: "grok", Error: "credentials unavailable", ErrorKind: "credentials"}
+		return Observation{ID: "grok", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
 	}
 	refreshed, refreshTried := false, false
 	if grokRefreshDue(record, now()) {
@@ -454,7 +458,7 @@ func fetchGrokRecord(ctx context.Context, record grokRecord, client HTTPDoer, no
 		}
 	}
 	o := grokBilling(ctx, record.Token, client, now)
-	if o.ErrorKind == "auth_failed" && !refreshed && !refreshTried && record.refreshable() {
+	if o.ErrorKind == ErrKindAuthFailed && !refreshed && !refreshTried && record.refreshable() {
 		next, failure, ok := grokRefresh(ctx, record, client, now)
 		if !ok {
 			return failure
@@ -482,13 +486,13 @@ func grokRefreshDue(record grokRecord, now time.Time) bool {
 func grokBilling(ctx context.Context, token string, client HTTPDoer, now func() time.Time) Observation {
 	resp, e := doJSON(ctx, client, "GET", "https://cli-chat-proxy.grok.com/v1/billing?format=credits", map[string]string{"Authorization": "Bearer " + token, "x-grok-client-mode": "build"}, nil)
 	if e != nil {
-		return Observation{ID: "grok", Error: "usage request failed", ErrorKind: "network"}
+		return Observation{ID: "grok", Error: "usage request failed", ErrorKind: ErrKindNetwork}
 	}
 	if resp.Status != 200 {
-		return statusObservation("grok", resp.Status, resp.Header, now(), "auth_failed", "grok authentication failed; run grok login", 0)
+		return statusObservation("grok", resp.Status, resp.Header, now(), ErrKindAuthFailed, "grok authentication failed; run grok login", 0)
 	}
 	if resp.ParseError {
-		return Observation{ID: "grok", Error: "invalid usage JSON", ErrorKind: "parse_error"}
+		return Observation{ID: "grok", Error: "invalid usage JSON", ErrorKind: ErrKindParse}
 	}
 	return parseGrok(resp.Body)
 }
@@ -511,7 +515,7 @@ func grokRefresh(ctx context.Context, record grokRecord, client HTTPDoer, now fu
 		return record, Observation{ID: "grok", Error: message, ErrorKind: kind}, false
 	}
 	if !record.refreshable() {
-		return fail("grok authentication failed; run grok login", "auth_failed")
+		return fail("grok authentication failed; run grok login", ErrKindAuthFailed)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -521,17 +525,17 @@ func grokRefresh(ctx context.Context, record grokRecord, client HTTPDoer, now fu
 	}
 	resp, e := doJSON(ctx, client, "POST", record.Issuer+"/oauth2/token", map[string]string{"Content-Type": "application/x-www-form-urlencoded"}, []byte(form.Encode()))
 	if e != nil {
-		return fail("grok token refresh failed", "network")
+		return fail("grok token refresh failed", ErrKindNetwork)
 	}
 	if resp.Status == 400 || resp.Status == 401 {
-		return fail("grok authentication failed; run grok login", "auth_failed")
+		return fail("grok authentication failed; run grok login", ErrKindAuthFailed)
 	}
 	if resp.Status != 200 {
-		return fail("grok token refresh failed", "http")
+		return fail("grok token refresh failed", ErrKindHTTP)
 	}
 	token := strings.TrimSpace(str(resp.Body["access_token"]))
 	if resp.ParseError || token == "" {
-		return fail("grok token refresh returned no access token", "parse_error")
+		return fail("grok token refresh returned no access token", ErrKindParse)
 	}
 	renewed := record
 	renewed.Token = token
@@ -597,7 +601,7 @@ func parseGrok(raw map[string]any) Observation {
 	}
 	used, ok := finiteNumber(config["creditUsagePercent"])
 	if !ok || !validPct(&used) {
-		return Observation{ID: "grok", Error: "usage response has no valid credit percentage", ErrorKind: "parse_error"}
+		return Observation{ID: "grok", Error: "usage response has no valid credit percentage", ErrorKind: ErrKindParse}
 	}
 	period := object(config["currentPeriod"])
 	kind := strings.ToUpper(str(period["type"]))
@@ -610,7 +614,7 @@ func parseGrok(raw map[string]any) Observation {
 	case strings.Contains(kind, "DAILY"):
 		window, label = "1d", "1d"
 	default:
-		return Observation{ID: "grok", Error: "usage response has an unrecognized billing period", ErrorKind: "parse_error"}
+		return Observation{ID: "grok", Error: "usage response has an unrecognized billing period", ErrorKind: ErrKindParse}
 	}
 	// The current period's end, or else the billing period's end — never one
 	// shape's start with the other's end.
@@ -622,7 +626,7 @@ func parseGrok(raw map[string]any) Observation {
 	if o.Plan == "" {
 		o.Plan = grokPlanName(str(raw["subscriptionTier"]))
 	}
-	bucket := Bucket{Label: label, Window: window, UsedPct: Pct(used), ResetsAt: reset, Scope: Scope{Kind: "account"}, Horizon: horizon(window)}
+	bucket := Bucket{Label: label, Window: window, UsedPct: Pct(used), ResetsAt: reset, Scope: Scope{Kind: ScopeAccount}, Horizon: horizon(window)}
 	note := productNote(config["productUsage"])
 	// Prepaid balance is money in cents, not a percentage; it rides the account
 	// note so every bucket stays percentage-bearing and publishable shared.
@@ -646,7 +650,7 @@ func parseGrok(raw map[string]any) Observation {
 			if name == "" || !shareOK || !validPct(&share) {
 				continue
 			}
-			o.Buckets = append(o.Buckets, Bucket{Label: name, Window: window, UsedPct: Pct(share), ResetsAt: reset, Scope: Scope{Kind: "model", Name: name}, Horizon: horizon(window)})
+			o.Buckets = append(o.Buckets, modelBucket(name, window, Pct(share), reset))
 		}
 	}
 	// The cap's unit isn't stated (dollars or cents), so it stays a share. It
@@ -664,7 +668,9 @@ func parseGrok(raw map[string]any) Observation {
 		if share > 100 {
 			share = 100
 		}
-		o.Buckets = append(o.Buckets, Bucket{Label: "On-Demand", Window: window, UsedPct: Pct(share), ResetsAt: reset, Scope: Scope{Kind: "model", Name: "On-Demand"}, Horizon: horizon(window), Locked: locked})
+		b := modelBucket("On-Demand", window, Pct(share), reset)
+		b.Locked = locked
+		o.Buckets = append(o.Buckets, b)
 	}
 	return o
 }
@@ -717,7 +723,7 @@ func devinWebProvider(cfg Config, client HTTPDoer, now func() time.Time) Provide
 // setting, so no browser storage is read and nothing is written back.
 func fetchDevinWeb(ctx context.Context, token, org string, client HTTPDoer, now func() time.Time) Observation {
 	if token == "" || !devinOrgRE.MatchString(org) {
-		return Observation{ID: "devin", Error: "credentials unavailable", ErrorKind: "credentials"}
+		return Observation{ID: "devin", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
 	}
 	endpoint := "https://app.devin.ai/api/" + url.PathEscape(org) + "/billing/quota/usage"
 	resp, e := doJSON(ctx, client, "GET", endpoint, map[string]string{
@@ -725,16 +731,16 @@ func fetchDevinWeb(ctx context.Context, token, org string, client HTTPDoer, now 
 		"x-cog-org-id":  org,
 	}, nil)
 	if e != nil {
-		return Observation{ID: "devin", Error: "usage request failed", ErrorKind: "network"}
+		return Observation{ID: "devin", Error: "usage request failed", ErrorKind: ErrKindNetwork}
 	}
 	if resp.Status != 200 {
 		if resp.Status == 401 || resp.Status == 403 {
-			return statusObservation("devin", resp.Status, resp.Header, now(), "auth_failed", "devin authentication failed; set DEVIN_BEARER_TOKEN and pools.devin.org_id", 0)
+			return statusObservation("devin", resp.Status, resp.Header, now(), ErrKindAuthFailed, "devin authentication failed; set DEVIN_BEARER_TOKEN and pools.devin.org_id", 0)
 		}
 		return statusObservation("devin", resp.Status, resp.Header, now(), "", "", 0)
 	}
 	if resp.ParseError {
-		return Observation{ID: "devin", Error: "invalid usage JSON", ErrorKind: "parse_error"}
+		return Observation{ID: "devin", Error: "invalid usage JSON", ErrorKind: ErrKindParse}
 	}
 	return parseDevin(resp.Body)
 }
@@ -744,16 +750,16 @@ func parseDevin(raw map[string]any) Observation {
 	nested := object(raw["quota_usage"])
 	if raw["hide_daily_quota"] != true {
 		if used, reset, ok := devinWindow(raw["daily_percentage"], raw["daily_reset_at"], nested["daily_quota"]); ok {
-			o.Buckets = append(o.Buckets, Bucket{Label: "1d", Window: "1d", UsedPct: Pct(used), ResetsAt: reset, Scope: Scope{Kind: "account"}, Horizon: horizon("1d")})
+			o.Buckets = append(o.Buckets, accountBucket("1d", Pct(used), reset))
 		}
 	}
 	if used, reset, ok := devinWindow(raw["weekly_percentage"], raw["weekly_reset_at"], nested["weekly_quota"]); ok {
-		o.Buckets = append(o.Buckets, Bucket{Label: "7d", Window: "7d", UsedPct: Pct(used), ResetsAt: reset, Scope: Scope{Kind: "account"}, Horizon: horizon("7d")})
+		o.Buckets = append(o.Buckets, accountBucket("7d", Pct(used), reset))
 	}
 	o.Plan = devinPlan(raw)
 	if len(o.Buckets) == 0 {
 		o.Error = "usage response has no recognized windows"
-		o.ErrorKind = "parse_error"
+		o.ErrorKind = ErrKindParse
 	}
 	return o
 }
@@ -848,7 +854,7 @@ func devinPlan(raw map[string]any) string {
 
 func fetchAgy(ctx context.Context, token string, client HTTPDoer, now func() time.Time) Observation {
 	if token == "" {
-		return Observation{ID: "agy", Error: "credentials unavailable", ErrorKind: "credentials"}
+		return Observation{ID: "agy", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
 	}
 	headers := map[string]string{"Authorization": "Bearer " + token, "User-Agent": "antigravity", "Content-Type": "application/json"}
 	var last httpJSON
@@ -860,25 +866,25 @@ func fetchAgy(ctx context.Context, token string, client HTTPDoer, now func() tim
 		}
 		last, gotStatus = resp, true
 		if resp.Status == 401 || resp.Status == 403 {
-			return statusObservation("agy", resp.Status, resp.Header, now(), "auth_failed", "antigravity authentication failed; run agy to refresh the login", 0)
+			return statusObservation("agy", resp.Status, resp.Header, now(), ErrKindAuthFailed, "antigravity authentication failed; run agy to refresh the login", 0)
 		}
 		if resp.Status == 200 && !resp.ParseError {
 			return parseAgy(resp.Body, fetchAgyModels(ctx, headers, client, base))
 		}
 	}
 	if gotStatus && last.Status == 200 {
-		return Observation{ID: "agy", Error: "invalid usage JSON", ErrorKind: "parse_error"}
+		return Observation{ID: "agy", Error: "invalid usage JSON", ErrorKind: ErrKindParse}
 	}
 	if gotStatus {
-		o := statusObservation("agy", last.Status, last.Header, now(), "auth_failed", "antigravity authentication failed; run agy to refresh the login", 0)
+		o := statusObservation("agy", last.Status, last.Header, now(), ErrKindAuthFailed, "antigravity authentication failed; run agy to refresh the login", 0)
 		if last.Status >= 500 {
 			// A server error is retryable, not a sign the login expired.
-			o.ErrorKind = "network"
+			o.ErrorKind = ErrKindNetwork
 			o.Error = "antigravity temporarily unavailable"
 		}
 		return o
 	}
-	return Observation{ID: "agy", Error: "usage request failed", ErrorKind: "network"}
+	return Observation{ID: "agy", Error: "usage request failed", ErrorKind: ErrKindNetwork}
 }
 
 // fetchAgyModels reads the per-model quota list. The summary groups omit a
@@ -927,7 +933,7 @@ func parseAgy(raw map[string]any, extraModels map[string]any) Observation {
 		if window == "unknown" {
 			h = ""
 		}
-		bucket := Bucket{Label: window, Window: window, UsedPct: Pct(100 * (1 - fraction)), ResetsAt: reset, Scope: Scope{Kind: "group", Name: group}, Horizon: h}
+		bucket := Bucket{Label: window, Window: window, UsedPct: Pct(100 * (1 - fraction)), ResetsAt: reset, Scope: Scope{Kind: ScopeGroup, Name: group}, Horizon: h}
 		key := group + "\x00" + window
 		if previous, ok := worst[key]; !ok || (previous.UsedPct != nil && bucket.UsedPct != nil && *bucket.UsedPct > *previous.UsedPct) {
 			worst[key] = bucket
@@ -995,7 +1001,7 @@ func parseAgy(raw map[string]any, extraModels map[string]any) Observation {
 	}
 	if len(o.Buckets) == 0 {
 		o.Error = "usage response has no recognized windows"
-		o.ErrorKind = "parse_error"
+		o.ErrorKind = ErrKindParse
 	}
 	return o
 }
@@ -1070,7 +1076,7 @@ func (w codexWindow) bucket(scope Scope, now time.Time) Bucket {
 	case w.ResetAfter > 0:
 		reset = now.Add(time.Duration(w.ResetAfter) * time.Second).UTC().Format(time.RFC3339Nano)
 	}
-	return Bucket{Label: label, Window: label, UsedPct: validated(w.Used), ResetsAt: reset, Scope: scope, Horizon: horizon(label)}
+	return windowBucket(scope, label, validated(w.Used), reset)
 }
 func fingerprint(prefix, value string) string {
 	if value == "" {
@@ -1116,10 +1122,10 @@ func DefaultProvidersAt(cfg Config, selectors map[string]string, now func() time
 		}
 		token := str(oauth["accessToken"])
 		if token == "" {
-			return Observation{ID: "claude", Error: "credentials unavailable", ErrorKind: "credentials"}
+			return Observation{ID: "claude", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
 		}
 		if expires, ok := finiteNumber(oauth["expiresAt"]); ok && expires/1000 < float64(clock().Unix()) {
-			return Observation{ID: "claude", Error: "token expired", ErrorKind: "token_expired"}
+			return Observation{ID: "claude", Error: "token expired", ErrorKind: ErrKindTokenExpired}
 		}
 		provider := ClaudeProvider{
 			API: HTTPProvider{ID: "claude", URL: "https://api.anthropic.com/api/oauth/usage", Headers: map[string]string{"Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20"}, RateLimitWaitS: 300, Now: clock},
@@ -1133,7 +1139,7 @@ func DefaultProvidersAt(cfg Config, selectors map[string]string, now func() time
 	result["clinepass"] = ProviderFunc(func(ctx context.Context) Observation {
 		token := clineToken(home)
 		if token == "" {
-			return Observation{ID: "clinepass", Error: "credentials unavailable", ErrorKind: "credentials"}
+			return Observation{ID: "clinepass", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
 		}
 		return (HTTPProvider{ID: "clinepass", URL: "https://api.cline.bot/api/v1/users/me/plan/usage-limits", Headers: map[string]string{"Authorization": "Bearer " + token}, Now: clock}).Fetch(ctx)
 	})
@@ -1143,7 +1149,7 @@ func DefaultProvidersAt(cfg Config, selectors map[string]string, now func() time
 	result["grok"] = ProviderFunc(func(ctx context.Context) Observation {
 		record, ok := selectGrokRecord(grokRecords(home, selectors), cfg.Quota.Accounts["grok"], clock())
 		if !ok {
-			return Observation{ID: "grok", Error: "credentials unavailable", ErrorKind: "credentials"}
+			return Observation{ID: "grok", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
 		}
 		o := fetchGrokRecord(ctx, record, nil, clock)
 		if record.Fingerprint != "" {
@@ -1179,7 +1185,7 @@ func fetchCodex(ctx context.Context, home string, selectors map[string]string, c
 	tokens := object(readObject(filepath.Join(dir, "auth.json"))["tokens"])
 	token := str(tokens["access_token"])
 	if token == "" {
-		return Observation{ID: "codex", Error: "credentials unavailable", ErrorKind: "credentials"}
+		return Observation{ID: "codex", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
 	}
 	acct := str(tokens["account_id"])
 	if o, ok := fetchCodexRPC(ctx, home, cfg, dir); ok {
@@ -1437,10 +1443,10 @@ func (p agyProvider) Fetch(ctx context.Context) Observation {
 		}
 	}
 	if token == "" {
-		return Observation{ID: "agy", Error: "credentials unavailable", ErrorKind: "credentials"}
+		return Observation{ID: "agy", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
 	}
 	o := fetchAgy(ctx, token, p.client, now)
-	if o.ErrorKind != "auth_failed" {
+	if o.ErrorKind != ErrKindAuthFailed {
 		return o
 	}
 	secretRefused := usedSecret
@@ -1454,7 +1460,7 @@ func (p agyProvider) Fetch(ctx context.Context) Observation {
 			break
 		}
 		token, usedSecret = fresh, freshSecret
-		if o = fetchAgy(ctx, token, p.client, now); o.ErrorKind != "auth_failed" {
+		if o = fetchAgy(ctx, token, p.client, now); o.ErrorKind != ErrKindAuthFailed {
 			return o
 		}
 		if usedSecret {

@@ -71,7 +71,7 @@ func (p PTYProvider) Fetch(ctx context.Context) Observation {
 		text, e := p.screen(ctx)
 		if e != nil {
 			result.Error = e.Error()
-			result.ErrorKind = "probe_error"
+			result.ErrorKind = ErrKindProbe
 		} else {
 			result = ParseScreen(p.ID, text, ClockNow(p.Now))
 		}
@@ -93,11 +93,11 @@ func (p PTYProvider) Fetch(ctx context.Context) Observation {
 		return nil
 	})
 	if e == ErrBusy {
-		return Observation{ID: p.ID, Error: "probe already in progress", ErrorKind: "probe_in_progress"}
+		return Observation{ID: p.ID, Error: "probe already in progress", ErrorKind: ErrKindProbeInProgress}
 	}
 	if e != nil {
 		result.Error = "probe lock unavailable"
-		result.ErrorKind = "probe_error"
+		result.ErrorKind = ErrKindProbe
 	}
 	return result
 }
