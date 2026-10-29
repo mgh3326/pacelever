@@ -14,6 +14,12 @@ wait_s = 1
 presence_every_s = 600
 measurable_accounts = ["codex:0123456789abcdef"]
 
+# Optional per-pool freshness overrides; these take precedence over
+# fresh_ttl_s. The defaults are claude = 900 and every other pool = 300.
+[quota.pool_fresh_ttl_s]
+claude = 900
+codex = 300
+
 [quota.accounts]
 codex = "0123456789abcdef"
 claude = "fedcba9876543210"
@@ -48,12 +54,16 @@ budget, publish, and release. Other hosts wait briefly and read again. No host
 probes independently during an hk outage. Lease expiry permits takeover; hk
 fences a late publisher. There are no new workers or persistent processes.
 
-A same-account local snapshot is used only when hk calls fail. Such output always
-has `stale: true`, `degraded: true` and an error kind. A different account's cache
-is discarded. Local cache TTL and provider backoff never bypass the shared read.
-Shared mode disables the legacy document-based quota fallback/publication so it
-cannot turn a degraded local reading into a fresh one. Inflight tracking keeps
-its existing behavior.
+A same-account local snapshot is used when hk calls fail, and also when hk is
+reachable but has no usable observation and the local probe is rate-limited or
+still inside its recorded 429 backoff. Such output is always stale with its age;
+during an hk outage it is also degraded. A different account's cache is
+discarded. A `rate_limited` probe result honours `Retry-After` and otherwise
+backs off for five minutes; other provider failures do not suppress the next
+shared probe. Local cache TTL and non-rate-limit provider backoff never bypass
+the shared read. Shared mode disables the legacy document-based quota
+fallback/publication so it cannot turn a degraded local reading into a fresh
+one. Inflight tracking keeps its existing behavior.
 
 `manual set`, `manual list`, and `manual clear` use the same account API in shared
 mode. Manual entries are independent per quota window; a write on one host is

@@ -376,6 +376,89 @@ func TestSharedQuotaFailuresReleaseAndDegrade(t *testing.T) {
 		t.Fatal("caller cancellation leaked lease")
 	}
 }
+
+// A 429 recorded in shared mode suppresses the next collector run before the
+// lease. With no usable shared observation, the same-account local last-good
+// snapshot is served stale and expired resets roll over.
+func TestSharedQuotaRateLimitBackoffUsesLocalLastGood(t *testing.T) {
+	now := testNow
+	f := &fakeHK{}
+	c := sharedCollector(t, f)
+	c.Now = func() time.Time { return now }
+	reset := now.Add(-time.Minute).Format(time.RFC3339)
+	lastGood := Observation{ID: "grok", AccountFP: "0123456789abcdef", AccountFPKind: "account", Buckets: []Bucket{{Window: "7d", UsedPct: Pct(24), ResetsAt: reset, Scope: Scope{Kind: "account"}}}}
+	if e := WriteJSON(c.CachePath, map[string]CacheEntry{"grok": {FetchedAt: float64(now.Add(-time.Hour).Unix()), Result: lastGood}}); e != nil {
+		t.Fatal(e)
+	}
+	var probes atomic.Int32
+	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation {
+		probes.Add(1)
+		return Observation{Error: "usage HTTP 429", ErrorKind: "rate_limited", PublishFP: "0123456789abcdef", PublishFPKind: "account"}
+	})
+	first := collectShared(t, c)
+	if !first.Stale || first.Degraded || first.ErrorKind != "rate_limited" || first.Error != "usage HTTP 429" || first.AgeS == nil || *first.AgeS != 3600 {
+		t.Fatalf("first fallback %+v", first)
+	}
+	if len(first.Buckets) != 1 || !first.Buckets[0].RolledOver || first.Buckets[0].UsedPct == nil || *first.Buckets[0].UsedPct != 0 || first.Buckets[0].ResetsAt != "" {
+		t.Fatalf("expired local bucket not rolled over: %+v", first.Buckets)
+	}
+	entries, e := loadSnapshots(c.CachePath, "")
+	if e != nil || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt < 299 || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt > 300 {
+		t.Fatalf("default rate-limit backoff not persisted: %+v %v", entries["grok"], e)
+	}
+	callsAfterFirst := len(f.calls)
+	second := collectShared(t, c)
+	if probes.Load() != 1 || strings.Join(f.calls[callsAfterFirst:], ",") != "read" {
+		t.Fatalf("backoff allowed another probe or lease: probes=%d calls=%v", probes.Load(), f.calls)
+	}
+	if !second.Stale || second.ErrorKind != "rate_limited" || second.Error != "provider backoff active" || second.AgeS == nil || *second.AgeS != 3600 || len(second.Buckets) != 1 {
+		t.Fatalf("second fallback %+v", second)
+	}
+	if second.AccountFPMatch == nil || !*second.AccountFPMatch {
+		t.Fatalf("same-account fallback lost identity: %+v", second)
+	}
+}
+
+func TestSharedQuotaRateLimitHonoursRetryAfter(t *testing.T) {
+	now := testNow
+	f := &fakeHK{}
+	c := sharedCollector(t, f)
+	c.Now = func() time.Time { return now }
+	var probes atomic.Int32
+	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation {
+		probes.Add(1)
+		return Observation{Error: "usage HTTP 429", ErrorKind: "rate_limited", RetryAfterS: 720}
+	})
+	collectShared(t, c)
+	entries, e := loadSnapshots(c.CachePath, "")
+	if e != nil || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt < 719 || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt > 720 {
+		t.Fatalf("Retry-After backoff not persisted: %+v %v", entries["grok"], e)
+	}
+	now = now.Add(6 * time.Minute)
+	o := collectShared(t, c)
+	if probes.Load() != 1 || o.Error != "provider backoff active" || o.ErrorKind != "rate_limited" {
+		t.Fatalf("Retry-After backoff ignored: probes=%d obs=%+v", probes.Load(), o)
+	}
+}
+
+func TestSharedQuotaOtherFailuresDoNotBackoff(t *testing.T) {
+	f := &fakeHK{}
+	c := sharedCollector(t, f)
+	var probes atomic.Int32
+	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation {
+		probes.Add(1)
+		return Observation{Error: "usage request failed", ErrorKind: "network"}
+	})
+	for i := 0; i < 2; i++ {
+		if o := collectShared(t, c); o.ErrorKind != "network" {
+			t.Fatalf("run %d: %+v", i, o)
+		}
+	}
+	if probes.Load() != 2 {
+		t.Fatalf("non-rate-limit failure was cached as backoff: probes=%d", probes.Load())
+	}
+}
+
 func TestSharedQuotaManualFleet(t *testing.T) {
 	f := &fakeHK{}
 	writer := sharedCollector(t, f)

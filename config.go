@@ -43,15 +43,16 @@ type BenchConfig struct {
 	AllowPlaintextQuotaShare bool    `toml:"allow_plaintext_quota_share"`
 }
 type QuotaConfig struct {
-	URL                string            `toml:"url"`
-	CredentialEnv      string            `toml:"credential_env"`
-	HostID             string            `toml:"host_id"`
-	FreshTTLS          float64           `toml:"fresh_ttl_s"`
-	LeaseTTLS          int               `toml:"lease_ttl_s"`
-	WaitS              float64           `toml:"wait_s"`
-	PresenceEveryS     float64           `toml:"presence_every_s"`
-	Accounts           map[string]string `toml:"accounts"`
-	MeasurableAccounts []string          `toml:"measurable_accounts"`
+	URL                string             `toml:"url"`
+	CredentialEnv      string             `toml:"credential_env"`
+	HostID             string             `toml:"host_id"`
+	FreshTTLS          float64            `toml:"fresh_ttl_s"`
+	PoolFreshTTLS      map[string]float64 `toml:"pool_fresh_ttl_s"`
+	LeaseTTLS          int                `toml:"lease_ttl_s"`
+	WaitS              float64            `toml:"wait_s"`
+	PresenceEveryS     float64            `toml:"presence_every_s"`
+	Accounts           map[string]string  `toml:"accounts"`
+	MeasurableAccounts []string           `toml:"measurable_accounts"`
 }
 type Config struct {
 	Quota    QuotaConfig              `toml:"quota"`

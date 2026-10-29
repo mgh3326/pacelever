@@ -25,6 +25,11 @@ func (q QuotaConfig) Validate() error {
 	if q.HostID != "" && safeHost(q.HostID) != q.HostID {
 		return fmt.Errorf("invalid shared quota host_id")
 	}
+	for pool, ttl := range q.PoolFreshTTLS {
+		if !knownPool(pool) || math.IsNaN(ttl) || math.IsInf(ttl, 0) || ttl < 0 || ttl > 86400 {
+			return fmt.Errorf("invalid shared quota TTLs")
+		}
+	}
 	for pool, fp := range q.Accounts {
 		if !knownPool(pool) || !accountFPRE.MatchString(fp) {
 			return fmt.Errorf("invalid shared quota account fingerprint")
@@ -310,9 +315,15 @@ func (c Collector) maybePresence(source ObservationSource, key string, allowed b
 		}
 	})
 }
-func (q QuotaConfig) freshTTL() time.Duration {
+func (q QuotaConfig) freshTTL(pool string) time.Duration {
+	if ttl := q.PoolFreshTTLS[pool]; ttl > 0 {
+		return time.Duration(ttl * float64(time.Second))
+	}
 	if q.FreshTTLS > 0 {
 		return time.Duration(q.FreshTTLS * float64(time.Second))
+	}
+	if pool == "claude" {
+		return 15 * time.Minute
 	}
 	return 5 * time.Minute
 }
@@ -343,25 +354,38 @@ func releaseQuota(source ObservationSource, key, holder string) error {
 	defer cancel()
 	return source.Release(ctx, key, holder)
 }
-func (c Collector) sharedFallback(pool, key, kind string, entry CacheEntry, now time.Time) Observation {
+func (c Collector) sharedLocalFallback(pool, key, kind, message string, entry CacheEntry, now time.Time, degraded bool) Observation {
 	o := entry.Result
 	fp, k := identity(o)
 	if key == "" || k != "account" || pool+":"+fp != key {
 		o = Observation{}
+	} else {
+		o.AccountFP = fp
+		o.AccountFPKind = k
+		o.AccountFPMatch = ptr(true)
 	}
 	o.ID = pool
 	o.PoolClass = c.Config.Pool(pool, now).Class
 	o.Stale = true
-	o.Degraded = true
+	o.Degraded = degraded
 	o.ErrorKind = kind
-	o.Error = "shared quota unavailable"
+	o.Error = message
 	if entry.FetchedAt > 0 && len(o.Buckets) > 0 {
+		fetched := time.UnixMilli(int64(entry.FetchedAt * 1000))
+		age := now.Sub(fetched).Seconds()
+		if age < 0 {
+			age = 0
+		}
 		o.FetchedAt = entry.FetchedAt
-		o.AgeS = ptr(now.Sub(time.UnixMilli(int64(entry.FetchedAt * 1000))).Seconds())
+		o.AgeS = ptr(age)
 		o.Buckets = rolloverExpired(o.Buckets, now)
 	}
 	return o
 }
+func (c Collector) sharedFallback(pool, key, kind string, entry CacheEntry, now time.Time) Observation {
+	return c.sharedLocalFallback(pool, key, kind, "shared quota unavailable", entry, now, true)
+}
+
 // rolloverNote marks a bucket whose reset passed between measurement and use:
 // the window restarted, so the reading is 0% and the next reset is unknown.
 const rolloverNote = "reset passed; window restarted at 0%, unmeasured"
@@ -441,21 +465,37 @@ func (c Collector) quotaNow() time.Time {
 	}
 	return time.Now().UTC()
 }
+
+// ClaudeBar keeps a rate limiter per account: a 429 suppresses another fetch
+// for Retry-After (or a five-minute default), while the last good reading stays
+// available as stale evidence. A legacy scopefuel backoff does not transfer to
+// shared mode because it was not recorded against this account key.
+func sharedRateLimitBackoffActive(entry CacheEntry, pool, key string, now time.Time) bool {
+	if entry.legacy || entry.NegativeUntil <= float64(now.UnixMilli())/1000 || entry.LastError == nil || entry.LastError.ErrorKind != "rate_limited" {
+		return false
+	}
+	fp, kind := identity(*entry.LastError)
+	return fp == "" || (kind == "account" && pool+":"+fp == key)
+}
+
 func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool string, entry CacheEntry, now time.Time) Observation {
 	key, allowed := c.accountKey(pool)
 	latest := SharedLatest{}
 	reachable := false
-	fail := func(kind string) Observation {
+	failWith := func(kind, message string) Observation {
 		if !reachable {
 			return c.sharedFallback(pool, key, kind, entry, now)
 		}
-		o, _ := sharedAuto(latest.Observation, pool, key, c.quotaNow(), 365*24*time.Hour, true)
-		o.ID = pool
-		o.Stale = true
-		o.ErrorKind = kind
-		o.Error = "shared measurement pending"
-		return o
+		if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), 365*24*time.Hour, true); ok {
+			o.ID = pool
+			o.Stale = true
+			o.ErrorKind = kind
+			o.Error = message
+			return o
+		}
+		return c.sharedLocalFallback(pool, key, kind, message, entry, now, false)
 	}
+	fail := func(kind string) Observation { return failWith(kind, "shared measurement pending") }
 	if key == "" {
 		return fail("account_unknown")
 	}
@@ -475,9 +515,12 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	if pool == "anthropic-api" {
 		return finish(fail("manual_only"))
 	}
-	if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(), false); ok {
+	if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(pool), false); ok {
 		_ = updateSnapshot(c.cacheFile(), pool, o, time.UnixMilli(int64(o.FetchedAt*1000)), entry)
 		return finish(o)
+	}
+	if sharedRateLimitBackoffActive(entry, pool, key, c.quotaNow()) {
+		return finish(failWith("rate_limited", "provider backoff active"))
 	}
 	// Read-only hosts also wait briefly for an in-flight publisher.
 	holder := ""
@@ -504,7 +547,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 			reachable = false
 			return fail("shared_unavailable")
 		}
-		if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(), false); ok {
+		if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(pool), false); ok {
 			return finish(o)
 		}
 		return finish(fail("shared_pending"))
@@ -521,7 +564,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		reachable = false
 		return fail("shared_unavailable")
 	}
-	if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(), false); ok {
+	if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(pool), false); ok {
 		return finish(o)
 	}
 	provider := c.Providers[pool]
@@ -539,6 +582,21 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		kind := observed.ErrorKind
 		if kind == "" {
 			kind = "probe_failed"
+		}
+		if kind == "rate_limited" {
+			failedAt := c.quotaNow()
+			if observed.RetryAfterS <= 0 {
+				observed.RetryAfterS = 300
+			}
+			observed.ID = pool
+			if e := updateSnapshot(c.cacheFile(), pool, observed, failedAt, entry); e != nil {
+				return finish(fail("cache_error"))
+			}
+			message := observed.Error
+			if message == "" {
+				message = "provider rate limited"
+			}
+			return finish(failWith(kind, message))
 		}
 		return finish(fail(kind))
 	}
@@ -562,7 +620,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		reachable = false
 		return finish(fail("shared_publish_failed"))
 	}
-	o, ok := sharedAuto(&x, pool, key, at, c.Config.Quota.freshTTL(), false)
+	o, ok := sharedAuto(&x, pool, key, at, c.Config.Quota.freshTTL(pool), false)
 	if !ok {
 		return finish(fail("probe_failed"))
 	}
