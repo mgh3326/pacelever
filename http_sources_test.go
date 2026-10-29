@@ -271,7 +271,7 @@ func TestGrokBilling(t *testing.T) {
 		return response(200, body), nil
 	})
 	o := fetchGrok(context.Background(), "fixture-token", client, fixedNow)
-	if o.Error != "" || len(o.Buckets) != 1 {
+	if o.Error != "" || len(o.Buckets) != 3 {
 		t.Fatalf("grok buckets %+v", o)
 	}
 	b := o.Buckets[0]
@@ -280,6 +280,12 @@ func TestGrokBilling(t *testing.T) {
 	}
 	if !strings.Contains(b.Note, "GrokBuild 5.0%") {
 		t.Fatalf("product note %q", b.Note)
+	}
+	if o.Buckets[1].Scope.Kind != "model" || o.Buckets[1].Scope.Name != "Build" || !pctClose(o.Buckets[1].UsedPct, 5) {
+		t.Fatalf("grok build bucket %+v", o.Buckets[1])
+	}
+	if o.Buckets[2].Scope.Name != "Chat" || !pctClose(o.Buckets[2].UsedPct, 3) {
+		t.Fatalf("grok chat bucket %+v", o.Buckets[2])
 	}
 }
 
@@ -860,8 +866,8 @@ func TestProviderTokens(t *testing.T) {
 	if e := os.WriteFile(filepath.Join(home, ".grok", "auth.json"), []byte(grok), 0600); e != nil {
 		t.Fatal(e)
 	}
-	if token, _ := grokCredential(home, nil, ""); token != "fixture-grok" {
-		t.Fatalf("grok token %q", token)
+	if record, ok := selectGrokRecord(grokRecords(home, nil), "", time.Now()); !ok || record.Token != "fixture-grok" {
+		t.Fatalf("grok token %q", record.Token)
 	}
 	if e := os.MkdirAll(filepath.Join(home, ".gemini", "antigravity-cli"), 0700); e != nil {
 		t.Fatal(e)
@@ -886,17 +892,17 @@ func TestGrokRecordDeterministic(t *testing.T) {
 	if e := os.WriteFile(filepath.Join(home, ".grok", "auth.json"), []byte(body), 0600); e != nil {
 		t.Fatal(e)
 	}
-	token, fp := grokCredential(home, nil, "")
-	if token != "newer" || fp != fingerprint("grok-account", "fixture-new") {
-		t.Fatalf("grok picked %q %q", token, fp)
+	record, ok := selectGrokRecord(grokRecords(home, nil), "", time.Now())
+	if !ok || record.Token != "newer" || record.Fingerprint != fingerprint("grok-account", "fixture-new") {
+		t.Fatalf("grok picked %q %q", record.Token, record.Fingerprint)
 	}
 	want := fingerprint("grok-account", "fixture-old")
-	token, fp = grokCredential(home, nil, want)
-	if token != "older" || fp != want {
-		t.Fatalf("grok did not honour the account key: %q %q", token, fp)
+	record, ok = selectGrokRecord(grokRecords(home, nil), want, time.Now())
+	if !ok || record.Token != "older" || record.Fingerprint != want {
+		t.Fatalf("grok did not honour the account key: %q %q", record.Token, record.Fingerprint)
 	}
-	if token, _ := grokCredential(home, nil, "ffffffffffffffff"); token != "" {
-		t.Fatalf("grok used a record for another account: %q", token)
+	if _, ok := selectGrokRecord(grokRecords(home, nil), "ffffffffffffffff", time.Now()); ok {
+		t.Fatal("grok used a record for another account")
 	}
 }
 
