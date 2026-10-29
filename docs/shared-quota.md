@@ -23,8 +23,11 @@ Never put the credential in TOML. A non-empty value in the environment variable
 named by `credential_env` is used as the token. When that variable is unset or
 empty (agents and daemons usually have no `HANDOFFKEEP_TOKEN`), pacelever keeps
 the token and CF Access pair it loaded from the handoffkeep `config.env`, the same
-file the catalog path reads (see `docs/config.md`, "Catalog credentials"). Tokens
-are never logged. HTTPS is required; the existing explicit `bench.allow_plaintext_quota_share` opt-in is
+file the catalog path reads (see `docs/config.md`, "Catalog credentials"), but only
+when `quota.url` has the same scheme, host and port as the `HANDOFFKEEP_URL` that
+credential was stored for. For any other endpoint (different host or port, or a
+plaintext downgrade) no stored token or CF Access pair is sent; set the variable
+named by `credential_env` explicitly. Tokens are never logged. HTTPS is required; the existing explicit `bench.allow_plaintext_quota_share` opt-in is
 available for controlled testing. Existing CF Access credential support applies.
 
 The account key is pool plus the existing 16-hex SHA-256 fingerprint. For Codex

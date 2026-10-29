@@ -386,7 +386,7 @@ func writeHKConfigEnv(t *testing.T) {
 	t.Helper()
 	isolate(t)
 	path := filepath.Join(configBase(), "handoffkeep", "config.env")
-	body := "HANDOFFKEEP_TOKEN=stored-placeholder\nHANDOFFKEEP_CF_ACCESS_CLIENT_ID=stored-id\nHANDOFFKEEP_CF_ACCESS_CLIENT_SECRET=stored-secret\n"
+	body := "HANDOFFKEEP_URL=https://stored.example.invalid\nHANDOFFKEEP_TOKEN=stored-placeholder\nHANDOFFKEEP_CF_ACCESS_CLIENT_ID=stored-id\nHANDOFFKEEP_CF_ACCESS_CLIENT_SECRET=stored-secret\n"
 	if e := AtomicWrite(path, []byte(body)); e != nil {
 		t.Fatal(e)
 	}
@@ -406,19 +406,56 @@ func TestSharedSourceKeepsStoredTokenWhenEnvEmpty(t *testing.T) {
 	for _, name := range []string{"", "PACELEVER_TEST_QUOTA_TOKEN"} {
 		writeHKConfigEnv(t)
 		t.Setenv("PACELEVER_TEST_QUOTA_TOKEN", "  ")
-		c := Collector{Config: Config{Quota: QuotaConfig{URL: "https://quota.example.invalid", CredentialEnv: name}}}
+		c := Collector{Config: Config{Quota: QuotaConfig{URL: "https://STORED.example.invalid:443/v1", CredentialEnv: name}}}
 		b := sharedClient(t, c)
-		if b.Token != "stored-placeholder" || b.CFClientID != "stored-id" || b.CFClientSecret != "stored-secret" || b.URL != "https://quota.example.invalid" {
+		if b.Token != "stored-placeholder" || b.CFClientID != "stored-id" || b.CFClientSecret != "stored-secret" || b.URL != "https://STORED.example.invalid:443/v1" {
 			t.Fatalf("stored credentials lost for credential_env %q", name)
 		}
 	}
 }
 func TestSharedSourceEnvTokenWins(t *testing.T) {
-	writeHKConfigEnv(t)
-	t.Setenv("PACELEVER_TEST_QUOTA_TOKEN", "env-placeholder")
-	c := Collector{Config: Config{Quota: QuotaConfig{URL: "https://quota.example.invalid", CredentialEnv: "PACELEVER_TEST_QUOTA_TOKEN"}}}
-	if b := sharedClient(t, c); b.Token != "env-placeholder" {
-		t.Fatal("explicit credential env did not win")
+	for _, quotaURL := range []string{"https://stored.example.invalid", "https://other.example.invalid"} {
+		writeHKConfigEnv(t)
+		t.Setenv("PACELEVER_TEST_QUOTA_TOKEN", "env-placeholder")
+		c := Collector{Config: Config{Quota: QuotaConfig{URL: quotaURL, CredentialEnv: "PACELEVER_TEST_QUOTA_TOKEN"}}}
+		if b := sharedClient(t, c); b.Token != "env-placeholder" {
+			t.Fatalf("explicit credential env did not win for %s", quotaURL)
+		}
+	}
+}
+func TestSharedSourceWithholdsStoredCredentialsFromOtherOrigin(t *testing.T) {
+	for _, quotaURL := range []string{
+		"https://other.example.invalid",       // different host
+		"https://stored.example.invalid:8443", // different port
+		"http://stored.example.invalid",       // plaintext downgrade
+		"not a url",                           // unparsable
+	} {
+		for _, name := range []string{"", "PACELEVER_TEST_QUOTA_TOKEN"} {
+			writeHKConfigEnv(t)
+			t.Setenv("PACELEVER_TEST_QUOTA_TOKEN", "")
+			c := Collector{Config: Config{Quota: QuotaConfig{URL: quotaURL, CredentialEnv: name}}}
+			b := sharedClient(t, c)
+			if b.Token != "" || b.CFClientID != "" || b.CFClientSecret != "" || b.URL != quotaURL {
+				t.Fatalf("stored credentials leaked to %s (credential_env %q)", quotaURL, name)
+			}
+		}
+	}
+}
+func TestSameOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want bool
+	}{
+		{"https://h.example.invalid", "https://H.example.invalid:443/x", true},
+		{"http://h.example.invalid", "http://h.example.invalid:80", true},
+		{"https://h.example.invalid", "http://h.example.invalid", false},
+		{"https://h.example.invalid", "https://h.example.invalid:444", false},
+		{"", "", false},
+		{"https://h.example.invalid", "", false},
+	} {
+		if got := sameOrigin(tc.a, tc.b); got != tc.want {
+			t.Fatalf("sameOrigin(%q,%q)=%v", tc.a, tc.b, got)
+		}
 	}
 }
 func TestPresenceHostIDPrecedence(t *testing.T) {

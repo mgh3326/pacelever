@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -112,18 +113,42 @@ func (c Collector) sharedSource() ObservationSource {
 		return nil
 	}
 	b := NewBenchClient(c.Config)
+	// The stored token and CF Access pair were loaded for b.URL. Reuse them only
+	// when the quota endpoint is the same origin; otherwise they must not leave
+	// for a different (or mistyped, or plaintext) host.
+	if !sameOrigin(b.URL, c.Config.Quota.URL) {
+		b.Token, b.CFClientID, b.CFClientSecret = "", "", ""
+	}
 	b.URL = c.Config.Quota.URL
 	name := c.Config.Quota.CredentialEnv
 	if name == "" {
 		name = "HANDOFFKEEP_TOKEN"
 	}
-	// An unset or empty variable keeps the token (and CF Access pair) that
-	// NewBenchClient loaded from the handoffkeep config.env.
+	// An unset or empty variable keeps the token that NewBenchClient loaded
+	// from config.env (same-origin only, above); a non-empty one always wins.
 	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 		b.Token = v
 	}
 	b.Client = &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return HKObservationSource{Client: b}
+}
+
+// sameOrigin reports whether two URLs share scheme, host and port. An empty or
+// unparsable URL never matches.
+func sameOrigin(a, b string) bool {
+	origin := func(raw string) string {
+		u, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || u.Scheme == "" || u.Hostname() == "" {
+			return ""
+		}
+		scheme, port := strings.ToLower(u.Scheme), u.Port()
+		if port == "" {
+			port = map[string]string{"https": "443", "http": "80"}[scheme]
+		}
+		return scheme + "://" + strings.ToLower(u.Hostname()) + ":" + port
+	}
+	oa := origin(a)
+	return oa != "" && oa == origin(b)
 }
 
 // Resolve identity before any provider request, using exactly the provider hash.
