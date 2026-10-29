@@ -195,6 +195,7 @@ usual; an expired exhausted reset does not make an old observation fresh.
 A new local exceed bypasses an otherwise fresh shared `available` state and
 is published under the normal account lease. Refreshing hosts preserve any
 active shared exceed, choosing the later reset when a local exceed also exists.
+A damaged local record cannot replace an active shared exceed with `unknown`.
 Consequently a local `--clear` does not erase an active hold published by another
 host; shared readers continue to honor its reset. The local `gate -m devin-swe2*`
 still uses its existing local free-limit records and return codes.

@@ -81,6 +81,7 @@ func TestDevinSharedKeepsPaidBucketsAndDropsFreePercentages(t *testing.T) {
 	c.Providers = map[string]Provider{"devin": ProviderFunc(func(context.Context) Observation {
 		o := observation("devin", 42)
 		o.Source = "usage-api"
+		o.PublishFP, o.PublishFPKind = fingerprint("devin-account", "org-fixture"), "account"
 		o.Buckets = append(o.Buckets, ParseDevinModels("swe-2-high Free\nswe-2-medium Free\nswe-2-max Free")...)
 		return o
 	})}
@@ -96,16 +97,33 @@ func TestDevinSharedKeepsPaidBucketsAndDropsFreePercentages(t *testing.T) {
 }
 
 func TestDevinSharedRejectsDifferentWebOrganization(t *testing.T) {
-	f := &fakeHK{}
-	c := devinSharedCollector(t, f)
-	c.Config.Pools = map[string]PoolPolicy{"devin": {OrgID: "org-other-fixture"}}
-	c.Providers = map[string]Provider{"devin": ProviderFunc(func(context.Context) Observation {
-		o := observation("devin", 42)
-		o.Source = "usage-api"
-		return o
-	})}
-	if got := collectDevinShared(t, c); got.ErrorKind != "account_mismatch" || f.published != 0 || f.holder != "" {
-		t.Fatalf("different web organization published under local key: %+v", got)
+	for _, tc := range []struct {
+		name, configuredOrg, providerOrg string
+	}{
+		{"provider selected another org", "org-fixture", "org-other-fixture"},
+		{"request config conflicts with provider", "org-other-fixture", "org-fixture"},
+		{"provider identity absent", "org-fixture", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeHK{}
+			c := devinSharedCollector(t, f)
+			c.Config.Pools = map[string]PoolPolicy{"devin": {OrgID: tc.configuredOrg}}
+			provider := Provider(ProviderFunc(func(context.Context) Observation {
+				o := observation("devin", 42)
+				o.Source = "usage-api"
+				return o
+			}))
+			if tc.providerOrg != "" {
+				t.Setenv("DEVIN_BEARER_TOKEN", "fixture-token")
+				provider = devinWebProvider(Config{Pools: map[string]PoolPolicy{"devin": {OrgID: tc.providerOrg}}}, doFunc(func(*http.Request) (*http.Response, error) {
+					return response(200, `{"weekly_percentage":42}`), nil
+				}), fixedNow)
+			}
+			c.Providers = map[string]Provider{"devin": provider}
+			if got := collectDevinShared(t, c); got.ErrorKind != "account_mismatch" || f.published != 0 || f.holder != "" {
+				t.Fatalf("unattested or different web organization published under local key: %+v", got)
+			}
+		})
 	}
 }
 
@@ -158,6 +176,30 @@ func TestDevinSharedPreservesOtherHostsExceedOnRefresh(t *testing.T) {
 	o := collectDevinShared(t, c)
 	if o.Stale || o.FreeBucket.State != FreeBucketExhausted || !o.FreeBucket.ResetsAt.Equal(reset) || f.published != 1 {
 		t.Fatalf("other host cleared active shared hold: %+v", o)
+	}
+}
+
+func TestDevinSharedDamagedLocalRecordCannotReplaceActiveSharedExceed(t *testing.T) {
+	for _, age := range []time.Duration{time.Minute, 10 * time.Minute} {
+		t.Run(age.String(), func(t *testing.T) {
+			reset := testNow.Add(time.Hour)
+			f := &fakeHK{latest: SharedLatest{Observation: &SharedObservation{Kind: "auto", MeasuredAt: testNow.Add(-age), FreeBucket: &FreeBucketState{State: FreeBucketExhausted, ResetsAt: &reset}}}}
+			c := devinSharedCollector(t, f)
+			if err := WriteJSON(limitPath("devin"), limitStore{Records: map[string]LimitRecord{limitIdentity("devin"): {}}}); err != nil {
+				t.Fatal(err)
+			}
+			o := collectDevinShared(t, c)
+			if o.Stale || o.FreeBucket.State != FreeBucketExhausted || !o.FreeBucket.ResetsAt.Equal(reset) {
+				t.Fatalf("damaged local record replaced known shared exceed: %+v", o)
+			}
+			wantPublishes := 0
+			if age > c.Config.Quota.freshTTL("devin") {
+				wantPublishes = 1
+			}
+			if f.published != wantPublishes || f.latest.Observation.FreeBucket.State != FreeBucketExhausted {
+				t.Fatalf("publications=%d, want %d; shared=%+v", f.published, wantPublishes, f.latest.Observation)
+			}
+		})
 	}
 }
 

@@ -607,16 +607,16 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	if provider != nil && !(pool == "devin" && backingOff) {
 		observed = provider.Fetch(probeCtx)
 	}
+	fp, kind := identity(observed)
 	if pool == "devin" && observed.Source == "usage-api" {
 		// The optional web source selects its organization independently of
-		// the CLI login. Never label another organization's paid quota with
-		// the local CLI's shared key.
-		webFP := fingerprint("devin-account", strings.TrimSpace(c.Config.Pools[pool].OrgID))
-		if webFP == "" || pool+":"+webFP != key {
+		// the CLI login. Require its attested identity; current request config
+		// is only an additional constraint, not proof of what was measured.
+		configuredFP := fingerprint("devin-account", strings.TrimSpace(c.Config.Pools[pool].OrgID))
+		if fp == "" || kind != "account" || configuredFP != "" && configuredFP != fp {
 			return finish(fail("account_mismatch"))
 		}
 	}
-	fp, kind := identity(observed)
 	if (fp != "" && (kind != "account" || pool+":"+fp != key)) || (pool == "codex" || pool == "claude") && fp == "" {
 		return finish(fail("account_mismatch"))
 	}

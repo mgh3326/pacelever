@@ -56,14 +56,14 @@ func devinFreeNeedsPublish(shared, local *FreeBucketState, now time.Time) bool {
 		return true
 	}
 	if local.State == FreeBucketUnknown {
-		return prior.State != FreeBucketUnknown
+		return prior.State != FreeBucketUnknown && prior.State != FreeBucketExhausted
 	}
 	return local.State == FreeBucketExhausted && (prior.State != FreeBucketExhausted || local.ResetsAt.After(*prior.ResetsAt))
 }
 
 func mergeDevinFreeBucket(shared, local *FreeBucketState, now time.Time) *FreeBucketState {
 	prior, ok := sharedFreeBucket(shared, "devin", now)
-	if ok && prior != nil && prior.State == FreeBucketExhausted && local.State != FreeBucketUnknown {
+	if ok && prior != nil && prior.State == FreeBucketExhausted {
 		if local.State != FreeBucketExhausted || prior.ResetsAt.After(*local.ResetsAt) {
 			return prior
 		}
