@@ -787,6 +787,18 @@ func fingerprint(prefix, value string) string {
 	b := sha256.Sum256([]byte(prefix + "|" + value))
 	return hex.EncodeToString(b[:8])
 }
+func claudeAccountFingerprint(provider Provider, identityPath string, shareable bool) Provider {
+	return ProviderFunc(func(ctx context.Context) Observation {
+		o := provider.Fetch(ctx)
+		acct := object(readObject(identityPath)["oauthAccount"])
+		id := str(acct["accountUuid"])
+		if id != "" && shareable {
+			o.AccountFP = fingerprint("claude-account", id)
+			o.AccountFPKind = "account"
+		}
+		return o
+	})
+}
 func DefaultProviders(cfg Config) map[string]Provider { return DefaultProvidersFor(cfg, nil) }
 func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Provider {
 	home, _ := os.UserHomeDir()
@@ -811,14 +823,11 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 		if expires, ok := finiteNumber(oauth["expiresAt"]); ok && expires/1000 < float64(time.Now().Unix()) {
 			return Observation{ID: "claude", Error: "token expired", ErrorKind: "token_expired"}
 		}
-		o := (HTTPProvider{ID: "claude", URL: "https://api.anthropic.com/api/oauth/usage", Headers: map[string]string{"Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20"}, RateLimitWaitS: 300}).Fetch(ctx)
-		acct := object(readObject(identityPath)["oauthAccount"])
-		id := str(acct["accountUuid"])
-		if id != "" && shareable {
-			o.AccountFP = fingerprint("claude-account", id)
-			o.AccountFPKind = "account"
+		provider := ClaudeProvider{
+			API: HTTPProvider{ID: "claude", URL: "https://api.anthropic.com/api/oauth/usage", Headers: map[string]string{"Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20"}, RateLimitWaitS: 300},
+			CLI: ClaudeCLIProvider{Binary: ResolveBinary("claude", cfg), Env: selectors},
 		}
-		return o
+		return claudeAccountFingerprint(provider, identityPath, shareable).Fetch(ctx)
 	})
 	result["codex"] = ProviderFunc(func(ctx context.Context) Observation {
 		dir := selectors["CODEX_HOME"]
