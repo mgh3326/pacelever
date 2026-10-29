@@ -41,6 +41,9 @@ func (f *fakeRPC) Close() { f.closed = true }
 
 func stubRPC(t *testing.T, f *fakeRPC, e error) {
 	t.Helper()
+	// The path is never executed — the transport is stubbed — but binary
+	// resolution must succeed on machines without a codex CLI.
+	t.Setenv("PACELEVER_CODEX_BIN", "fixture-codex")
 	prev := codexRPCStart
 	codexRPCStart = func(context.Context, string, string, string) (codexRPCTransport, error) {
 		if e != nil {
