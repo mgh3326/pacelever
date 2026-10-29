@@ -213,17 +213,24 @@ func (q QuotaConfig) presenceHostID() string {
 
 // publishPresence records where an account was measured. It is asynchronous and
 // bounded, so it never adds latency to a collection or changes its verdict.
-func (c Collector) publishPresence(source ObservationSource, key string, at time.Time) {
+// onDone, when set, reports whether the publish succeeded.
+func (c Collector) publishPresence(source ObservationSource, key string, at time.Time, onDone func(bool)) {
 	publisher, ok := source.(PresenceSource)
 	host := c.Config.Quota.presenceHostID()
 	if !ok || !accountKeyRE.MatchString(key) || host == "" {
+		if onDone != nil {
+			onDone(false)
+		}
 		return
 	}
 	record := PresenceRecord{HostID: host, AccountKey: key, LastSeen: at}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		_ = publisher.PublishPresence(ctx, record)
+		err := publisher.PublishPresence(ctx, record)
+		if onDone != nil {
+			onDone(err == nil)
+		}
 	}()
 }
 func holderToken() (string, error) {
@@ -238,27 +245,48 @@ func (q QuotaConfig) presenceEvery() time.Duration {
 	return 10 * time.Minute
 }
 
-// presenceFile persists the last presence publish per host+account so repeated
-// CLI runs do not spam hk. Unreadable state counts as due; a state that cannot
-// be persisted skips this run's publish rather than risking a burst.
+// presenceFile persists the last claimed presence publish per host+account so
+// repeated CLI runs do not spam hk. Unreadable state counts as due; a state
+// that cannot be persisted skips this run's publish rather than risking a
+// burst. The lock is nonblocking: collection never waits on a presence slot.
 func (c Collector) presenceFile() string { return filepath.Join(c.cacheDir(), "presence.json") }
-func (c Collector) presenceDue(host, key string, now time.Time) bool {
+func (c Collector) presenceDue(host, key string, now time.Time) (int64, bool) {
+	ts := now.UnixNano()
 	due := false
-	e := WithFileLock(c.presenceFile()+".lock", false, func() error {
+	e := WithFileLock(c.presenceFile()+".lock", true, func() error {
 		state := map[string]int64{}
 		_ = ReadJSON(c.presenceFile(), &state)
+		if state == nil {
+			state = map[string]int64{}
+		}
 		k := host + "|" + key
-		if last := state[k]; last > 0 && now.Sub(time.Unix(last, 0)) < c.Config.Quota.presenceEvery() {
+		if last := time.Unix(0, state[k]); state[k] > 0 && !last.After(now) && now.Sub(last) < c.Config.Quota.presenceEvery() {
 			return nil
 		}
-		state[k] = now.Unix()
+		state[k] = ts
 		if e := WriteJSON(c.presenceFile(), state); e != nil {
 			return e
 		}
 		due = true
 		return nil
 	})
-	return e == nil && due
+	return ts, e == nil && due
+}
+
+// presenceUndo releases a slot claimed by presenceDue when its publish failed,
+// so a lost PUT does not suppress the host for the whole interval. A newer
+// claim is never removed.
+func (c Collector) presenceUndo(host, key string, ts int64) {
+	_ = WithFileLock(c.presenceFile()+".lock", true, func() error {
+		state := map[string]int64{}
+		_ = ReadJSON(c.presenceFile(), &state)
+		k := host + "|" + key
+		if state[k] != ts {
+			return nil
+		}
+		delete(state, k)
+		return WriteJSON(c.presenceFile(), state)
+	})
 }
 
 // maybePresence publishes presence for an observation served from the shared
@@ -269,10 +297,18 @@ func (c Collector) maybePresence(source ObservationSource, key string, allowed b
 		return
 	}
 	host := c.Config.Quota.presenceHostID()
-	if host == "" || !c.presenceDue(host, key, c.quotaNow()) {
+	if host == "" {
 		return
 	}
-	c.publishPresence(source, key, c.quotaNow())
+	ts, due := c.presenceDue(host, key, c.quotaNow())
+	if !due {
+		return
+	}
+	c.publishPresence(source, key, c.quotaNow(), func(ok bool) {
+		if !ok {
+			c.presenceUndo(host, key, ts)
+		}
+	})
 }
 func (q QuotaConfig) freshTTL() time.Duration {
 	if q.FreshTTLS > 0 {

@@ -39,7 +39,6 @@ func (f *fakeHK) PublishPresence(ctx context.Context, r PresenceRecord) error {
 		<-f.presenceBlock
 	}
 	f.mu.Lock()
-	f.calls = append(f.calls, "presence")
 	f.presence = append(f.presence, r)
 	done := f.presenceDone
 	f.mu.Unlock()
@@ -154,12 +153,16 @@ func TestSharedQuotaFreshBeforeProbe(t *testing.T) {
 	}
 }
 func TestSharedQuotaFleetSingleProbe(t *testing.T) {
+	t.Setenv("PACELEVER_HOST_ID", "")
+	t.Setenv("HANDOFFKEEP_HOST_ID", "")
 	f := &fakeHK{presenceDone: make(chan struct{}, 1)}
 	var probes atomic.Int32
 	var wg sync.WaitGroup
 	out := make(chan Observation, 6)
+	hosts := []string{"node-a", "node-b", "node-c", "node-d", "node-e", "node-f"}
 	for i := 0; i < 6; i++ {
 		c := sharedCollector(t, f)
+		c.Config.Quota.HostID = hosts[i]
 		c.Providers["grok"] = ProviderFunc(func(context.Context) Observation {
 			probes.Add(1)
 			time.Sleep(15 * time.Millisecond)
@@ -202,10 +205,15 @@ func TestSharedQuotaFleetSingleProbe(t *testing.T) {
 	if len(f.presence) != 6 {
 		t.Fatalf("presence %+v", f.presence)
 	}
+	seen := map[string]bool{}
 	for _, p := range f.presence {
 		if p.AccountKey != sharedTestKey || p.HostID == "" || p.LastSeen.IsZero() {
 			t.Fatalf("presence %+v", f.presence)
 		}
+		seen[p.HostID] = true
+	}
+	if len(seen) != 6 {
+		t.Fatalf("expected 6 distinct host IDs: %+v", f.presence)
 	}
 }
 
@@ -253,10 +261,12 @@ func TestPresenceSkippedWhenNotLoggedIn(t *testing.T) {
 // record survives across CLI runs via the cache dir.
 func TestPresenceRateLimitAcrossRuns(t *testing.T) {
 	dir := t.TempDir()
-	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now())}, presenceDone: make(chan struct{}, 2)}
+	now := time.Now().UTC()
+	f := &fakeHK{onRead: func(int) *SharedObservation { return sampleShared(now) }, presenceDone: make(chan struct{}, 2)}
 	run := func() Observation {
 		c := sharedCollector(t, f)
 		c.CachePath = filepath.Join(dir, "cache.json")
+		c.Now = func() time.Time { return now }
 		c.Providers["grok"] = ProviderFunc(func(context.Context) Observation { t.Fatal("fresh hk triggered probe"); return Observation{} })
 		return collectShared(t, c)
 	}
@@ -276,9 +286,18 @@ func TestPresenceRateLimitAcrossRuns(t *testing.T) {
 		t.Fatal("second run inside the interval published again")
 	case <-time.After(200 * time.Millisecond):
 	}
+	now = now.Add(11 * time.Minute)
+	if o := run(); o.Stale || o.Degraded {
+		t.Fatalf("%+v", o)
+	}
+	select {
+	case <-f.presenceDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("run past the interval did not publish presence")
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.presence) != 1 {
+	if len(f.presence) != 2 {
 		t.Fatalf("presence %+v", f.presence)
 	}
 }
