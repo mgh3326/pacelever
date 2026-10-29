@@ -136,7 +136,7 @@ func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inpu
 	}
 	manual = a.Collector.ManualInputs(observations, manual)
 	now := time.Now().UTC()
-	in := pl.Inputs{Catalog: c, Config: a.Config, Observations: observations, Manual: manual, Now: now, Inflight: map[string]*int{}}
+	in := pl.Inputs{Catalog: c, Config: a.Config, Observations: observations, Manual: manual, Now: now, Inflight: map[string]*int{}, FreeLimit: pl.ActiveLimit("devin", now)}
 	for i, o := range in.Observations {
 		if a.Config.Quota.URL == "" && (o.Error != "" || o.Stale) {
 			in.Observations[i] = a.Bench.QuotaFallback(ctx, o, "")
@@ -213,7 +213,16 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 			return 2, fmt.Errorf("unknown observation")
 		}
 		r := pl.LimitRecord{ResetAt: v.get("reset"), ObservedAt: v.get("observed"), Rung: v.get("rung"), Source: v.get("source"), Unparsed: v.flags["unparsed"]}
-		return 0, pl.ObserveLimit(pool, r, v.flags["clear"], v.get("account-key"), time.Now().UTC())
+		now := time.Now().UTC()
+		if r.ResetAt == "" && r.Unparsed && !v.flags["clear"] {
+			// A limit event whose reset time could not be read is held for a
+			// conservative default rather than ignored.
+			if observed, e := pl.ParseTime(r.ObservedAt); e == nil {
+				r.ResetAt = observed.Add(pl.UnknownResetHold).Format(time.RFC3339)
+				fmt.Fprintf(a.Err, "observe: reset time unknown; holding %s until %s\n", pool, r.ResetAt)
+			}
+		}
+		return 0, pl.ObserveLimit(pool, r, v.flags["clear"], v.get("account-key"), now)
 	case "inflight":
 		if v.at(1) != "show" || v.get("pool") == "" {
 			return 2, fmt.Errorf("inflight show --pool required")
@@ -405,6 +414,7 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 		return 2, e
 	}
 	in := pl.Inputs{Catalog: c, Config: a.Config, Manual: manual, Now: time.Now().UTC()}
+	in.FreeLimit = pl.ActiveLimit("devin", in.Now)
 	preliminaryInput := in
 	preliminaryInput.Manual = pl.ManualStore{}
 	preliminary := pl.Gate(preliminaryInput, req)
@@ -425,9 +435,6 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 			return 2, e
 		}
 		d = pl.Gate(in, req)
-	}
-	if hold := pl.ActiveLimit("devin", in.Now); hold != nil && strings.HasPrefix(req.Profile, "devin-swe2") {
-		d.Reason += "; last observed free_rate_limited until " + hold.ResetAt
 	}
 	if hold := pl.ActiveLimit("commandcode", in.Now); hold != nil && req.Profile == "cmd-dsflash41" && d.ExitCode != pl.RoleDenied && d.ExitCode != pl.Unsubscribed {
 		d.OK = false
@@ -468,7 +475,7 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 		}
 		fmt.Fprintf(a.Out, "profile=%s pool=%s used_pct=%s class=%s", d.Profile, d.ProviderID, percentText(d.UsedPct), class)
 		if d.GateBasis != "" {
-			fmt.Fprintf(a.Out, " basis=%s free_tag=%s account_daily=%s account_weekly=%s", d.GateBasis, d.FreeTag, percentText(d.AccountDailyPct), percentText(d.AccountWeeklyPct))
+			fmt.Fprintf(a.Out, " basis=%s free_tag=%q account_daily=%s account_weekly=%s", d.GateBasis, d.FreeTag, percentText(d.AccountDailyPct), percentText(d.AccountWeeklyPct))
 		}
 		if d.E6Arm != "" {
 			fmt.Fprintf(a.Out, " [E6 arm %s]", d.E6Arm)

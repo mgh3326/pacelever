@@ -6,6 +6,12 @@
   metering group the quota summary omits (e.g. this account's gemini session
   window) still reaches the gate; an unmappable model stays under the `unknown`
   group and fails closed.
+- Treat the SWE-2 free bucket as unmeasurable by design: `devin-swe2*` rungs are
+  admitted as `available (free)` without a fresh Free tag, and refused with
+  `free limit exceeded until <reset>` only while a recorded free-limit exceed has
+  not reached its reset time. An exceed with an unreadable reset is held for 60
+  minutes (`observe devin-free-limit --unparsed`). Account daily/weekly gating of
+  non-free Devin rungs is unchanged.
 - Read Command Code quota over HTTP (`whoami` then `credits`) and retire its PTY
   probe; refused credentials are `auth_failed` instead of a probe timeout.
 - Read Grok billing over HTTP and add Antigravity's cloud quota summary as `agy`.

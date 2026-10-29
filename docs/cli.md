@@ -55,8 +55,13 @@ the server's operator credential.
 ```sh
 pacelever observe devin-free-limit --reset '<RFC3339_RESET>' \
   --observed '<RFC3339_OBSERVATION>' --rung devin-swe2 --source job:example
+pacelever observe devin-free-limit --unparsed --observed '<RFC3339_OBSERVATION>' \
+  --rung devin-swe2 --source job:example   # reset unreadable: held 60 minutes
 pacelever observe devin-free-limit --clear
 ```
+
+The recorded exceed makes the SWE-2 free rungs refuse with
+`free limit exceeded until <reset>` (exit 3) until the reset passes.
 
 `models verify` sends a minimal one-token completion to compare the serving model
 with its recorded baseline. It returns 0 for matches, 1 for drift, 2 for unknown.

@@ -1,6 +1,8 @@
 package pacelever
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -71,14 +73,49 @@ func TestManualFallback(t *testing.T) {
 	}
 }
 func TestFreeScope(t *testing.T) {
-	o := observation("devin", 100)
-	o.Buckets = append(o.Buckets, Bucket{Label: "swe-2-high", Scope: Scope{Kind: "model", Name: "swe-2-high"}, UsedPct: Pct(0)})
-	in := Inputs{Now: testNow, Observations: []Observation{o}}
-	if d := Gate(in, Request{Profile: "devin-swe2"}); d.ExitCode != 0 {
-		t.Fatal(d.Reason)
+	// No record: the unmeasurable free bucket is available, even with no
+	// observation and with the account weekly window exhausted.
+	for name, obs := range map[string][]Observation{"none": nil, "weekly100": {observation("devin", 100)}} {
+		in := Inputs{Now: testNow, Observations: obs}
+		for _, profile := range []string{"devin-swe2", "devin-swe2-medium", "devin-swe2-max"} {
+			d := Gate(in, Request{Profile: profile})
+			if d.ExitCode != 0 || d.FreeTag != FreeAvailable || !strings.HasPrefix(d.Reason, FreeAvailable) || strings.Contains(d.Reason, "unmeasur") {
+				t.Fatalf("%s %s: %+v", name, profile, d)
+			}
+		}
 	}
-	if d := Gate(in, Request{Profile: "devin-swe2-medium"}); d.ExitCode != 4 {
-		t.Fatalf("borrowed free sibling: %d", d.ExitCode)
+}
+func TestFreeLimitExceed(t *testing.T) {
+	reset := testNow.Add(time.Hour).Format(time.RFC3339)
+	in := Inputs{Now: testNow, FreeLimit: &LimitRecord{ResetAt: reset, ObservedAt: testNow.Format(time.RFC3339), Source: "job:fixture"}}
+	d := Gate(in, Request{Profile: "devin-swe2"})
+	if d.OK || d.ExitCode != Blocked || d.Unmeasurable || d.Reason != "free limit exceeded until "+reset {
+		t.Fatalf("active exceed: %+v", d)
+	}
+	b, _ := json.Marshal(d)
+	if !strings.Contains(string(b), "free limit exceeded until") {
+		t.Fatalf("json wording: %s", b)
+	}
+	in.Now = testNow.Add(time.Hour)
+	if d := Gate(in, Request{Profile: "devin-swe2"}); d.ExitCode != 0 || d.Reason[:len(FreeAvailable)] != FreeAvailable {
+		t.Fatalf("expired exceed: %+v", d)
+	}
+	b, _ = json.Marshal(Gate(in, Request{Profile: "devin-swe2"}))
+	if !strings.Contains(string(b), `"free_tag":"available (free)"`) {
+		t.Fatalf("json wording: %s", b)
+	}
+}
+func TestFreeLimitDoesNotAffectPaidDevin(t *testing.T) {
+	in := Inputs{Now: testNow, Observations: []Observation{observation("devin", 100)}, FreeLimit: &LimitRecord{ResetAt: testNow.Add(time.Hour).Format(time.RFC3339)}}
+	if d := Gate(in, Request{Profile: "devin-swe2"}); d.ExitCode != Blocked {
+		t.Fatalf("exceed ignored: %+v", d)
+	}
+	cat := BundledCatalog()
+	cat.Rows = []CatalogRow{{Profile: "devin-paid", Effort: "high", ModelID: "devin-paid-model", Pool: "devin", Grade: "A", Gate: "default", Placed: true}}
+	in.Catalog = cat
+	in.FreeLimit = nil
+	if d := Gate(in, Request{Profile: "devin-paid", Effort: "high"}); d.ExitCode != Blocked || !strings.Contains(d.Reason, "quota exhausted") {
+		t.Fatalf("weekly 100%% admitted a non-free rung: %+v", d)
 	}
 }
 func TestPaceAllPaidPools(t *testing.T) {
