@@ -408,7 +408,7 @@ func TestSharedQuotaRateLimitBackoffUsesLocalLastGood(t *testing.T) {
 	}
 	callsAfterFirst := len(f.calls)
 	second := collectShared(t, c)
-	if probes.Load() != 1 || strings.Join(f.calls[callsAfterFirst:], ",") != "read" {
+	if probes.Load() != 1 || strings.Join(f.calls[callsAfterFirst:], ",") != "read,read" {
 		t.Fatalf("backoff allowed another probe or lease: probes=%d calls=%v", probes.Load(), f.calls)
 	}
 	if !second.Stale || second.ErrorKind != "rate_limited" || second.Error != "provider backoff active" || second.AgeS == nil || *second.AgeS != 3600 || len(second.Buckets) != 1 {
@@ -434,6 +434,9 @@ func TestSharedQuotaRateLimitHonoursRetryAfter(t *testing.T) {
 	if e != nil || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt < 719 || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt > 720 {
 		t.Fatalf("Retry-After backoff not persisted: %+v %v", entries["grok"], e)
 	}
+	if entries["grok"].LastError == nil || entries["grok"].LastError.PublishFP != "0123456789abcdef" || entries["grok"].LastError.PublishFPKind != "account" {
+		t.Fatalf("rate-limit backoff not bound to account key: %+v", entries["grok"].LastError)
+	}
 	now = now.Add(6 * time.Minute)
 	o := collectShared(t, c)
 	if probes.Load() != 1 || o.Error != "provider backoff active" || o.ErrorKind != "rate_limited" {
@@ -441,16 +444,58 @@ func TestSharedQuotaRateLimitHonoursRetryAfter(t *testing.T) {
 	}
 }
 
+func TestSharedQuotaRateLimitBackoffIsAccountScoped(t *testing.T) {
+	now := testNow
+	f := &fakeHK{}
+	c := sharedCollector(t, f)
+	c.Now = func() time.Time { return now }
+	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation {
+		return Observation{Error: "usage HTTP 429", ErrorKind: "rate_limited"}
+	})
+	collectShared(t, c)
+	c.Config.Quota.Accounts["grok"] = "fedcba9876543210"
+	if o := collectShared(t, c); o.ErrorKind != "shared_pending" {
+		t.Fatalf("previous account's backoff suppressed a different key: %+v", o)
+	}
+}
+
+func TestSharedQuotaBackoffStillRereadsShared(t *testing.T) {
+	now := testNow
+	f := &fakeHK{onRead: func(n int) *SharedObservation {
+		if n == 4 {
+			return sampleShared(now)
+		}
+		return nil
+	}}
+	c := sharedCollector(t, f)
+	c.Now = func() time.Time { return now }
+	var probes atomic.Int32
+	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation {
+		probes.Add(1)
+		return Observation{Error: "usage HTTP 429", ErrorKind: "rate_limited"}
+	})
+	collectShared(t, c)
+	callsAfterFirst := len(f.calls)
+	o := collectShared(t, c)
+	if probes.Load() != 1 || o.Stale || o.Source != "handoffkeep" || strings.Join(f.calls[callsAfterFirst:], ",") != "read,read" {
+		t.Fatalf("backoff skipped the shared reread: probes=%d calls=%v obs=%+v", probes.Load(), f.calls, o)
+	}
+}
+
 func TestSharedQuotaOtherFailuresDoNotBackoff(t *testing.T) {
 	f := &fakeHK{}
 	c := sharedCollector(t, f)
+	lastGood := Observation{ID: "grok", AccountFP: "0123456789abcdef", AccountFPKind: "account", Buckets: []Bucket{{Window: "7d", UsedPct: Pct(24), Scope: Scope{Kind: "account"}}}}
+	if e := WriteJSON(c.CachePath, map[string]CacheEntry{"grok": {FetchedAt: float64(testNow.Unix()), Result: lastGood}}); e != nil {
+		t.Fatal(e)
+	}
 	var probes atomic.Int32
 	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation {
 		probes.Add(1)
 		return Observation{Error: "usage request failed", ErrorKind: "network"}
 	})
 	for i := 0; i < 2; i++ {
-		if o := collectShared(t, c); o.ErrorKind != "network" {
+		if o := collectShared(t, c); o.ErrorKind != "network" || len(o.Buckets) != 0 {
 			t.Fatalf("run %d: %+v", i, o)
 		}
 	}

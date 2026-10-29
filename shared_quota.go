@@ -26,7 +26,7 @@ func (q QuotaConfig) Validate() error {
 		return fmt.Errorf("invalid shared quota host_id")
 	}
 	for pool, ttl := range q.PoolFreshTTLS {
-		if !knownPool(pool) || math.IsNaN(ttl) || math.IsInf(ttl, 0) || ttl < 0 || ttl > 86400 {
+		if !knownPool(pool) || math.IsNaN(ttl) || math.IsInf(ttl, 0) || ttl <= 0 || ttl > 86400 {
 			return fmt.Errorf("invalid shared quota TTLs")
 		}
 	}
@@ -475,7 +475,7 @@ func sharedRateLimitBackoffActive(entry CacheEntry, pool, key string, now time.T
 		return false
 	}
 	fp, kind := identity(*entry.LastError)
-	return fp == "" || (kind == "account" && pool+":"+fp == key)
+	return kind == "account" && pool+":"+fp == key
 }
 
 func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool string, entry CacheEntry, now time.Time) Observation {
@@ -493,7 +493,10 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 			o.Error = message
 			return o
 		}
-		return c.sharedLocalFallback(pool, key, kind, message, entry, now, false)
+		if kind == "rate_limited" {
+			return c.sharedLocalFallback(pool, key, kind, message, entry, now, false)
+		}
+		return Observation{ID: pool, Stale: true, ErrorKind: kind, Error: message}
 	}
 	fail := func(kind string) Observation { return failWith(kind, "shared measurement pending") }
 	if key == "" {
@@ -519,12 +522,10 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		_ = updateSnapshot(c.cacheFile(), pool, o, time.UnixMilli(int64(o.FetchedAt*1000)), entry)
 		return finish(o)
 	}
-	if sharedRateLimitBackoffActive(entry, pool, key, c.quotaNow()) {
-		return finish(failWith("rate_limited", "provider backoff active"))
-	}
+	backingOff := sharedRateLimitBackoffActive(entry, pool, key, c.quotaNow())
 	// Read-only hosts also wait briefly for an in-flight publisher.
 	holder := ""
-	if allowed {
+	if allowed && !backingOff {
 		holder, err = holderToken()
 		if err != nil {
 			return fail("shared_unavailable")
@@ -549,6 +550,9 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		}
 		if o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(pool), false); ok {
 			return finish(o)
+		}
+		if backingOff {
+			return finish(failWith("rate_limited", "provider backoff active"))
 		}
 		return finish(fail("shared_pending"))
 	}
@@ -585,6 +589,10 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		}
 		if kind == "rate_limited" {
 			failedAt := c.quotaNow()
+			if fp == "" {
+				observed.PublishFP = strings.SplitN(key, ":", 2)[1]
+				observed.PublishFPKind = "account"
+			}
 			if observed.RetryAfterS <= 0 {
 				observed.RetryAfterS = 300
 			}

@@ -156,6 +156,7 @@ func TestQuotaPoolFreshTTLConfig(t *testing.T) {
 	for _, data := range []string{
 		"[quota.pool_fresh_ttl_s]\nunknown = 60\n",
 		"[quota.pool_fresh_ttl_s]\nclaude = -1\n",
+		"[quota.pool_fresh_ttl_s]\nclaude = 0\n",
 		"[quota.pool_fresh_ttl_s]\nclaude = nan\n",
 	} {
 		if e := AtomicWrite(ConfigPath(), []byte(data)); e != nil {
