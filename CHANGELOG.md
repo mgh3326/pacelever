@@ -6,6 +6,11 @@
   and OIDC issuer from `auth.json`, and read the optional `/v1/settings` tier
   step; product usage, the on-demand cap share and the prepaid balance become
   their own buckets. The CLI's `auth.json` is never written back.
+- Read Devin's organization quota over its read-only web endpoint first when
+  `DEVIN_BEARER_TOKEN` and `pools.devin.org_id` are set, mapping daily and weekly
+  usage from the flat and nested response shapes; any failure falls back to the
+  existing CLI probe, which still supplies the per-model Free tags. The SWE-2
+  free rung remains `available (free)` unless a free-limit exceed is recorded.
 - Track the manual `anthropic-api` organisation credit as a balance with an
   expiry: `manual set --credit-balance/--credit-total/--expires` shows balance,
   days left and the paced daily budget, flags `WASTE` when that budget exceeds
