@@ -425,7 +425,7 @@ func TestAgyGateAdmitsGroupBucketsFromEitherSource(t *testing.T) {
 		{Window: "5h", UsedPct: 0.4, ResetsAt: &reset5h, Scope: "group", Model: "gemini"},
 		{Window: "5h", UsedPct: 50, ResetsAt: &reset5h, Scope: "group", Model: "3p"},
 		{Window: "7d", UsedPct: 40, ResetsAt: &reset7d, Scope: "group", Model: "3p"},
-	}}, "agy", "agy:0123456789abcdef", testNow, time.Hour)
+	}}, "agy", "agy:0123456789abcdef", testNow, time.Hour, false)
 	if !ok {
 		t.Fatal("shared agy observation rejected")
 	}
@@ -902,7 +902,7 @@ func TestGrokRecordDeterministic(t *testing.T) {
 
 func TestSharedAutoAcceptsGroupScope(t *testing.T) {
 	x := &SharedObservation{Kind: "auto", MeasuredAt: testNow, Buckets: []SharedBucket{{Window: "7d", UsedPct: 20, Scope: "group", Model: "gemini"}}}
-	o, ok := sharedAuto(x, "agy", "agy:0123456789abcdef", testNow, time.Hour)
+	o, ok := sharedAuto(x, "agy", "agy:0123456789abcdef", testNow, time.Hour, false)
 	if !ok || len(o.Buckets) != 1 || o.Buckets[0].Scope.Kind != "group" || o.Buckets[0].Scope.Name != "gemini" {
 		t.Fatalf("group scope lost: %+v", o)
 	}

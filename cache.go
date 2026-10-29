@@ -197,6 +197,7 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		if entry.FetchedAt > 0 {
 			o.FetchedAt = entry.FetchedAt
 			o.AgeS = ptr(float64(now.UnixMilli())/1000 - entry.FetchedAt)
+			o.Buckets = rolloverExpired(o.Buckets, now)
 		}
 		return o
 	}

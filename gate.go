@@ -235,8 +235,11 @@ func gate(in Inputs, req Request) Decision {
 			for _, required := range RequiredWindows(row.Pool, obs.Plan, false) {
 				found := false
 				for _, b := range buckets {
-					reset, e := ParseTime(b.ResetsAt)
-					if b.Window == required && e == nil && reset.After(now) {
+					// A reset in the future still gates; a reset that already
+					// passed means the window restarted, so its stale reading
+					// no longer blocks anything (marked rolled over or not).
+					_, e := ParseTime(b.ResetsAt)
+					if b.Window == required && (b.RolledOver || e == nil) {
 						found = true
 					}
 				}
