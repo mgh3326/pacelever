@@ -156,6 +156,19 @@ func TestBundledCatalogMonotonic(t *testing.T) {
 	}
 }
 
+func TestValidateMonotonicReportsFirstProfileByName(t *testing.T) {
+	var rows []CatalogRow
+	for _, profile := range []string{"zeta", "mid", "alpha"} {
+		rows = append(rows, CatalogRow{Profile: profile, Effort: "low", Grade: "A"}, CatalogRow{Profile: profile, Effort: "high", Grade: "B"})
+	}
+	for range 20 {
+		e := ValidateMonotonic(rows)
+		if e == nil || !strings.Contains(e.Error(), "for alpha") {
+			t.Fatalf("violation not reported for the first profile by name: %v", e)
+		}
+	}
+}
+
 func TestDecodeCatalogInfersAgyGroupForNewProfiles(t *testing.T) {
 	row := func(profile, model string) map[string]any {
 		return map[string]any{"profile": profile, "effort": "", "model_id": model, "pool": "agy", "grade": "B", "gate": "default"}

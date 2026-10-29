@@ -35,13 +35,12 @@ func (a *App) bench(ctx context.Context, v args) (int, error) {
 		}
 		return 2, fmt.Errorf("catalog list or status required")
 	case "push-catalog":
-		rows := []pl.CatalogRow{}
 		if v.flags["emit-seed"] {
-			rows = pl.BundledCatalog().Rows
+			rows := pl.BundledCatalog().Rows
 			for i := range rows {
 				rows[i].DecidedBy = v.get("decided-by")
 				rows[i].DeviationRef = v.get("deviation-ref")
-				rows[i].DecidedAt = time.Now().UTC().Format(time.RFC3339Nano)
+				rows[i].DecidedAt = a.now().Format(time.RFC3339Nano)
 			}
 			return 0, a.json(map[string]any{"catalog": pl.CatalogWire(rows)})
 		}
@@ -59,7 +58,7 @@ func (a *App) bench(ctx context.Context, v args) (int, error) {
 		if json.Unmarshal(data, &payload) != nil {
 			return 2, fmt.Errorf("invalid catalog JSON")
 		}
-		rows = payload.Catalog
+		rows := payload.Catalog
 		if len(rows) == 0 {
 			return 2, fmt.Errorf("non-empty catalog required")
 		}
@@ -307,7 +306,7 @@ func (a *App) grades(ctx context.Context, v args) (int, error) {
 				only[key] = true
 			}
 		}
-		rows, e := pl.ApplyGrades(p, c, reps, only, v.get("decided-by"), v.get("deviation-ref"), v.get("allow-degraded"), time.Now().UTC())
+		rows, e := pl.ApplyGrades(p, c, reps, only, v.get("decided-by"), v.get("deviation-ref"), v.get("allow-degraded"), a.now())
 		if e != nil {
 			return 2, e
 		}

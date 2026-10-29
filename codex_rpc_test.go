@@ -157,7 +157,7 @@ func TestFetchCodexRPCPreferredAndAPIFallback(t *testing.T) {
 		`{"id":3,"result":{"account":{"email":"fixture@example.invalid"}}}`,
 	}}
 	stubRPC(t, f, nil)
-	o := fetchCodex(context.Background(), t.TempDir(), sel, Config{}, api)
+	o := fetchCodex(context.Background(), t.TempDir(), sel, Config{}, api, nil)
 	if called != 0 || o.Source != "usage-rpc" || *o.Buckets[0].UsedPct != 55 {
 		t.Fatalf("rpc path %+v calls=%d", o, called)
 	}
@@ -167,7 +167,7 @@ func TestFetchCodexRPCPreferredAndAPIFallback(t *testing.T) {
 
 	// RPC fails: the API fallback answers.
 	stubRPC(t, nil, errors.New("no binary"))
-	o = fetchCodex(context.Background(), t.TempDir(), sel, Config{}, api)
+	o = fetchCodex(context.Background(), t.TempDir(), sel, Config{}, api, nil)
 	if called != 1 || o.Source != "usage-api" || *o.Buckets[0].UsedPct != 25 {
 		t.Fatalf("api fallback %+v calls=%d", o, called)
 	}
@@ -182,7 +182,7 @@ func TestFetchCodexNoTokenNoSpawn(t *testing.T) {
 		return &fakeRPC{}, nil
 	}
 	t.Cleanup(func() { codexRPCStart = prev })
-	o := fetchCodex(context.Background(), t.TempDir(), map[string]string{"CODEX_HOME": dir}, Config{}, nil)
+	o := fetchCodex(context.Background(), t.TempDir(), map[string]string{"CODEX_HOME": dir}, Config{}, nil, nil)
 	if spawned || o.ErrorKind != "credentials" {
 		t.Fatalf("no login must not spawn the CLI %+v spawned=%v", o, spawned)
 	}

@@ -75,11 +75,7 @@ func (p ClaudeCLIProvider) Fetch(ctx context.Context) Observation {
 		result.ErrorKind = "probe_error"
 		return result
 	}
-	now := time.Now().UTC()
-	if p.Now != nil {
-		now = p.Now()
-	}
-	return ParseClaudeUsageScreen(text, now)
+	return ParseClaudeUsageScreen(text, ClockNow(p.Now))
 }
 
 func runClaudeUsageCommand(ctx context.Context, binary, dir string, env map[string]string) (string, error) {

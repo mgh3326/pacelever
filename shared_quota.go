@@ -511,12 +511,7 @@ func sharedManual(xs []SharedObservation, pool string) []ManualObservation {
 	}
 	return out
 }
-func (c Collector) quotaNow() time.Time {
-	if c.Now != nil {
-		return c.Now()
-	}
-	return time.Now().UTC()
-}
+func (c Collector) quotaNow() time.Time { return ClockNow(c.Now) }
 
 // ClaudeBar keeps a rate limiter per account: a 429 suppresses another fetch
 // for Retry-After (or a five-minute default), while the last good reading stays

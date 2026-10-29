@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,12 +68,7 @@ func NewBenchClient(cfg Config) BenchClient {
 	b.CFClientSecret = read("HANDOFFKEEP_CF_ACCESS_CLIENT_SECRET")
 	return b
 }
-func (b BenchClient) now() time.Time {
-	if b.Now != nil {
-		return b.Now()
-	}
-	return time.Now().UTC()
-}
+func (b BenchClient) now() time.Time { return ClockNow(b.Now) }
 func (b BenchClient) endpointID() string {
 	s := sha256.Sum256([]byte(b.URL))
 	return hex.EncodeToString(s[:8])
@@ -377,7 +374,9 @@ func ValidateMonotonic(rows []CatalogRow) error {
 			byProfile[r.Profile] = append(byProfile[r.Profile], r)
 		}
 	}
-	for _, rr := range byProfile {
+	// Profiles are checked in name order so the reported violation is stable.
+	for _, profile := range slices.Sorted(maps.Keys(byProfile)) {
+		rr := byProfile[profile]
 		sort.Slice(rr, func(i, j int) bool { return effortRank(rr[i].Effort) < effortRank(rr[j].Effort) })
 		for i := 1; i < len(rr); i++ {
 			if gradeRank(rr[i].Grade) > gradeRank(rr[i-1].Grade) {

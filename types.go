@@ -133,6 +133,16 @@ func ExitCode(err error) int {
 	return Invalid
 }
 func ptr[T any](v T) *T { return &v }
+
+// ClockNow is the single clock rule: an injected clock wins, otherwise the
+// wall clock in UTC. Code that measures or stamps time takes a func() time.Time
+// and reads it here, so a fixed clock gives repeatable results.
+func ClockNow(now func() time.Time) time.Time {
+	if now != nil {
+		return now()
+	}
+	return time.Now().UTC()
+}
 func validPct(p *float64) bool {
 	return p != nil && !math.IsNaN(*p) && !math.IsInf(*p, 0) && *p >= 0 && *p <= 100
 }

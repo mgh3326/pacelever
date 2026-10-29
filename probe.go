@@ -26,6 +26,8 @@ type PTYProvider struct {
 	Preferred Provider
 	// Guard supplies a parent-death watchdog. The CLI provides GuardProcess.
 	Guard func(int) (func(), error)
+	// Now stamps parsed reset times; nil means the wall clock in UTC.
+	Now func() time.Time
 }
 
 func ResolveBinary(pool string, cfg Config) string {
@@ -71,7 +73,7 @@ func (p PTYProvider) Fetch(ctx context.Context) Observation {
 			result.Error = e.Error()
 			result.ErrorKind = "probe_error"
 		} else {
-			result = ParseScreen(p.ID, text, time.Now().UTC())
+			result = ParseScreen(p.ID, text, ClockNow(p.Now))
 		}
 		if p.ID == "devin" {
 			models := exec.CommandContext(ctx, p.Binary, "models", "list")

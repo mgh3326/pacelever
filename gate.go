@@ -35,7 +35,7 @@ type AreaException struct {
 
 func (in Inputs) clock() time.Time {
 	if in.Now.IsZero() {
-		return time.Now().UTC()
+		return ClockNow(nil)
 	}
 	return in.Now
 }

@@ -192,10 +192,7 @@ func (c Collector) Collect(ctx context.Context, pools []string) ([]Observation, 
 	return results, nil
 }
 func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Observation {
-	now := time.Now().UTC()
-	if c.Now != nil {
-		now = c.Now()
-	}
+	now := c.quotaNow()
 	p := c.Config.Pool(pool, now)
 	fallback := func(kind, text string) Observation {
 		o := entry.Result

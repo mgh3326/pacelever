@@ -32,7 +32,7 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 		catalog := a.catalog(ctx)
 		d, e := pl.ResolveLaunch(catalog, a.Config, req)
 		if e == nil && a.Config.Pools[d.Pool].Exploration.Active() {
-			inputs := pl.Inputs{Catalog: catalog, Config: a.Config, Now: time.Now().UTC()}
+			inputs := pl.Inputs{Catalog: catalog, Config: a.Config, Now: a.now()}
 			inputs.FreeLimit = pl.ActiveFreeLimit(inputs.Now)
 			if strings.TrimSpace(req.TaskID) != "" && req.RequiredGrade != "" {
 				var inputErr error
@@ -57,7 +57,7 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 			return 0, a.json(map[string]any{"pools": a.Config.Pools, "profiles": a.Config.Profiles, "settings": a.Config.Settings})
 		}
 		for _, p := range append(append([]string{}, pl.ProviderIDs...), "anthropic-api") {
-			policy := a.Config.Pool(p, time.Now().UTC())
+			policy := a.Config.Pool(p, a.now())
 			fmt.Fprintf(a.Out, "%s class=%s boost=%g cutoff=%g subscribed=%t\n", p, policy.Class, policy.Boost, policy.Cutoff, a.Config.Subscribed("", p))
 		}
 		return 0, nil
@@ -223,7 +223,7 @@ func (a *App) manual(ctx context.Context, v args) (int, error) {
 		if pool == "" {
 			return 0, a.json(s)
 		}
-		return 0, a.json(s.Valid(pool, time.Now().UTC()))
+		return 0, a.json(s.Valid(pool, a.now()))
 	case "clear":
 		if pool == "" {
 			return 2, fmt.Errorf("pool required")
@@ -241,7 +241,7 @@ func (a *App) manual(ctx context.Context, v args) (int, error) {
 		measured, reason := v.get("measured-at"), v.get("reason")
 		if creditForm {
 			if measured == "" {
-				measured = time.Now().UTC().Format(time.RFC3339Nano)
+				measured = a.now().Format(time.RFC3339Nano)
 			}
 			if reason == "" {
 				reason = "credit balance observed"
@@ -299,7 +299,7 @@ func (a *App) manual(ctx context.Context, v args) (int, error) {
 			}
 			m.ResetsAt = at.Add(duration).Format(time.RFC3339Nano)
 		}
-		r, e := a.Collector.AddManual(ctx, m, ttl, time.Now().UTC())
+		r, e := a.Collector.AddManual(ctx, m, ttl, a.now())
 		if e != nil {
 			return 2, e
 		}

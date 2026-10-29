@@ -180,12 +180,7 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 	}
 	return o
 }
-func (p HTTPProvider) now() time.Time {
-	if p.Now != nil {
-		return p.Now()
-	}
-	return time.Now().UTC()
-}
+func (p HTTPProvider) now() time.Time { return ClockNow(p.Now) }
 
 // retryAfterSeconds reads a Retry-After header as delay-seconds or an
 // HTTP-date. Missing, zero, negative and unparseable values return 0 so the
@@ -1227,10 +1222,16 @@ func claudeAccountFingerprint(provider Provider, identityPath string, shareable 
 }
 func DefaultProviders(cfg Config) map[string]Provider { return DefaultProvidersFor(cfg, nil) }
 func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Provider {
+	return DefaultProvidersAt(cfg, selectors, nil)
+}
+
+// DefaultProvidersAt wires every provider to one clock; nil means the wall
+// clock in UTC.
+func DefaultProvidersAt(cfg Config, selectors map[string]string, now func() time.Time) map[string]Provider {
+	clock := func() time.Time { return ClockNow(now) }
 	home, _ := os.UserHomeDir()
 	result := map[string]Provider{}
 	result["claude"] = ProviderFunc(func(ctx context.Context) Observation {
-
 		credentialPath, identityPath, service, shareable := claudeLocations(home, selectors)
 		oauth := object(readObject(credentialPath)["claudeAiOauth"])
 		if runtime.GOOS == "darwin" {
@@ -1238,7 +1239,7 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 			if e == nil {
 				var data map[string]any
 				if json.Unmarshal(out, &data) == nil {
-					oauth = chooseOAuth(oauth, object(data["claudeAiOauth"]), time.Now())
+					oauth = chooseOAuth(oauth, object(data["claudeAiOauth"]), clock())
 				}
 			}
 		}
@@ -1246,46 +1247,48 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 		if token == "" {
 			return Observation{ID: "claude", Error: "credentials unavailable", ErrorKind: "credentials"}
 		}
-		if expires, ok := finiteNumber(oauth["expiresAt"]); ok && expires/1000 < float64(time.Now().Unix()) {
+		if expires, ok := finiteNumber(oauth["expiresAt"]); ok && expires/1000 < float64(clock().Unix()) {
 			return Observation{ID: "claude", Error: "token expired", ErrorKind: "token_expired"}
 		}
 		provider := ClaudeProvider{
-			API: HTTPProvider{ID: "claude", URL: "https://api.anthropic.com/api/oauth/usage", Headers: map[string]string{"Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20"}, RateLimitWaitS: 300},
-			CLI: ClaudeCLIProvider{Binary: ResolveBinary("claude", cfg), Env: selectors},
+			API: HTTPProvider{ID: "claude", URL: "https://api.anthropic.com/api/oauth/usage", Headers: map[string]string{"Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20"}, RateLimitWaitS: 300, Now: clock},
+			CLI: ClaudeCLIProvider{Binary: ResolveBinary("claude", cfg), Env: selectors, Now: clock},
 		}
 		return claudeAccountFingerprint(provider, identityPath, shareable).Fetch(ctx)
 	})
 	result["codex"] = ProviderFunc(func(ctx context.Context) Observation {
-		return fetchCodex(ctx, home, selectors, cfg, nil)
+		return fetchCodex(ctx, home, selectors, cfg, nil, clock)
 	})
 	result["clinepass"] = ProviderFunc(func(ctx context.Context) Observation {
 		token := clineToken(home)
 		if token == "" {
 			return Observation{ID: "clinepass", Error: "credentials unavailable", ErrorKind: "credentials"}
 		}
-		return (HTTPProvider{ID: "clinepass", URL: "https://api.cline.bot/api/v1/users/me/plan/usage-limits", Headers: map[string]string{"Authorization": "Bearer " + token}}).Fetch(ctx)
+		return (HTTPProvider{ID: "clinepass", URL: "https://api.cline.bot/api/v1/users/me/plan/usage-limits", Headers: map[string]string{"Authorization": "Bearer " + token}, Now: clock}).Fetch(ctx)
 	})
 	result["commandcode"] = ProviderFunc(func(ctx context.Context) Observation {
-		return fetchCommandCode(ctx, commandCodeToken(home), nil, time.Now)
+		return fetchCommandCode(ctx, commandCodeToken(home), nil, clock)
 	})
 	result["grok"] = ProviderFunc(func(ctx context.Context) Observation {
-		record, ok := selectGrokRecord(grokRecords(home, selectors), cfg.Quota.Accounts["grok"], time.Now())
+		record, ok := selectGrokRecord(grokRecords(home, selectors), cfg.Quota.Accounts["grok"], clock())
 		if !ok {
 			return Observation{ID: "grok", Error: "credentials unavailable", ErrorKind: "credentials"}
 		}
-		o := fetchGrokRecord(ctx, record, nil, time.Now)
+		o := fetchGrokRecord(ctx, record, nil, clock)
 		if record.Fingerprint != "" {
 			o.PublishFP = record.Fingerprint
 			o.PublishFPKind = "account"
 		}
 		return o
 	})
-	result["agy"] = newAgyProvider(home, cfg, nil)
+	agy := newAgyProvider(home, cfg, nil)
+	agy.now = clock
+	result["agy"] = agy
 	// Devin keeps its CLI probe for the per-model Free tags; the read-only web
 	// quota is tried first when its environment token and org setting are set.
-	result["devin"] = PTYProvider{ID: "devin", Binary: ResolveBinary("devin", cfg), Timeout: 35 * time.Second, Env: selectors, Preferred: devinWebProvider(cfg, nil, time.Now)}
+	result["devin"] = PTYProvider{ID: "devin", Binary: ResolveBinary("devin", cfg), Timeout: 35 * time.Second, Env: selectors, Preferred: devinWebProvider(cfg, nil, clock), Now: clock}
 	for _, pool := range []string{"kimi", "kiro"} {
-		result[pool] = PTYProvider{ID: pool, Binary: ResolveBinary(pool, cfg), Timeout: 35 * time.Second, Env: selectors}
+		result[pool] = PTYProvider{ID: pool, Binary: ResolveBinary(pool, cfg), Timeout: 35 * time.Second, Env: selectors, Now: clock}
 	}
 	return result
 }
@@ -1294,7 +1297,7 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 // safer than the API — it writes no credentials and, with a file login already
 // present, cannot open a browser sign-in — and falls back to the wham usage
 // API on any RPC failure.
-func fetchCodex(ctx context.Context, home string, selectors map[string]string, cfg Config, client HTTPDoer) Observation {
+func fetchCodex(ctx context.Context, home string, selectors map[string]string, cfg Config, client HTTPDoer, now func() time.Time) Observation {
 	dir := selectors["CODEX_HOME"]
 	if dir == "" {
 		dir = os.Getenv("CODEX_HOME")
@@ -1319,7 +1322,7 @@ func fetchCodex(ctx context.Context, home string, selectors map[string]string, c
 	if acct != "" {
 		headers["ChatGPT-Account-Id"] = acct
 	}
-	o := (HTTPProvider{ID: "codex", URL: "https://chatgpt.com/backend-api/wham/usage", Headers: headers, Client: client}).Fetch(ctx)
+	o := (HTTPProvider{ID: "codex", URL: "https://chatgpt.com/backend-api/wham/usage", Headers: headers, Client: client, Now: now}).Fetch(ctx)
 	if acct != "" {
 		o.PublishFP = fingerprint("codex-account", acct)
 		o.PublishFPKind = "account"
