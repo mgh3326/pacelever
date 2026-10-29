@@ -444,6 +444,31 @@ func sharedAuto(x *SharedObservation, pool, key string, now time.Time, ttl time.
 	}
 	return o, true
 }
+
+// AccountObservation reads only the named account's fresh automatic evidence.
+// Placement callers must never probe, publish presence, or fall back to the
+// invoking host's cache, manual observations or login for another account.
+func (c Collector) AccountObservation(ctx context.Context, key string) (Observation, error) {
+	pool, _, _ := strings.Cut(key, ":")
+	if !accountKeyRE.MatchString(key) || !knownPool(pool) {
+		return Observation{}, deny(Invalid, "invalid quota account key")
+	}
+	source := c.sharedSource()
+	if source == nil {
+		return Observation{}, deny(Unmeasurable, "shared quota unavailable for account")
+	}
+	latest, err := source.Latest(ctx, key)
+	if err != nil {
+		return Observation{}, deny(Unmeasurable, "shared quota unavailable for account")
+	}
+	o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(pool), false)
+	if !ok {
+		return Observation{}, deny(Unmeasurable, "fresh automatic shared quota unavailable for account")
+	}
+	o.PoolClass = c.Config.Pool(pool, c.quotaNow()).Class
+	return o, nil
+}
+
 func sharedManual(xs []SharedObservation, pool string) []ManualObservation {
 	out := []ManualObservation{}
 	for _, x := range xs {

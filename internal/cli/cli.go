@@ -451,17 +451,37 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 	}
 	req := request(v)
 	c := a.catalog(ctx)
-	manual, e := a.localManual()
-	if e != nil {
-		return 2, e
+	key := v.get("account-key")
+	var manual pl.ManualStore
+	var e error
+	if key == "" {
+		manual, e = a.localManual()
+		if e != nil {
+			return 2, e
+		}
 	}
 	in := pl.Inputs{Catalog: c, Config: a.Config, Manual: manual, Now: time.Now().UTC()}
-	in.FreeLimit = pl.ActiveFreeLimit(in.Now)
+	if key == "" {
+		in.FreeLimit = pl.ActiveFreeLimit(in.Now)
+	}
 	preliminaryInput := in
 	preliminaryInput.Manual = pl.ManualStore{}
 	preliminary := pl.Gate(preliminaryInput, req)
 	d := preliminary
-	if d.ExitCode == pl.Unmeasurable {
+	if key != "" {
+		pool, _, _ := strings.Cut(key, ":")
+		if pool != d.ProviderID {
+			return pl.Invalid, fmt.Errorf("--account-key does not match profile pool")
+		}
+		if d.OK || d.ExitCode == pl.Unmeasurable {
+			o, err := a.Collector.AccountObservation(ctx, key)
+			if err != nil {
+				return pl.ExitCode(err), err
+			}
+			in.Observations = []pl.Observation{o}
+			d = pl.Gate(in, req)
+		}
+	} else if d.ExitCode == pl.Unmeasurable {
 		pools := []string{}
 		seen := map[string]bool{}
 		for _, r := range c.Rows {
@@ -478,24 +498,29 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 		}
 		d = pl.Gate(in, req)
 	}
-	if hold := pl.ActiveLimit("commandcode", in.Now); hold != nil && req.Profile == "cmd-dsflash41" && d.ExitCode != pl.RoleDenied && d.ExitCode != pl.Unsubscribed {
-		d.OK = false
-		d.ExitCode = pl.Blocked
-		d.Unmeasurable = false
-		d.Reason = "commandcode usage limit until " + hold.ResetAt
+	if key == "" && req.Profile == "cmd-dsflash41" && d.ExitCode != pl.RoleDenied && d.ExitCode != pl.Unsubscribed {
+		if hold := pl.ActiveLimit("commandcode", in.Now); hold != nil {
+			d.OK = false
+			d.ExitCode = pl.Blocked
+			d.Unmeasurable = false
+			d.Reason = "commandcode usage limit until " + hold.ResetAt
+		}
 	}
 	record := map[string]any{}
 	data, _ := json.Marshal(d)
 	_ = json.Unmarshal(data, &record)
 	record["schema"] = "scopefuel.gate.v1"
 	record["generated_at"] = in.Now.Format(time.RFC3339Nano)
+	if key != "" {
+		record["account_key"] = key
+	}
 	record["purpose"] = nil
 	if req.Purpose != "" {
 		record["purpose"] = req.Purpose
 	}
 	record["exhaust_notice"] = nil
 	for _, o := range in.Observations {
-		if o.ID == d.ProviderID {
+		if key == "" && o.ID == d.ProviderID {
 			if notice := pl.ExhaustionNotice(ctx, a.Config, o, "", in.Now, nil); notice != "" {
 				record["exhaust_notice"] = notice
 				d.Reason += " [" + notice + "]"
@@ -516,6 +541,9 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 			class = *d.PoolClass
 		}
 		fmt.Fprintf(a.Out, "profile=%s pool=%s used_pct=%s class=%s", d.Profile, d.ProviderID, percentText(d.UsedPct), class)
+		if key != "" {
+			fmt.Fprintf(a.Out, " account_key=%s", key)
+		}
 		if d.GateBasis != "" {
 			fmt.Fprintf(a.Out, " basis=%s free_tag=%s account_daily=%s account_weekly=%s", d.GateBasis, freeTagText(d.FreeTag), percentText(d.AccountDailyPct), percentText(d.AccountWeeklyPct))
 		}
@@ -631,7 +659,7 @@ const help = `pacelever — measure quota, resolve profiles, admit sustainable w
 
 Usage:
   pacelever [--json|--brief] [--only claude,codex] [--watch SECONDS]
-  pacelever gate -m PROFILE [--effort RUNG] [--role SEAT] [--gate-output PATH]
+  pacelever gate -m PROFILE [--effort RUNG] [--role SEAT] [--account-key POOL:FINGERPRINT] [--gate-output PATH]
   pacelever policy launch PROFILE [--effort RUNG] [--role SEAT] [--json]
   pacelever policy list|set|clear|profile|setting
   pacelever manual set|list|clear

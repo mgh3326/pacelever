@@ -1,5 +1,18 @@
 # Account quota through handoffkeep
 
+`pacelever gate -m sonnet --account-key claude:0123456789abcdef --json` judges
+the named account using the same gate rules as a local launch. The key must
+match the profile's pool. This path reads only that account's fresh automatic
+shared observation; it never probes, publishes, or substitutes the invoking
+host's cache, login, manual observations or local limit records. Missing,
+stale, malformed or unreadable shared evidence exits 4. Account-only manual
+evidence is insufficient for this read-only placement preflight. Normal role,
+policy, window and pool-class checks still apply. JSON and `--gate-output`
+receipts include `account_key`; admitted text headers include it as well.
+The placed host must still run its local gate before starting work, including
+any locally recorded provider limits. Omitting `--account-key` keeps the local
+gate path.
+
 Deploy handoffkeep's quota API and additive startup migration first. Then enable
 this opt-in configuration in each host's private pacelever config:
 
