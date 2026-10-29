@@ -47,6 +47,58 @@ local identity must also match. For other pools, configure the fingerprint
 explicitly and list it as measurable only where that account's CLI is logged in.
 The herdr event's CLI selectors also select the identity used for the key.
 
+## Per-host setup checklist
+
+Items 1 and 2 gate reads — without them the read fails before any provider is
+contacted. Item 3 gates probing and publishing; a host that only reads fresh
+shared observations does not need it.
+
+1. **An account key for every measured pool.** `claude` and `codex` derive
+   their fingerprint from the local CLI login; every other pool (`grok`,
+   `commandcode`, `agy`, `devin`, …) has no local derivation and gets its key
+   only from `[quota.accounts]`. Without an entry the account key is empty and
+   every read for that pool fails as `account_unknown`.
+2. **Plaintext opt-in for an `http://` hk endpoint.** HTTPS is the default;
+   an `http://` `quota.url` also requires `allow_plaintext_quota_share = true`
+   under `[bench]` (see `docs/config.md`). Without it every shared read fails
+   as `shared_unavailable` even though hk answers.
+3. **Measurable and hk-granted keys.** Each `pool:fingerprint` key must appear
+   in `measurable_accounts` to be allowed to probe, and the matching account
+   must be granted on the hk side (`HANDOFFKEEP_QUOTA_<client>`). A key that
+   is measurable locally but not granted on hk is readable but can never
+   publish, so it stays `shared_unavailable`/`shared_wait` until another
+   granted host measures it.
+
+Minimal example (placeholders only — use your own endpoint, fingerprints and
+host id):
+
+```toml
+[bench]
+allow_plaintext_quota_share = true   # only if quota.url is http://
+
+[quota]
+url = "http://YOUR_HK_HOST:PORT"
+credential_env = "HANDOFFKEEP_TOKEN"
+host_id = "your-host-id"
+measurable_accounts = [
+  "claude:0123456789abcdef",
+  "grok:fedcba9876543210",
+]
+
+[quota.accounts]
+grok = "fedcba9876543210"            # required: grok has no local derivation
+# claude/codex derive from the local CLI login; add them here only to pin a
+# specific account fingerprint.
+```
+
+Failure signatures:
+
+| Symptom | Cause |
+|---|---|
+| `account_unknown` | pool has no `quota.accounts` entry and no local claude/codex derivation |
+| `shared_unavailable` on every read | `http://` url without `allow_plaintext_quota_share = true`, or hk unreachable/not granting |
+| reads but never probes | key missing from `measurable_accounts`, or not granted via `HANDOFFKEEP_QUOTA_<client>` |
+
 Every collection reads hk first, including `refresh` and `--no-cache`. A fresh
 shared observation bypasses local cache and probing. Stale/missing data causes
 an eligible host to acquire a short lease, re-read, probe within the lease
