@@ -485,6 +485,8 @@ func parseGrok(raw map[string]any) Observation {
 		window, label = "30d", "30d"
 	case strings.Contains(kind, "DAILY"):
 		window, label = "1d", "1d"
+	default:
+		return Observation{ID: "grok", Error: "usage response has an unrecognized billing period", ErrorKind: "parse_error"}
 	}
 	bucket := Bucket{Label: label, Window: window, UsedPct: Pct(used), ResetsAt: resetAtValue(period["end"]), Scope: Scope{Kind: "account"}, Horizon: horizon(window)}
 	if note := productNote(config["productUsage"]); note != "" {
@@ -538,7 +540,13 @@ func fetchAgy(ctx context.Context, token string, client HTTPDoer, now func() tim
 		return Observation{ID: "agy", Error: "invalid usage JSON", ErrorKind: "parse_error"}
 	}
 	if gotStatus {
-		return statusObservation("agy", last.Status, last.Header, now(), "auth_failed", "antigravity authentication failed; run agy to refresh the login", 0)
+		o := statusObservation("agy", last.Status, last.Header, now(), "auth_failed", "antigravity authentication failed; run agy to refresh the login", 0)
+		if last.Status >= 500 {
+			// A server error is retryable, not a sign the login expired.
+			o.ErrorKind = "network"
+			o.Error = "antigravity temporarily unavailable"
+		}
+		return o
 	}
 	return Observation{ID: "agy", Error: "usage request failed", ErrorKind: "network"}
 }

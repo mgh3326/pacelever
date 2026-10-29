@@ -180,6 +180,15 @@ func TestGrokInvalidPercent(t *testing.T) {
 	}
 }
 
+func TestGrokUnknownPeriod(t *testing.T) {
+	body := `{"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_UNSPECIFIED","end":"2026-10-29T19:58:08Z"},"creditUsagePercent":10}}`
+	client := doFunc(func(*http.Request) (*http.Response, error) { return response(200, body), nil })
+	o := fetchGrok(context.Background(), "fixture-token", client, fixedNow)
+	if o.ErrorKind != "parse_error" {
+		t.Fatalf("unknown grok period %+v", o)
+	}
+}
+
 func TestGrokAuthFailure(t *testing.T) {
 	client := doFunc(func(*http.Request) (*http.Response, error) { return response(403, `{}`), nil })
 	o := fetchGrok(context.Background(), "fixture-token", client, fixedNow)
@@ -221,6 +230,14 @@ func TestAgyFallsBackToSecondHost(t *testing.T) {
 	o := fetchAgy(context.Background(), "fixture-token", client, fixedNow)
 	if o.Error != "" || len(o.Buckets) != 1 || o.Buckets[0].Window != "7d" {
 		t.Fatalf("agy fallback %+v", o)
+	}
+}
+
+func TestAgyServerErrorIsRetryable(t *testing.T) {
+	client := doFunc(func(*http.Request) (*http.Response, error) { return response(503, `{}`), nil })
+	o := fetchAgy(context.Background(), "fixture-token", client, fixedNow)
+	if o.ErrorKind != "network" || !strings.Contains(o.Error, "temporarily unavailable") {
+		t.Fatalf("agy server error %+v", o)
 	}
 }
 
