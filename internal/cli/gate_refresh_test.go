@@ -158,7 +158,8 @@ func TestGateAccountStaleRefusedWhenHostCannotMeasure(t *testing.T) {
 		failWrite  bool
 		want       string
 	}{
-		{"not measurable here", nil, false, "may not measure"},
+		// A derived pool needs no measurable_accounts entry, so a host that holds
+		// the login always measures it; only a failed publish refuses the refresh.
 		{"publish refused", []string{key}, true, "local refresh failed (shared_publish_failed)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

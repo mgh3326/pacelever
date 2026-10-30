@@ -13,8 +13,9 @@ work, including any locally recorded provider limits. Omitting `--account-key`
 keeps the local gate path.
 
 When the shared reading is stale or missing and this host holds the same account
-(its derived key equals the requested key) and lists it in `measurable_accounts`,
-the gate measures once, publishes under the normal lease and judges the fresh
+(its derived key equals the requested key) and may measure it (always for
+Claude, Codex and Devin; otherwise listed in `measurable_accounts`), the gate
+measures once, publishes under the normal lease and judges the fresh
 value. Any other host keeps the read-only behavior and exits 4 with the reason
 (`this host does not hold the account`, or `this host may not measure the
 account`); a failed refresh exits 4 with `local refresh failed (<kind>)`. A fresh
@@ -73,10 +74,12 @@ confirm a local login. The XDG defaults are `~/.config` and `~/.local/share`.
 The API key is never a fingerprint input. A missing login, missing organization
 or unreadable file leaves Devin's identity unknown; a token alone is insufficient.
 No identity lookup makes a network request. Neither raw identity nor tokens are sent.
-An explicit `quota.accounts` mapping lets a host read an account without its CLI
-login. Only keys in `measurable_accounts` may probe; for Codex/Claude/Devin the
-local identity must also match. For other pools, configure the fingerprint
-explicitly and list it as measurable only where that account's CLI is logged in.
+Claude, Codex and Devin key an account by its local login only. A configured
+`quota.accounts` entry for these pools is ignored for keying, so a mismatch never
+blocks measurement, presence or publish. For other pools, an explicit
+`quota.accounts` fingerprint names the account, and only keys in
+`measurable_accounts` may probe; list it there only where that account's CLI is
+logged in.
 The herdr event's CLI selectors also select the identity used for the key.
 
 ## Per-host setup checklist
@@ -94,8 +97,9 @@ shared observations does not need it.
    an `http://` `quota.url` also requires `allow_plaintext_quota_share = true`
    under `[bench]` (see `docs/config.md`). Without it every shared read fails
    as `shared_unavailable` even though hk answers.
-3. **Measurable and hk-granted keys.** Each `pool:fingerprint` key must appear
-   in `measurable_accounts` to be allowed to probe, and the matching account
+3. **Measurable and hk-granted keys.** Each non-derived `pool:fingerprint` key
+   (every pool except Claude, Codex and Devin) must appear in
+   `measurable_accounts` to be allowed to probe, and the matching account
    must be granted on the hk side (`HANDOFFKEEP_QUOTA_<client>`). A key that
    is measurable locally but not granted on hk is readable but can never
    publish, so it stays `shared_unavailable`/`shared_wait` until another
@@ -242,17 +246,16 @@ An optional paid web source must select the same organization as the CLI login;
 a mismatch is refused as `account_mismatch` rather than published under its key.
 Consumers must not use `free_bucket` as evidence about paid credit availability.
 No account ID, credential, host ID, source job or local audit text appears in
-the observation. A matching, locally logged-in measurable host publishes
-presence through the existing separate endpoint after a successful shared read
-or publication.
+the observation. A host that may measure the account publishes presence through
+the existing separate endpoint after a successful shared read or publication.
 
 ## Host presence
 
 After a successful shared measurement, the measuring host also publishes a
 presence record so placement can see which host last saw an account. A host
-that only reads fresh shared observations publishes presence too, provided its
-local identity resolves to the measured key (the same `measurable_accounts` and
-identity checks that gate probing); read-only hosts never publish:
+that only reads fresh shared observations publishes presence too, provided it
+may measure the key under the same account-key rules that gate probing;
+read-only hosts never publish:
 
 ```
 PUT /v1/quota/presence

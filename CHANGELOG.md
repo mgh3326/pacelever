@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Claude, Codex and Devin accounts are keyed by the local login. A configured
+  `quota.accounts` fingerprint that disagrees with it no longer blocks
+  measurement, presence or publish, and these pools need no
+  `measurable_accounts` entry. Other pools keep the explicit list.
+- The `fable` profile launches with a default `high` effort instead of an empty
+  one, which runtug's seat rejected as incomplete launch data.
 - `gate --account-key`: when the shared reading is stale and this host holds the
   same account and may measure it, measure, publish and judge on the fresh value
   instead of refusing; other hosts still exit 4 with the reason. A free SWE-2
