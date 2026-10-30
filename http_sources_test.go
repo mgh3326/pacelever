@@ -529,7 +529,7 @@ func shellQuote(s string) string {
 
 func writeFakeAgy(t *testing.T, script string) (dir, marker string) {
 	t.Helper()
-	for _, k := range []string{"PACELEVER_AGY_BIN", "SCOPEFUEL_AGY_BIN"} {
+	for _, k := range []string{"PACELEVER_AGY_BIN"} {
 		t.Setenv(k, "")
 	}
 	dir = t.TempDir()
@@ -626,7 +626,7 @@ func TestAgyMissingBinaryKeepsAuthHint(t *testing.T) {
 	if e := os.WriteFile(filepath.Join(dir, "antigravity-oauth-token"), []byte(`{"token":{"access_token":"fixture-dead"}}`), 0600); e != nil {
 		t.Fatal(e)
 	}
-	for _, k := range []string{"PACELEVER_AGY_BIN", "SCOPEFUEL_AGY_BIN"} {
+	for _, k := range []string{"PACELEVER_AGY_BIN", "PACELEVER_AGY_BIN"} {
 		t.Setenv(k, "")
 	}
 	t.Setenv("PATH", t.TempDir())

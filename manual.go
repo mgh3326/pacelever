@@ -42,17 +42,16 @@ type ManualStore struct {
 
 func LoadManual() (ManualStore, error) {
 	var s ManualStore
-	p := filepath.Join(CacheDir(), "manual.json")
-	e := ReadJSON(p, &s)
+	e := ReadJSON(filepath.Join(CacheDir(), "manual.json"), &s)
 	if os.IsNotExist(e) {
-		e = ReadJSON(filepath.Join(filepath.Dir(legacyCachePath()), "manual.json"), &s)
-	}
-	if os.IsNotExist(e) {
-		return ManualStore{Schema: "scopefuel.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}, nil
+		return ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}, nil
 	}
 	if e != nil {
 		return s, e
 	}
+	// The retired store schema name is still accepted so an existing file keeps
+	// loading for one release (operator decision 10-30); new stores write
+	// pacelever.manual.v1.
 	if (s.Schema != "scopefuel.manual.v1" && s.Schema != "pacelever.manual.v1") || s.Latest == nil || s.History == nil {
 		return s, fmt.Errorf("invalid manual observation store")
 	}

@@ -162,9 +162,7 @@ func limitPath(pool string) string {
 }
 func readLimits(pool string) limitStore {
 	var s limitStore
-	if e := ReadJSON(limitPath(pool), &s); os.IsNotExist(e) {
-		_ = ReadJSON(filepath.Join(filepath.Dir(legacyCachePath()), filepath.Base(limitPath(pool))), &s)
-	}
+	_ = ReadJSON(limitPath(pool), &s)
 	if s.Records == nil {
 		s.Records = map[string]LimitRecord{}
 	}
@@ -192,9 +190,9 @@ func ObserveLimit(pool string, r LimitRecord, clear bool, accountKey string, now
 	}
 	return WithFileLock(limitPath(pool)+".lock", false, func() error {
 		s := readLimits(pool)
-		s.Schema = "scopefuel.devin-free-limit.v1"
+		s.Schema = "pacelever.devin-free-limit.v1"
 		if pool == "commandcode" {
-			s.Schema = "scopefuel.commandcode-limit.v1"
+			s.Schema = "pacelever.commandcode-limit.v1"
 		}
 		if clear {
 			delete(s.Records, accountKey)

@@ -106,7 +106,7 @@ func (a *App) catalog(ctx context.Context) pl.Catalog {
 	return c
 }
 func request(a args) pl.Request {
-	return pl.Request{TaskID: a.get("task"), RequiredGrade: a.get("grade"), Profile: a.get("profile"), Effort: a.get("effort"), Role: a.get("role"), Purpose: a.get("purpose"), OperatorRequest: a.get("operator-request"), RequestedBy: a.get("requested-by"), PaceOverride: a.get("pace-override"), E6Arm: pl.FirstEnv("PACELEVER_E6_ARM", "SCOPEFUEL_E6_ARM"), Area: a.get("area")}
+	return pl.Request{TaskID: a.get("task"), RequiredGrade: a.get("grade"), Profile: a.get("profile"), Effort: a.get("effort"), Role: a.get("role"), Purpose: a.get("purpose"), OperatorRequest: a.get("operator-request"), RequestedBy: a.get("requested-by"), PaceOverride: a.get("pace-override"), E6Arm: os.Getenv("PACELEVER_E6_ARM"), Area: a.get("area")}
 }
 func (a *App) localManual() (pl.ManualStore, error) {
 	if a.Config.Quota.URL != "" {
@@ -621,7 +621,6 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 		collector.TTL = time.Minute
 		if event.Credential != "default" {
 			collector.CachePath = filepath.Join(base, "snapshot-"+event.Provider+"-"+event.Credential+".json")
-			collector.LegacyCachePath = ""
 			collector.Providers = pl.DefaultProvidersAt(a.Config, event.Selectors, a.Now)
 			collector.Selectors = event.Selectors
 			for key, p := range collector.Providers {
@@ -652,7 +651,7 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 	if binary == "" {
 		binary = "herdr"
 	}
-	cmd := exec.CommandContext(ctx, binary, "pane", "report-metadata", "--source", "scopefuel.gauge", event.PaneID, "--token", "scopefuel_quota="+label, "--ttl-ms", "60000")
+	cmd := exec.CommandContext(ctx, binary, "pane", "report-metadata", "--source", "pacelever.gauge", event.PaneID, "--token", "pacelever_quota="+label, "--ttl-ms", "60000")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	return 0, cmd.Run()

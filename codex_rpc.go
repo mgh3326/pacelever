@@ -99,7 +99,7 @@ func (t *codexProcTransport) Close() {
 // codexBinary resolves the codex CLI: explicit override, PATH, then the desktop
 // app's bundled copy (ClaudeBar's `cli` list).
 func codexBinary(home string, cfg Config) string {
-	if explicit := FirstEnv("PACELEVER_CODEX_BIN", "SCOPEFUEL_CODEX_BIN"); explicit != "" {
+	if explicit := os.Getenv("PACELEVER_CODEX_BIN"); explicit != "" {
 		return expandHome(explicit)
 	}
 	if cfg.Pools["codex"].Bin != "" {
