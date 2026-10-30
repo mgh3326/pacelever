@@ -9,7 +9,8 @@
   script, and the `scopefuel` herdr metadata names (`pacelever.gauge`,
   `pacelever_quota`). Inflight documents are now `pacelever.quota-inflight.v1`.
   Kept for one release, as the only exceptions: a configuration at the previous
-  tool's config path, and a manual store with its old schema name, still load.
+  tool's config path, and a manual store at the old cache path with its old schema
+  name, still load.
   The wire identifiers `scopefuel.v1` and `scopefuel.gate.v1` are unchanged.
   `testdata/scopefuel_golden.json` is now `testdata/gate_golden.json`.
 - Remove the legacy document publish path (`PublishQuota`, `QuotaFallback`, the

@@ -42,19 +42,28 @@ type ManualStore struct {
 
 const previousManualSchema = "scopefuel.manual.v1"
 
+func previousManualPath() string {
+	return filepath.Join(cacheBase(), "scopefuel", "manual.json")
+}
+
 func LoadManual() (ManualStore, error) {
 	var s ManualStore
 	p := filepath.Join(CacheDir(), "manual.json")
 	e := ReadJSON(p, &s)
+	// One-release exception: a running host keeps its manual store at the
+	// retired tool's cache path until its next change writes the new one.
+	if os.IsNotExist(e) {
+		e = ReadJSON(previousManualPath(), &s)
+	}
 	if os.IsNotExist(e) {
 		return ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}, nil
 	}
 	if e != nil {
 		return s, e
 	}
-	// One-release exception: a manual store written by a running host before
-	// the schema was renamed still loads, and is rewritten under the new name
-	// on its next change. Delete previousManualSchema in the next release.
+	// The store is accepted under its old schema name too and is rewritten
+	// under the new name, at the new path, on its next change. Delete
+	// previousManualSchema and previousManualPath in the next release.
 	if (s.Schema != previousManualSchema && s.Schema != "pacelever.manual.v1") || s.Latest == nil || s.History == nil {
 		return s, fmt.Errorf("invalid manual observation store")
 	}

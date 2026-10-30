@@ -7,8 +7,9 @@ every other parsed key. Comments and formatting may be rewritten.
 
 **One-release exception.** A running host whose configuration still sits at
 `$XDG_CONFIG_HOME/scopefuel/config.toml` keeps loading it when no pacelever file
-exists, and a manual store with the `scopefuel.manual.v1` schema still loads (it
-is rewritten as `pacelever.manual.v1` on the next change). Neither file is ever
+exists, and a manual store at `$XDG_CACHE_HOME/scopefuel/manual.json` (schema
+`scopefuel.manual.v1`) still loads when there is none under pacelever's cache
+(the next change writes it there as `pacelever.manual.v1`). Neither file is ever
 edited by pacelever. Move the config to the path above; both fallbacks are
 removed in the next release.
 

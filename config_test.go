@@ -89,7 +89,7 @@ func TestCreditMaxAgeConfig(t *testing.T) {
 
 func TestPreviousManualStoreLoadsAndAuditPreserved(t *testing.T) {
 	isolate(t)
-	path := filepath.Join(CacheDir(), "manual.json")
+	path := previousManualPath()
 	data := `{"schema":"scopefuel.manual.v1","latest":{"claude:5h":"old"},"history":[{"event":"set","manual_observation_id":"old","pool":"claude","window":"5h","used_pct":10,"measured_at":"2026-10-28T00:00:00Z","expires_at":"2026-10-28T01:00:00Z","account_ref":{"verification":"unverified","local_only":true},"execution_context":{"kind":"fixture"}}]}`
 	if e := AtomicWrite(path, []byte(data)); e != nil {
 		t.Fatal(e)
@@ -100,6 +100,9 @@ func TestPreviousManualStoreLoadsAndAuditPreserved(t *testing.T) {
 	}
 	if s.Schema != "pacelever.manual.v1" {
 		t.Fatalf("schema not renamed: %q", s.Schema)
+	}
+	if len(s.History) != 1 {
+		t.Fatalf("store at the previous path not loaded: %+v", s)
 	}
 	if e = WriteJSON(filepath.Join(CacheDir(), "manual.json"), s); e != nil {
 		t.Fatal(e)
