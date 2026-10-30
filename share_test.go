@@ -10,7 +10,7 @@ import (
 
 func TestInflightDedupAndAge(t *testing.T) {
 	local := []InflightJob{{"job-a", testNow.Add(-time.Hour).Format(time.RFC3339)}, {"old-job", testNow.Add(-9 * time.Hour).Format(time.RFC3339)}}
-	remote := InflightSnapshot{Schema: "pacelever.quota-inflight.v1", Pool: "codex", AccountFP: "example-fingerprint", Host: "fixture-peer", PublishedAt: testNow.Add(-24 * time.Hour).Format(time.RFC3339), Jobs: []InflightJob{{"job-a", testNow.Add(-time.Hour).Format(time.RFC3339)}, {"job-b", testNow.Add(-2 * time.Hour).Format(time.RFC3339)}}}
+	remote := InflightSnapshot{Schema: inflightSchema, Pool: "codex", AccountFP: "example-fingerprint", Host: "fixture-peer", PublishedAt: testNow.Add(-24 * time.Hour).Format(time.RFC3339), Jobs: []InflightJob{{"job-a", testNow.Add(-time.Hour).Format(time.RFC3339)}, {"job-b", testNow.Add(-2 * time.Hour).Format(time.RFC3339)}}}
 	b := fakeBench(t, func(*http.Request) (*http.Response, error) {
 		body, _ := json.Marshal(remote)
 		raw, _ := json.Marshal(map[string]any{"documents": []any{map[string]any{"key": "quota/codex/example-fingerprint/inflight/fixture-peer", "body": string(body)}}})

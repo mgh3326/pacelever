@@ -1,7 +1,7 @@
 # pacelever conventions
 
 Read README.md and DESIGN.md first. The gate exit codes, `scopefuel.v1` /
-`scopefuel.gate.v1` JSON schema ids and the golden fixtures in `testdata/` are a
+`scopefuel.gate.v1` JSON schema ids, the `scopefuel.quota-inflight.v1` document id and the golden fixtures in `testdata/` are a
 compatibility contract: a refactor must leave them unchanged.
 
 ## Layout

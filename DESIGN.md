@@ -34,9 +34,11 @@ Gate exits remain 0 admitted, 3 quota/policy, 4 unmeasurable, 5 role-denied and
 6 unsubscribed; malformed input or output failures use 2. The CLI preserves the
 admission first-line format and the `scopefuel.gate.v1` audit schema id. JSON quota
 summaries keep the `scopefuel.v1` schema id, including provider status/source and
-scoped buckets. These two ids are wire identifiers that spawners and quota
-collectors validate; they are the only places the retired predecessor's name
-survives, and renaming them needs a coordinated change in every consumer.
+scoped buckets. The inflight document schema id, `scopefuel.quota-inflight.v1`,
+is also kept. These three ids are wire identifiers that spawners, quota
+collectors and peer hosts validate; with the two one-release exceptions below they
+are the only places the retired predecessor's name survives, and renaming them
+needs a coordinated change in every consumer and host.
 Launch JSON keeps the original fields, including catalog provenance, billing,
 provider family and the nullable E6 marker. Launch refusals use exit 3. The operator-requested `label` is an additive field on
 every successful launch; it identifies actual profile/effort and experiment arm.

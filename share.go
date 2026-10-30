@@ -36,9 +36,11 @@ func identity(o Observation) (string, string) {
 	return o.AccountFP, o.AccountFPKind
 }
 
-// inflightSchema is the schema id of a published inflight document; readers and
-// writers must agree on it.
-const inflightSchema = "pacelever.quota-inflight.v1"
+// inflightSchema is the schema id of a published inflight document. Hosts
+// exchange these documents, so it is a wire id like the gate schema ids and
+// keeps its original name: renaming it would make hosts on different builds
+// ignore each other's jobs. Rename it with the other wire ids, in one change.
+const inflightSchema = "scopefuel.quota-inflight.v1"
 
 type InflightJob struct {
 	JobID     string `json:"job_id"`
