@@ -108,9 +108,13 @@ func CachePath() string {
 	return filepath.Join(CacheDir(), "snapshots.json")
 }
 
-// legacyCachePath is the default snapshot file of the retired build. It is read
-// for one release so a running host keeps its evidence; nothing writes it.
+// legacyCachePath is the snapshot file of the retired build: SCOPEFUEL_CACHE when
+// set, else its default. It is read for one release so a running host keeps its
+// evidence; nothing writes it.
 func legacyCachePath() string {
+	if p := strings.TrimSpace(os.Getenv("SCOPEFUEL_CACHE")); p != "" {
+		return p
+	}
 	return filepath.Join(cacheBase(), "scopefuel", "snapshots.json")
 }
 func LoadConfig() (Config, error) {

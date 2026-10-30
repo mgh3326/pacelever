@@ -386,8 +386,11 @@ func ValidateMonotonic(rows []CatalogRow) error {
 	}
 	return nil
 }
+
+// legacyDBPath is the bench database of the retired build. SCOPEFUEL_BENCH_DB is
+// honored for one release so a running host keeps its history; it is read only.
 func legacyDBPath() string {
-	if p := FirstEnv("PACELEVER_BENCH_DB"); p != "" {
+	if p := FirstEnv("PACELEVER_BENCH_DB", "SCOPEFUEL_BENCH_DB"); p != "" {
 		return p
 	}
 	return filepath.Join(dataBase(), "scopefuel", "bench.db")
