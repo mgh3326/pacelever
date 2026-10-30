@@ -58,20 +58,21 @@ func TestDevinAccountFingerprint(t *testing.T) {
 func TestDevinAccountKeyRequiresMatchingLogin(t *testing.T) {
 	isolate(t)
 	fp := writeDevinLogin(t)
-	c := Collector{Config: Config{Quota: QuotaConfig{MeasurableAccounts: []string{"devin:" + fp}}}}
+	c := Collector{}
 	if key, allowed := c.accountKey("devin"); key != "devin:"+fp || !allowed {
 		t.Fatalf("derived key %q, allowed=%v", key, allowed)
 	}
 	c.Config.Quota.Accounts = map[string]string{"devin": "0123456789abcdef"}
 	c.Config.Quota.MeasurableAccounts = []string{"devin:0123456789abcdef"}
-	if key, allowed := c.accountKey("devin"); key != "devin:0123456789abcdef" || allowed {
-		t.Fatal("mismatched login may only read the configured key")
+	if key, allowed := c.accountKey("devin"); key != "devin:"+fp || !allowed {
+		t.Fatalf("a configured key that differs from the login must not block: %q allowed=%v", key, allowed)
 	}
+	c.Config.Quota.MeasurableAccounts = nil
 	if err := os.Remove(filepath.Join(dataBase(), "devin", "credentials.toml")); err != nil {
 		t.Fatal(err)
 	}
-	if _, allowed := c.accountKey("devin"); allowed {
-		t.Fatal("configured key without login allowed to publish")
+	if key, allowed := c.accountKey("devin"); key != "devin:0123456789abcdef" || allowed {
+		t.Fatalf("configured key without a login may only be read: %q allowed=%v", key, allowed)
 	}
 	c.Config.Quota.Accounts = nil
 	if key, _ := c.accountKey("devin"); key != "" {

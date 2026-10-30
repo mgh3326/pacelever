@@ -136,6 +136,18 @@ func TestGateAccountStaleSameAccountRefreshesThenAdmits(t *testing.T) {
 	}
 }
 
+// A derived pool's login alone lets the host that holds the account measure it;
+// measurable_accounts is not consulted.
+func TestGateAccountStaleSameAccountNeedsNoMeasurableList(t *testing.T) {
+	key := devinHost(t, refreshOrg)
+	stale := &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: time.Now().Add(-time.Hour), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketAvailable}}
+	hk := &memoryHK{latest: pl.SharedLatest{Observation: stale}}
+	code, _, err := gateAccount(t, hk, nil, "devin-swe2-medium", key)
+	if err != nil || code != pl.Admitted || hk.published != 1 {
+		t.Fatalf("code=%d err=%v published=%d", code, err, hk.published)
+	}
+}
+
 func TestGateAccountStaleOtherAccountStillRefused(t *testing.T) {
 	local := devinHost(t, refreshOrg)
 	other := devinKey(otherOrg)
@@ -158,7 +170,6 @@ func TestGateAccountStaleRefusedWhenHostCannotMeasure(t *testing.T) {
 		failWrite  bool
 		want       string
 	}{
-		{"not measurable here", nil, false, "may not measure"},
 		{"publish refused", []string{key}, true, "local refresh failed (shared_publish_failed)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

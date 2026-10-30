@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -166,9 +167,26 @@ func sameOrigin(a, b string) bool {
 	return oa != "" && oa == origin(b)
 }
 
+// derivedPool reports whether the pool's account is read from the local
+// login, so the host's own credentials, not a list, say which account it holds.
+func derivedPool(pool string) bool {
+	return pool == "claude" || pool == "codex" || pool == "devin"
+}
+
+// accountKey is the shared key a host measures and publishes for pool and
+// whether it may do so. A derived pool takes its key from the local login and
+// is always allowed; a configured accounts entry that differs from it is
+// ignored and never blocks measurement, presence or publication. Any other
+// pool uses the configured key and is allowed only when measurable_accounts
+// lists it. A derived pool with no readable login falls back to the configured
+// key for reading and is not allowed.
 func (c Collector) accountKey(pool string) (string, bool) {
 	local := localAccountFP(pool, c.Selectors)
-	fp := c.Config.Quota.Accounts[pool]
+	configured := c.Config.Quota.Accounts[pool]
+	if derivedPool(pool) && accountFPRE.MatchString(local) {
+		return pool + ":" + local, true
+	}
+	fp := configured
 	if fp == "" {
 		fp = local
 	}
@@ -176,16 +194,7 @@ func (c Collector) accountKey(pool string) (string, bool) {
 		return "", false
 	}
 	key := pool + ":" + fp
-	allowed := false
-	for _, v := range c.Config.Quota.MeasurableAccounts {
-		if v == key {
-			allowed = true
-		}
-	}
-	if (pool == "claude" || pool == "codex" || pool == "devin") && local != fp {
-		allowed = false
-	}
-	return key, allowed
+	return key, !derivedPool(pool) && slices.Contains(c.Config.Quota.MeasurableAccounts, key)
 }
 
 // presenceHostID is stable per host and never the raw hostname when an explicit
@@ -204,27 +213,21 @@ func (q QuotaConfig) presenceHostID() string {
 	return "host-" + fingerprint("host", host)
 }
 
-// publishPresence records where an account was measured. It is asynchronous and
-// bounded, so it never adds latency to a collection or changes its verdict.
-// onDone, when set, reports whether the publish succeeded.
-func (c Collector) publishPresence(source ObservationSource, key string, at time.Time, onDone func(bool)) {
-	publisher, ok := source.(PresenceSource)
-	host := c.Config.Quota.presenceHostID()
-	if !ok || !accountKeyRE.MatchString(key) || host == "" {
-		if onDone != nil {
-			onDone(false)
-		}
-		return
+// publishPresence records where an account was measured. It returns only after
+// the store answered or the three second bound passed, so the publish is never
+// cut short by the process exiting.
+func publishPresence(source PresenceSource, record PresenceRecord) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return source.PublishPresence(ctx, record)
+}
+
+// report passes one sentence about a failed shared publish to c.Report. The
+// sentence names the failure, never the response, URL or credential.
+func (c Collector) report(sentence string) {
+	if c.Report != nil {
+		c.Report(sentence)
 	}
-	record := PresenceRecord{HostID: host, AccountKey: key, LastSeen: at}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		err := publisher.PublishPresence(ctx, record)
-		if onDone != nil {
-			onDone(err == nil)
-		}
-	}()
 }
 func holderToken() (string, error) {
 	var b [16]byte
@@ -284,24 +287,26 @@ func (c Collector) presenceUndo(host, key string, ts int64) {
 
 // maybePresence publishes presence for an observation served from the shared
 // store. allowed is the accountKey verdict, so a host never publishes for an
-// account whose local CLI identity does not resolve to the same key.
+// account whose local CLI identity does not resolve to the same key. The publish
+// completes before it returns, and a failure is reported, not dropped; it never
+// changes the observation's verdict.
 func (c Collector) maybePresence(source ObservationSource, key string, allowed bool, o Observation) {
 	if !allowed || o.Stale || o.Degraded || o.Source != SourceHandoffkeep {
 		return
 	}
+	publisher, ok := source.(PresenceSource)
 	host := c.Config.Quota.presenceHostID()
-	if host == "" {
+	if !ok || !accountKeyRE.MatchString(key) || host == "" {
 		return
 	}
 	ts, due := c.presenceDue(host, key, c.quotaNow())
 	if !due {
 		return
 	}
-	c.publishPresence(source, key, c.quotaNow(), func(ok bool) {
-		if !ok {
-			c.presenceUndo(host, key, ts)
-		}
-	})
+	if publishPresence(publisher, PresenceRecord{HostID: host, AccountKey: key, LastSeen: c.quotaNow()}) != nil {
+		c.presenceUndo(host, key, ts)
+		c.report(MsgPresencePublishFailed)
+	}
 }
 func (q QuotaConfig) freshTTL(pool string) time.Duration {
 	if ttl := q.PoolFreshTTLS[pool]; ttl > 0 {
@@ -502,7 +507,7 @@ func (c Collector) RefreshAccount(ctx context.Context, key string) (Observation,
 	case own != key:
 		return Observation{}, deny(Unmeasurable, msgAccountStale+"; this host does not hold the account")
 	case !allowed:
-		return Observation{}, deny(Unmeasurable, msgAccountStale+"; this host may not measure the account (measurable_accounts)")
+		return Observation{}, deny(Unmeasurable, msgAccountStale+"; this host cannot measure the account")
 	}
 	observed, err := c.Collect(ctx, []string{pool})
 	if err != nil || len(observed) != 1 {
@@ -540,12 +545,11 @@ func sharedManual(xs []SharedObservation, pool string) []ManualObservation {
 }
 func (c Collector) quotaNow() time.Time { return ClockNow(c.Now) }
 
-// ClaudeBar keeps a rate limiter per account: a 429 suppresses another fetch
-// for Retry-After (or a five-minute default), while the last good reading stays
-// available as stale evidence. A legacy scopefuel backoff does not transfer to
-// shared mode because it was not recorded against this account key.
+// sharedRateLimitBackoffActive reports a 429 backoff recorded against this
+// account key: it suppresses another fetch for Retry-After (or a five-minute
+// default), while the last good reading stays available as stale evidence.
 func sharedRateLimitBackoffActive(entry CacheEntry, pool, key string, now time.Time) bool {
-	if entry.legacy || entry.NegativeUntil <= float64(now.UnixMilli())/1000 || entry.LastError == nil || entry.LastError.ErrorKind != ErrKindRateLimited {
+	if entry.NegativeUntil <= float64(now.UnixMilli())/1000 || entry.LastError == nil || entry.LastError.ErrorKind != ErrKindRateLimited {
 		return false
 	}
 	fp, kind := identity(*entry.LastError)

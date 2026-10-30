@@ -29,22 +29,17 @@ type fakeHK struct {
 	presence  []PresenceRecord
 	onRead    func(int) *SharedObservation
 	reads     int
-	// presenceBlock holds the async publish open; presenceDone signals it ran.
-	presenceBlock chan struct{}
-	presenceDone  chan struct{}
+	// presenceFail makes every presence publish fail.
+	presenceFail bool
 }
 
 func (f *fakeHK) PublishPresence(ctx context.Context, r PresenceRecord) error {
-	if f.presenceBlock != nil {
-		<-f.presenceBlock
-	}
 	f.mu.Lock()
-	f.presence = append(f.presence, r)
-	done := f.presenceDone
-	f.mu.Unlock()
-	if done != nil {
-		done <- struct{}{}
+	defer f.mu.Unlock()
+	if f.presenceFail {
+		return errors.New("offline")
 	}
+	f.presence = append(f.presence, r)
 	return nil
 }
 
@@ -155,7 +150,7 @@ func TestSharedQuotaFreshBeforeProbe(t *testing.T) {
 func TestSharedQuotaFleetSingleProbe(t *testing.T) {
 	t.Setenv("PACELEVER_HOST_ID", "")
 	t.Setenv("HANDOFFKEEP_HOST_ID", "")
-	f := &fakeHK{presenceDone: make(chan struct{}, 1)}
+	f := &fakeHK{}
 	var probes atomic.Int32
 	var wg sync.WaitGroup
 	out := make(chan Observation, 6)
@@ -189,17 +184,8 @@ func TestSharedQuotaFleetSingleProbe(t *testing.T) {
 	if probes.Load() != 1 || f.published != 1 || f.holder != "" {
 		t.Fatalf("probes=%d published=%d holder=%s", probes.Load(), f.published, f.holder)
 	}
-	// Every logged-in host records presence: one prober plus five shared readers.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		f.mu.Lock()
-		n := len(f.presence)
-		f.mu.Unlock()
-		if n == 6 || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	// Every logged-in host records presence before its collection returns: one
+	// prober plus five shared readers.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.presence) != 6 {
@@ -220,17 +206,12 @@ func TestSharedQuotaFleetSingleProbe(t *testing.T) {
 // A logged-in host that reads a fresh shared observation still publishes
 // presence, so placement sees hosts that never probe.
 func TestPresencePublishedOnSharedRead(t *testing.T) {
-	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now())}, presenceDone: make(chan struct{}, 1)}
+	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now())}}
 	c := sharedCollector(t, f)
 	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation { t.Fatal("fresh hk triggered probe"); return Observation{} })
 	o := collectShared(t, c)
 	if o.Stale || o.Degraded {
 		t.Fatalf("%+v", o)
-	}
-	select {
-	case <-f.presenceDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("shared read did not publish presence")
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -242,7 +223,7 @@ func TestPresencePublishedOnSharedRead(t *testing.T) {
 // A host whose local identity does not resolve to the measured key never
 // publishes presence for it, even when it reads fresh shared data.
 func TestPresenceSkippedWhenNotLoggedIn(t *testing.T) {
-	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now())}, presenceDone: make(chan struct{}, 1)}
+	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now())}}
 	c := sharedCollector(t, f)
 	c.Config.Quota.MeasurableAccounts = nil
 	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation { t.Fatal("read-only host probed"); return Observation{} })
@@ -250,10 +231,8 @@ func TestPresenceSkippedWhenNotLoggedIn(t *testing.T) {
 	if o.Stale || o.Degraded {
 		t.Fatalf("%+v", o)
 	}
-	select {
-	case <-f.presenceDone:
-		t.Fatal("read-only host published presence")
-	case <-time.After(200 * time.Millisecond):
+	if len(f.presence) != 0 {
+		t.Fatalf("read-only host published presence: %+v", f.presence)
 	}
 }
 
@@ -262,7 +241,7 @@ func TestPresenceSkippedWhenNotLoggedIn(t *testing.T) {
 func TestPresenceRateLimitAcrossRuns(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC()
-	f := &fakeHK{onRead: func(int) *SharedObservation { return sampleShared(now) }, presenceDone: make(chan struct{}, 2)}
+	f := &fakeHK{onRead: func(int) *SharedObservation { return sampleShared(now) }}
 	run := func() Observation {
 		c := sharedCollector(t, f)
 		c.CachePath = filepath.Join(dir, "cache.json")
@@ -273,27 +252,18 @@ func TestPresenceRateLimitAcrossRuns(t *testing.T) {
 	if o := run(); o.Stale || o.Degraded {
 		t.Fatalf("%+v", o)
 	}
-	select {
-	case <-f.presenceDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first run did not publish presence")
+	if len(f.presence) != 1 {
+		t.Fatalf("first run did not publish presence: %+v", f.presence)
 	}
 	if o := run(); o.Stale || o.Degraded {
 		t.Fatalf("%+v", o)
 	}
-	select {
-	case <-f.presenceDone:
-		t.Fatal("second run inside the interval published again")
-	case <-time.After(200 * time.Millisecond):
+	if len(f.presence) != 1 {
+		t.Fatalf("second run inside the interval published again: %+v", f.presence)
 	}
 	now = now.Add(11 * time.Minute)
 	if o := run(); o.Stale || o.Degraded {
 		t.Fatalf("%+v", o)
-	}
-	select {
-	case <-f.presenceDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("run past the interval did not publish presence")
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -302,33 +272,38 @@ func TestPresenceRateLimitAcrossRuns(t *testing.T) {
 	}
 }
 
-func TestPresencePublishDoesNotBlockCollection(t *testing.T) {
-	f := &fakeHK{presenceBlock: make(chan struct{}), presenceDone: make(chan struct{}, 1)}
-	c := sharedCollector(t, f)
-	done := make(chan Observation, 1)
-	go func() {
-		obs, err := c.Collect(context.Background(), []string{"grok"})
-		if err != nil {
-			done <- Observation{Error: err.Error()}
-			return
-		}
-		done <- obs[0]
-	}()
-	select {
-	case o := <-done:
-		if o.Error != "" {
-			close(f.presenceBlock)
-			t.Fatal(o.Error)
-		}
-	case <-time.After(500 * time.Millisecond):
-		close(f.presenceBlock)
-		t.Fatal("collection waited for the presence publish")
+// The presence publish is finished when Collect returns, so a CLI that exits
+// right after cannot lose it; a refused publish is reported and does not use up
+// the interval.
+func TestPresencePublishCompletesAndFailureIsReported(t *testing.T) {
+	dir := t.TempDir()
+	f := &fakeHK{presenceFail: true}
+	var reports []string
+	run := func() Observation {
+		c := sharedCollector(t, f)
+		c.CachePath = filepath.Join(dir, "cache.json")
+		c.Report = func(s string) { reports = append(reports, s) }
+		c.Providers["grok"] = ProviderFunc(func(context.Context) Observation {
+			return Observation{Buckets: []Bucket{{Window: "7d", UsedPct: Pct(24), Scope: Scope{Kind: "account"}}}}
+		})
+		return collectShared(t, c)
 	}
-	close(f.presenceBlock)
-	select {
-	case <-f.presenceDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("presence never ran")
+	if o := run(); o.Stale || o.Degraded || o.Error != "" {
+		t.Fatalf("a presence failure changed the verdict: %+v", o)
+	}
+	if len(reports) != 1 || reports[0] != MsgPresencePublishFailed {
+		t.Fatalf("failure not reported: %v", reports)
+	}
+	f.mu.Lock()
+	f.presenceFail = false
+	f.mu.Unlock()
+	if o := run(); o.Stale || o.Degraded {
+		t.Fatalf("%+v", o)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(reports) != 1 || len(f.presence) != 1 {
+		t.Fatalf("retry after a failed publish: reports=%v presence=%+v", reports, f.presence)
 	}
 }
 func TestSharedQuotaRereadAndReadOnly(t *testing.T) {
@@ -402,7 +377,7 @@ func TestSharedQuotaRateLimitBackoffUsesLocalLastGood(t *testing.T) {
 	if len(first.Buckets) != 1 || !first.Buckets[0].RolledOver || first.Buckets[0].UsedPct == nil || *first.Buckets[0].UsedPct != 0 || first.Buckets[0].ResetsAt != "" {
 		t.Fatalf("expired local bucket not rolled over: %+v", first.Buckets)
 	}
-	entries, e := loadSnapshots(c.CachePath, "")
+	entries, e := loadSnapshots(c.CachePath)
 	if e != nil || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt < 299 || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt > 300 {
 		t.Fatalf("default rate-limit backoff not persisted: %+v %v", entries["grok"], e)
 	}
@@ -430,7 +405,7 @@ func TestSharedQuotaRateLimitHonoursRetryAfter(t *testing.T) {
 		return Observation{Error: "usage HTTP 429", ErrorKind: "rate_limited", RetryAfterS: 720}
 	})
 	collectShared(t, c)
-	entries, e := loadSnapshots(c.CachePath, "")
+	entries, e := loadSnapshots(c.CachePath)
 	if e != nil || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt < 719 || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt > 720 {
 		t.Fatalf("Retry-After backoff not persisted: %+v %v", entries["grok"], e)
 	}
@@ -546,15 +521,15 @@ func TestSharedQuotaIdentityBeforeMeasurement(t *testing.T) {
 		t.Fatal(e)
 	}
 	fp := fingerprint("codex-account", account)
-	c := Collector{Selectors: map[string]string{"CODEX_HOME": dir}, Config: Config{Quota: QuotaConfig{MeasurableAccounts: []string{"codex:" + fp}}}}
+	c := Collector{Selectors: map[string]string{"CODEX_HOME": dir}}
 	key, allowed := c.accountKey("codex")
 	if key != "codex:"+fp || !allowed {
 		t.Fatalf("%s %v", key, allowed)
 	}
 	c.Config.Quota.Accounts = map[string]string{"codex": "0123456789abcdef"}
 	key, allowed = c.accountKey("codex")
-	if allowed {
-		t.Fatal("different login allowed to measure configured account")
+	if key != "codex:"+fp || !allowed {
+		t.Fatalf("a configured account that differs from the login blocked the host: %s %v", key, allowed)
 	}
 	if strings.Contains(key, account) {
 		t.Fatal("raw identity leaked")
@@ -738,15 +713,10 @@ func TestQuotaHostIDFromConfigFile(t *testing.T) {
 func TestPresenceUsesConfiguredHostID(t *testing.T) {
 	t.Setenv("PACELEVER_HOST_ID", "")
 	t.Setenv("HANDOFFKEEP_HOST_ID", "")
-	f := &fakeHK{presenceDone: make(chan struct{}, 1)}
+	f := &fakeHK{}
 	c := sharedCollector(t, f)
 	c.Config.Quota.HostID = "desktop"
 	collectShared(t, c)
-	select {
-	case <-f.presenceDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("presence never ran")
-	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.presence) != 1 || f.presence[0].HostID != "desktop" {

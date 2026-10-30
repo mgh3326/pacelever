@@ -31,7 +31,7 @@ func collectDevinShared(t *testing.T, c Collector) Observation {
 func TestDevinSharedPublishesFreeOnlyAndPresence(t *testing.T) {
 	for _, failedProbe := range []bool{false, true} {
 		t.Run(map[bool]string{false: "no paid provider", true: "paid probe fails"}[failedProbe], func(t *testing.T) {
-			f := &fakeHK{presenceDone: make(chan struct{}, 1)}
+			f := &fakeHK{}
 			c := devinSharedCollector(t, f)
 			if failedProbe {
 				c.Providers = map[string]Provider{"devin": ProviderFunc(func(context.Context) Observation {
@@ -41,11 +41,6 @@ func TestDevinSharedPublishesFreeOnlyAndPresence(t *testing.T) {
 			o := collectDevinShared(t, c)
 			if o.Stale || o.Degraded || o.Error != "" || o.Source != "handoffkeep" || o.FreeBucket == nil || o.FreeBucket.State != FreeBucketAvailable || len(o.Buckets) != 0 || f.published != 1 {
 				t.Fatalf("free-only observation: %+v, publications=%d", o, f.published)
-			}
-			select {
-			case <-f.presenceDone:
-			case <-time.After(time.Second):
-				t.Fatal("no presence published")
 			}
 			if len(f.presence) != 1 || f.presence[0].AccountKey != "devin:"+fingerprint("devin-account", "org-fixture") {
 				t.Fatalf("presence: %+v", f.presence)

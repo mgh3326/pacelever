@@ -1265,6 +1265,7 @@
     "opus": "high",
     "sonnet": "high",
     "haiku": "low",
+    "fable": "high",
     "codex-sol": "max",
     "codex-luna": "medium",
     "codex-luna-max": "max",

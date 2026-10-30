@@ -42,7 +42,7 @@ func TestExhaustionNoticeDedup(t *testing.T) {
 }
 func TestScopedCollectorNeverReadsDefaultSnapshot(t *testing.T) {
 	isolate(t)
-	if e := WriteJSON(legacyCachePath(), map[string]CacheEntry{"claude": {FetchedAt: float64(testNow.Unix()), Result: observation("claude", 1)}}); e != nil {
+	if e := WriteJSON(CachePath(), map[string]CacheEntry{"claude": {FetchedAt: float64(testNow.Unix()), Result: observation("claude", 1)}}); e != nil {
 		t.Fatal(e)
 	}
 	c := Collector{CachePath: t.TempDir() + "/scoped.json", Now: func() time.Time { return testNow }, Providers: map[string]Provider{"claude": ProviderFunc(func(context.Context) Observation { return observation("claude", 20) })}}
