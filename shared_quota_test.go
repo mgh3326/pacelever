@@ -38,6 +38,9 @@ func (f *fakeHK) PublishPresence(ctx context.Context, r PresenceRecord) error {
 	if f.presenceBlock != nil {
 		<-f.presenceBlock
 	}
+	if f.fail == "presence" {
+		return errors.New("offline")
+	}
 	f.mu.Lock()
 	f.presence = append(f.presence, r)
 	done := f.presenceDone
@@ -302,6 +305,32 @@ func TestPresenceRateLimitAcrossRuns(t *testing.T) {
 	}
 }
 
+// A tracked presence publish is joined by Wait and counted on failure, so a
+// lost record surfaces instead of being dropped silently.
+func TestPublishTrackerJoinsPresenceFailures(t *testing.T) {
+	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now())}}
+	c := sharedCollector(t, f)
+	c.Publish = NewPublishTracker()
+	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation { t.Fatal("fresh hk triggered probe"); return Observation{} })
+	o := collectShared(t, c)
+	if o.Stale || o.Degraded {
+		t.Fatalf("%+v", o)
+	}
+	if n := c.Publish.Wait(); n != 0 || len(f.presence) != 1 {
+		t.Fatalf("successful publish counted as failure: %d %+v", n, f.presence)
+	}
+	f.fail = "presence"
+	c = sharedCollector(t, f)
+	c.Publish = NewPublishTracker()
+	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation { t.Fatal("fresh hk triggered probe"); return Observation{} })
+	o = collectShared(t, c)
+	if o.Stale || o.Degraded {
+		t.Fatalf("%+v", o)
+	}
+	if n := c.Publish.Wait(); n != 1 || len(f.presence) != 1 {
+		t.Fatalf("presence failure not counted: %d %+v", n, f.presence)
+	}
+}
 func TestPresencePublishDoesNotBlockCollection(t *testing.T) {
 	f := &fakeHK{presenceBlock: make(chan struct{}), presenceDone: make(chan struct{}, 1)}
 	c := sharedCollector(t, f)

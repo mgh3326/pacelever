@@ -155,9 +155,9 @@ during an hk outage it is also degraded. A different account's cache is
 discarded. A `rate_limited` probe result honours `Retry-After` and otherwise
 backs off for five minutes; other provider failures do not suppress the next
 shared probe. Local cache TTL and non-rate-limit provider backoff never bypass
-the shared read. Shared mode disables the legacy document-based quota
-fallback/publication so it cannot turn a degraded local reading into a fresh
-one. Inflight tracking keeps its existing behavior.
+the shared read. The legacy document-based quota fallback/publication is
+removed: nothing turns a degraded local reading into a fresh one. Inflight
+tracking is local-only.
 
 `manual set`, `manual list`, and `manual clear` use the same account API in shared
 mode. Manual entries are independent per quota window; a write on one host is
@@ -270,8 +270,9 @@ configured value may contain only letters, digits, `.`, `_` and `-` (at most 64
 characters); anything else makes the configuration invalid. Publishes are
 rate-limited to at most one per `presence_every_s` seconds (default 600) per
 host and account, recorded in a `presence.json` next to the cache file.
-Publication is
-best-effort: a missing endpoint or an hk error never changes a quota verdict and never fails collection. hk must expose this endpoint
+A missing endpoint or an hk error never changes a quota
+verdict, but the CLI joins every in-flight presence publish before exiting
+and reports failures on stderr. hk must expose this endpoint
 for records to persist; pacelever does not create it.
 
 Omit `quota.url` to retain the existing local collection behavior. Tests use an

@@ -339,7 +339,7 @@ func gate(in Inputs, req Request) Decision {
 	if len(policy.InflightReservePct) > 0 {
 		count := in.Inflight[row.Pool]
 		if count == nil {
-			d.Inflight = "inflight=unknown(local|remote)"
+			d.Inflight = "inflight=unknown(local)"
 		} else {
 			d.Inflight = fmt.Sprintf("inflight=%d", *count)
 			for _, b := range buckets {
@@ -375,11 +375,6 @@ func gate(in Inputs, req Request) Decision {
 		if p := Pace(b, now); p != nil && *p > 1 {
 			d.Reason += fmt.Sprintf("\npace-warning pool=%s window=%s multiple=%.2f", row.Pool, b.Window, *p)
 		}
-	}
-	if d.Source == nil && obs.Source == SourceRemote {
-		d.Source = ptr(SourceRemote)
-		d.MeasuredAt = ptr(time.UnixMilli(int64(obs.FetchedAt * 1000)).UTC().Format(time.RFC3339Nano))
-		d.ObservedAgeS = obs.AgeS
 	}
 	return d
 }

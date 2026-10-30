@@ -50,7 +50,6 @@ const (
 	SourceUsageAPI    = "usage-api"   // a provider HTTP usage endpoint
 	SourceUsageRPC    = "usage-rpc"   // the Codex app-server JSON-RPC
 	SourceCLI         = "cli:/usage"  // a CLI usage screen or command
-	SourceRemote      = "remote"      // a peer snapshot from the bench server
 	SourceHandoffkeep = "handoffkeep" // the shared quota store
 )
 

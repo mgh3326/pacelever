@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -217,9 +219,40 @@ func (q QuotaConfig) presenceHostID() string {
 	return "host-" + fingerprint("host", host)
 }
 
-// publishPresence records where an account was measured. It is asynchronous and
-// bounded, so it never adds latency to a collection or changes its verdict.
-// onDone, when set, reports whether the publish succeeded.
+// PublishTracker joins asynchronous shared publishes so a caller can wait for
+// them before exiting and report how many failed instead of losing them
+// silently.
+type PublishTracker struct {
+	wg     sync.WaitGroup
+	failed atomic.Int32
+}
+
+// NewPublishTracker returns a tracker for a Collector's Publish field.
+func NewPublishTracker() *PublishTracker { return &PublishTracker{} }
+
+// track runs publish in the background; a failure is counted for Wait.
+func (t *PublishTracker) track(publish func() error) {
+	t.wg.Add(1)
+	go func() {
+		defer t.wg.Done()
+		if publish() != nil {
+			t.failed.Add(1)
+		}
+	}()
+}
+
+// Wait blocks until every tracked publish finished and reports how many
+// failed.
+func (t *PublishTracker) Wait() int {
+	t.wg.Wait()
+	return int(t.failed.Load())
+}
+
+// publishPresence records where an account was measured. It is asynchronous
+// and bounded, so it never adds latency to a collection or changes its
+// verdict; when the collector carries a PublishTracker the caller joins and
+// reports every failed publish before exiting. onDone, when set, reports
+// whether the publish succeeded.
 func (c Collector) publishPresence(source ObservationSource, key string, at time.Time, onDone func(bool)) {
 	publisher, ok := source.(PresenceSource)
 	host := c.Config.Quota.presenceHostID()
@@ -230,14 +263,20 @@ func (c Collector) publishPresence(source ObservationSource, key string, at time
 		return
 	}
 	record := PresenceRecord{HostID: host, AccountKey: key, LastSeen: at}
-	go func() {
+	publish := func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		err := publisher.PublishPresence(ctx, record)
 		if onDone != nil {
 			onDone(err == nil)
 		}
-	}()
+		return err
+	}
+	if c.Publish != nil {
+		c.Publish.track(publish)
+		return
+	}
+	go func() { _ = publish() }()
 }
 func holderToken() (string, error) {
 	var b [16]byte
@@ -815,7 +854,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	}
 	if source.Publish(ctx, key, holder, x) != nil {
 		reachable = false
-		return finish(fail(ErrKindSharedPublishFailed))
+		return finish(failWith(ErrKindSharedPublishFailed, "shared publish failed"))
 	}
 	o, ok := sharedAuto(&x, pool, key, at, c.Config.Quota.freshTTL(pool), false)
 	if !ok {
