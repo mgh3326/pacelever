@@ -80,7 +80,7 @@ func envPath(key, fallback string) string {
 }
 
 // FirstEnv is the first non-blank variable among keys, trimmed. Callers list
-// the pacelever name before its legacy scopefuel or handoffkeep alias.
+// the pacelever name before any handoffkeep alias.
 func FirstEnv(keys ...string) string {
 	for _, k := range keys {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
@@ -107,20 +107,25 @@ func CachePath() string {
 	}
 	return filepath.Join(CacheDir(), "snapshots.json")
 }
-func legacyCachePath() string {
-	if p := os.Getenv("SCOPEFUEL_CACHE"); p != "" {
-		return p
-	}
-	return filepath.Join(cacheBase(), "scopefuel", "snapshots.json")
-}
+
+// previousConfigPath is where hosts kept their configuration before the
+// pacelever path. It is read, never written, only while ConfigPath is absent,
+// so a running host keeps its policy for one release; remove it after that.
+func previousConfigPath() string { return filepath.Join(configBase(), "scopefuel", "config.toml") }
+
 func LoadConfig() (Config, error) {
 	path := ConfigPath()
 	b, e := os.ReadFile(path)
+	previous := false
 	if os.IsNotExist(e) && os.Getenv("PACELEVER_CONFIG") == "" {
-		path = filepath.Join(configBase(), "scopefuel", "config.toml")
+		path = previousConfigPath()
 		b, e = os.ReadFile(path)
+		previous = e == nil
 	}
 	c := Config{Pools: map[string]PoolPolicy{}, Profiles: map[string]ProfilePolicy{}, Settings: map[string]float64{}, Raw: map[string]any{}, Path: path}
+	if previous {
+		c.Warnings = append(c.Warnings, "configuration read from the previous path; move it to "+ConfigPath()+" (the fallback is removed in the next release)")
+	}
 	if os.IsNotExist(e) {
 		return c, nil
 	}
@@ -236,8 +241,8 @@ func (c Config) CreditMaxAge(pool string) time.Duration {
 	return 72 * time.Hour
 }
 
-// EditConfig preserves all unrecognized sections and keys. Legacy input is copied
-// into the pacelever config; the scopefuel file is never changed.
+// EditConfig preserves all unrecognized sections and keys. A configuration read
+// from the previous path is written to ConfigPath; the old file is never changed.
 func EditConfig(edit func(map[string]any) error) error {
 	return WithFileLock(ConfigPath()+".lock", false, func() error {
 		c, e := LoadConfig()

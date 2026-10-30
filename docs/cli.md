@@ -21,7 +21,7 @@ Run `pacelever --help` for a compact command list.
 | `reps pending list\|retry\|drop` | Inspect, retry or discard a local pending intent |
 | `grades propose [--out FILE]`, `apply FILE --out FILE` | Reviewable grade artifacts |
 | `grades areas` | Per-area evidence, separated by grade band and builder/tester role |
-| `refresh POOL [--background]` | Refresh one automatic pool |
+| `refresh POOL [--background]` | Refresh one automatic pool; with shared quota, a failed publication exits 4 |
 | `observe devin-free-limit` | Passive free-limit observation; advisory |
 | `observe commandcode-limit` | Passive usage-limit observation until reset |
 | `inflight show --pool POOL` | Read local plus peer inflight observations |

@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- Shared quota: claude, codex and devin take their account key from the local
+  login and may always measure, publish and record presence for it; a
+  `quota.accounts` entry for those pools only names an account to read on a host
+  without the login, and a value that differs from the login is ignored instead
+  of blocking. `measurable_accounts` now applies only to pools without a login
+  derivation.
+- Presence is published before the command returns instead of in a background
+  goroutine a CLI exit could drop. A failed presence or inflight publication is
+  printed to stderr, and `refresh` exits 4 when its measurement was not
+  published.
+- `fable` launches with effort `high` by default; runtug refuses an empty effort
+  for Claude seats.
+- Removed the predecessor tool's remains: the document-based quota share
+  (`/v1/documents/quota/<pool>/<fp>/latest` publication and its peer fallback,
+  including the Fusion billing lookup), its cache, manual-store and bench
+  SQLite imports, its `SCOPEFUEL_*` environment aliases and the fixture
+  capture script. The inflight peer documents and limit files now carry
+  `pacelever.*` schema names; peers still on the previous version are not
+  counted until they upgrade. The herdr pane metadata is reported as
+  `pacelever.gauge`/`pacelever_quota`. The previous configuration path and the
+  previous manual-store schema name still load for one release. The
+  `scopefuel.v1` and `scopefuel.gate.v1` output schema names are unchanged
+  because runtug checks them.
 - `gate --account-key`: when the shared reading is stale and this host holds the
   same account and may measure it, measure, publish and judge on the fresh value
   instead of refusing; other hosts still exit 4 with the reason. A free SWE-2
@@ -46,8 +69,7 @@
 - Read Grok billing over HTTP and add Antigravity's cloud quota summary as `agy`.
 - Refresh a refused Antigravity token by running `agy models` once and retrying,
   with a read-only macOS Keychain fallback when the token file is missing or
-  stays refused. A legacy scopefuel backoff no longer blocks pools pacelever
-  measures itself; imported measurements still serve as stale fallbacks.
+  stays refused.
 - Claude keeps a 900-second cache, honours `Retry-After` with a 300-second
   default, and serves its last good value as stale after a rate limit.
 - ClinePass accepts `CLINEPASS_API_KEY` and

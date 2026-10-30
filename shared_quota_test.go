@@ -29,21 +29,24 @@ type fakeHK struct {
 	presence  []PresenceRecord
 	onRead    func(int) *SharedObservation
 	reads     int
-	// presenceBlock holds the async publish open; presenceDone signals it ran.
-	presenceBlock chan struct{}
-	presenceDone  chan struct{}
+	// presenceDone signals a presence publish ran; presenceErr fails it.
+	presenceDone chan struct{}
+	presenceErr  error
 }
 
 func (f *fakeHK) PublishPresence(ctx context.Context, r PresenceRecord) error {
-	if f.presenceBlock != nil {
-		<-f.presenceBlock
+	if f.presenceErr != nil {
+		return f.presenceErr
 	}
 	f.mu.Lock()
 	f.presence = append(f.presence, r)
 	done := f.presenceDone
 	f.mu.Unlock()
 	if done != nil {
-		done <- struct{}{}
+		select {
+		case done <- struct{}{}:
+		default:
+		}
 	}
 	return nil
 }
@@ -302,33 +305,34 @@ func TestPresenceRateLimitAcrossRuns(t *testing.T) {
 	}
 }
 
-func TestPresencePublishDoesNotBlockCollection(t *testing.T) {
-	f := &fakeHK{presenceBlock: make(chan struct{}), presenceDone: make(chan struct{}, 1)}
+func TestPresencePublishCompletesBeforeCollectReturns(t *testing.T) {
+	f := &fakeHK{}
 	c := sharedCollector(t, f)
-	done := make(chan Observation, 1)
-	go func() {
-		obs, err := c.Collect(context.Background(), []string{"grok"})
-		if err != nil {
-			done <- Observation{Error: err.Error()}
-			return
-		}
-		done <- obs[0]
-	}()
-	select {
-	case o := <-done:
-		if o.Error != "" {
-			close(f.presenceBlock)
-			t.Fatal(o.Error)
-		}
-	case <-time.After(500 * time.Millisecond):
-		close(f.presenceBlock)
-		t.Fatal("collection waited for the presence publish")
+	var reported []error
+	c.PublishFailed = func(err error) { reported = append(reported, err) }
+	collectShared(t, c)
+	f.mu.Lock()
+	n := len(f.presence)
+	f.mu.Unlock()
+	if n != 1 || len(reported) != 0 {
+		t.Fatalf("presence not published before return: presence=%d reported=%v", n, reported)
 	}
-	close(f.presenceBlock)
-	select {
-	case <-f.presenceDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("presence never ran")
+}
+
+func TestPresencePublishFailureIsReportedAndRetried(t *testing.T) {
+	f := &fakeHK{presenceErr: fmt.Errorf("hk unavailable")}
+	c := sharedCollector(t, f)
+	var reported []error
+	c.PublishFailed = func(err error) { reported = append(reported, err) }
+	collectShared(t, c)
+	if len(reported) != 1 || !strings.Contains(reported[0].Error(), "grok presence publish failed") {
+		t.Fatalf("failure not reported: %v", reported)
+	}
+	// The failed publish released its rate-limit slot, so the next run retries.
+	f.presenceErr = nil
+	collectShared(t, c)
+	if len(f.presence) != 1 || len(reported) != 1 {
+		t.Fatalf("presence not retried: presence=%d reported=%v", len(f.presence), reported)
 	}
 }
 func TestSharedQuotaRereadAndReadOnly(t *testing.T) {
@@ -402,7 +406,7 @@ func TestSharedQuotaRateLimitBackoffUsesLocalLastGood(t *testing.T) {
 	if len(first.Buckets) != 1 || !first.Buckets[0].RolledOver || first.Buckets[0].UsedPct == nil || *first.Buckets[0].UsedPct != 0 || first.Buckets[0].ResetsAt != "" {
 		t.Fatalf("expired local bucket not rolled over: %+v", first.Buckets)
 	}
-	entries, e := loadSnapshots(c.CachePath, "")
+	entries, e := loadSnapshots(c.CachePath)
 	if e != nil || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt < 299 || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt > 300 {
 		t.Fatalf("default rate-limit backoff not persisted: %+v %v", entries["grok"], e)
 	}
@@ -430,7 +434,7 @@ func TestSharedQuotaRateLimitHonoursRetryAfter(t *testing.T) {
 		return Observation{Error: "usage HTTP 429", ErrorKind: "rate_limited", RetryAfterS: 720}
 	})
 	collectShared(t, c)
-	entries, e := loadSnapshots(c.CachePath, "")
+	entries, e := loadSnapshots(c.CachePath)
 	if e != nil || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt < 719 || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt > 720 {
 		t.Fatalf("Retry-After backoff not persisted: %+v %v", entries["grok"], e)
 	}
@@ -546,18 +550,30 @@ func TestSharedQuotaIdentityBeforeMeasurement(t *testing.T) {
 		t.Fatal(e)
 	}
 	fp := fingerprint("codex-account", account)
-	c := Collector{Selectors: map[string]string{"CODEX_HOME": dir}, Config: Config{Quota: QuotaConfig{MeasurableAccounts: []string{"codex:" + fp}}}}
+	c := Collector{Selectors: map[string]string{"CODEX_HOME": dir}}
 	key, allowed := c.accountKey("codex")
 	if key != "codex:"+fp || !allowed {
 		t.Fatalf("%s %v", key, allowed)
 	}
 	c.Config.Quota.Accounts = map[string]string{"codex": "0123456789abcdef"}
 	key, allowed = c.accountKey("codex")
-	if allowed {
-		t.Fatal("different login allowed to measure configured account")
+	if key != "codex:"+fp || !allowed {
+		t.Fatalf("configured fingerprint overrode the login: %s %v", key, allowed)
 	}
 	if strings.Contains(key, account) {
 		t.Fatal("raw identity leaked")
+	}
+}
+func TestRefreshAccountNonDerivedPoolNeedsMeasurable(t *testing.T) {
+	f := &fakeHK{}
+	c := sharedCollector(t, f)
+	c.Config.Quota.MeasurableAccounts = nil
+	if _, err := c.RefreshAccount(context.Background(), sharedTestKey); err == nil || !strings.Contains(err.Error(), "may not measure") {
+		t.Fatalf("unlisted non-derived account refreshed: %v", err)
+	}
+	c.Config.Quota.MeasurableAccounts = []string{sharedTestKey}
+	if o, err := c.RefreshAccount(context.Background(), sharedTestKey); err != nil || o.Source != SourceHandoffkeep {
+		t.Fatalf("listed account not refreshed: %+v %v", o, err)
 	}
 }
 func TestSharedQuotaHTTPWire(t *testing.T) {

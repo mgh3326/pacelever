@@ -14,22 +14,22 @@ func isolate(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(base, "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(base, "cache"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(base, "data"))
-	for _, k := range []string{"PACELEVER_CONFIG", "PACELEVER_CACHE", "SCOPEFUEL_CACHE", "SCOPEFUEL_BENCH_DB"} {
+	for _, k := range []string{"PACELEVER_CONFIG", "PACELEVER_CACHE"} {
 		t.Setenv(k, "")
 	}
 }
-func TestConfigLegacy(t *testing.T) {
+func TestConfigPreviousPathLoadsWithWarning(t *testing.T) {
 	isolate(t)
-	legacy := filepath.Join(configBase(), "scopefuel", "config.toml")
+	previous := previousConfigPath()
 	b := []byte("[pools.retired]\nsubscribed = false\n[pools.claude]\nclass = 'preserve'\nuntil = 2027-01-01\nboost = 3\n[pools.codex]\nsubscribed = false\n[profiles.sonnet]\nsubscribed = true\n[bench]\nallow_plaintext_catalog = true\n[custom]\nretain = 'keep-me'\n")
-	if e := AtomicWrite(legacy, b); e != nil {
+	if e := AtomicWrite(previous, b); e != nil {
 		t.Fatal(e)
 	}
 	c, e := LoadConfig()
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(c.Warnings) != 1 || !strings.Contains(c.Warnings[0], "retired") {
+	if len(c.Warnings) != 2 || !strings.Contains(c.Warnings[0], "previous path") || !strings.Contains(c.Warnings[1], "retired") {
 		t.Fatal(c.Warnings)
 	}
 	if c.Pool("claude", testNow).Class != "preserve" {
@@ -44,13 +44,13 @@ func TestConfigLegacy(t *testing.T) {
 	}); e != nil {
 		t.Fatal(e)
 	}
-	after, _ := os.ReadFile(legacy)
+	after, _ := os.ReadFile(previous)
 	if string(after) != string(b) {
-		t.Fatal("legacy config changed")
+		t.Fatal("previous config changed")
 	}
 	c, e = LoadConfig()
-	if e != nil || c.Raw["custom"].(map[string]any)["retain"] != "keep-me" || c.PaceThreshold() != 1.5 {
-		t.Fatalf("config keys lost: %v", e)
+	if e != nil || c.Path != ConfigPath() || len(c.Warnings) != 1 || c.Raw["custom"].(map[string]any)["retain"] != "keep-me" || c.PaceThreshold() != 1.5 {
+		t.Fatalf("config keys lost or still on the previous path: %v %v", e, c.Warnings)
 	}
 }
 func TestConfigMalformedDoesNotLeak(t *testing.T) {
@@ -87,23 +87,23 @@ func TestCreditMaxAgeConfig(t *testing.T) {
 	}
 }
 
-func TestLegacyManualAuditPreserved(t *testing.T) {
+func TestManualStoreSchemaRenamedOnLoad(t *testing.T) {
 	isolate(t)
-	path := filepath.Join(filepath.Dir(legacyCachePath()), "manual.json")
+	path := filepath.Join(CacheDir(), "manual.json")
 	data := `{"schema":"scopefuel.manual.v1","latest":{"claude:5h":"old"},"history":[{"event":"set","manual_observation_id":"old","pool":"claude","window":"5h","used_pct":10,"measured_at":"2026-10-28T00:00:00Z","expires_at":"2026-10-28T01:00:00Z","account_ref":{"verification":"unverified","local_only":true},"execution_context":{"kind":"fixture"}}]}`
 	if e := AtomicWrite(path, []byte(data)); e != nil {
 		t.Fatal(e)
 	}
 	s, e := LoadManual()
-	if e != nil {
+	if e != nil || s.Schema != manualSchema {
+		t.Fatalf("store from the previous schema name: %q %v", s.Schema, e)
+	}
+	if e = WriteJSON(path, s); e != nil {
 		t.Fatal(e)
 	}
-	if e = WriteJSON(filepath.Join(CacheDir(), "manual.json"), s); e != nil {
-		t.Fatal(e)
-	}
-	after, _ := os.ReadFile(filepath.Join(CacheDir(), "manual.json"))
-	if !strings.Contains(string(after), "execution_context") || !strings.Contains(string(after), "account_ref") {
-		t.Fatal("legacy audit fields lost")
+	after, _ := os.ReadFile(path)
+	if !strings.Contains(string(after), `"schema": "`+manualSchema+`"`) || !strings.Contains(string(after), "execution_context") || !strings.Contains(string(after), "account_ref") {
+		t.Fatalf("audit fields or schema lost: %s", after)
 	}
 }
 

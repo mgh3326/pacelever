@@ -127,7 +127,8 @@ func TestGateAccountStaleSameAccountRefreshesThenAdmits(t *testing.T) {
 	key := devinHost(t, refreshOrg)
 	stale := &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: time.Now().Add(-time.Hour), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketAvailable}}
 	hk := &memoryHK{latest: pl.SharedLatest{Observation: stale}}
-	code, record, err := gateAccount(t, hk, []string{key}, "devin-swe2-medium", key)
+	// The host holds the account through its login; no allowlist is needed.
+	code, record, err := gateAccount(t, hk, nil, "devin-swe2-medium", key)
 	if err != nil || code != pl.Admitted || record["account_key"] != key {
 		t.Fatalf("code=%d err=%v record=%v", code, err, record)
 	}
@@ -158,8 +159,7 @@ func TestGateAccountStaleRefusedWhenHostCannotMeasure(t *testing.T) {
 		failWrite  bool
 		want       string
 	}{
-		{"not measurable here", nil, false, "may not measure"},
-		{"publish refused", []string{key}, true, "local refresh failed (shared_publish_failed)"},
+		{"publish refused", nil, true, "local refresh failed (shared_publish_failed)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hk := &memoryHK{failWrite: tc.failWrite}
@@ -210,6 +210,50 @@ func TestGateAccountMalformedReadingIsNotRefreshed(t *testing.T) {
 			code, record, err := gateAccount(t, hk, []string{key}, "devin-swe2-medium", key)
 			if err == nil || code != pl.Unmeasurable || record["ok"] == true || hk.leases != 0 || hk.published != 0 {
 				t.Fatalf("code=%d err=%v leases=%d published=%d", code, err, hk.leases, hk.published)
+			}
+		})
+	}
+}
+
+// presenceHK is memoryHK with a presence endpoint whose result is fixed.
+type presenceHK struct {
+	memoryHK
+	err  error
+	sent int
+}
+
+func (p *presenceHK) PublishPresence(context.Context, pl.PresenceRecord) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.sent++
+	return p.err
+}
+
+func TestRefreshFailsWhenPresenceIsNotPublished(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		code int
+	}{
+		{"published", nil, pl.Admitted},
+		{"refused", errors.New("refused"), pl.Unmeasurable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			devinHost(t, refreshOrg)
+			hk := &presenceHK{err: tc.err}
+			var out, errOut bytes.Buffer
+			var reported []error
+			app := App{Out: &out, Err: &errOut, Collector: pl.Collector{Shared: hk, CachePath: filepath.Join(t.TempDir(), "cache.json"), PublishFailed: func(err error) { reported = append(reported, err) }}}
+			v, err := parse([]string{"refresh", "devin"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			code, err := app.run(context.Background(), v)
+			if code != tc.code || hk.sent != 1 || hk.published != 1 || !strings.Contains(out.String(), `"id": "devin"`) {
+				t.Fatalf("code=%d err=%v presence=%d published=%d out=%s", code, err, hk.sent, hk.published, out.String())
+			}
+			if failed := tc.err != nil; failed != (err != nil) || failed != (len(reported) == 1) || len(reported) > 1 {
+				t.Fatalf("failure not reported: err=%v reported=%v", err, reported)
 			}
 		})
 	}
