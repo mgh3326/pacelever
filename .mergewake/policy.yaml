@@ -13,3 +13,7 @@ blocking:
     reason: Admission changes affect running work before a revert can land
   - paths: [.github/workflows/**, .mergewake/**]
     reason: Verification controls require operator review
+review_gate:
+  land: graded
+fast_lane:
+  max_changed_lines: 50
