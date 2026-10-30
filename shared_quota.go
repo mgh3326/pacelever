@@ -197,22 +197,6 @@ func (c Collector) accountKey(pool string) (string, bool) {
 	return key, false
 }
 
-// presenceHostID is stable per host and never the raw hostname when an explicit
-// identifier is absent. Precedence: environment, then quota.host_id, then a hash.
-func (q QuotaConfig) presenceHostID() string {
-	if v := strings.TrimSpace(FirstEnv("PACELEVER_HOST_ID", "HANDOFFKEEP_HOST_ID")); v != "" {
-		return safeHost(v)
-	}
-	if v := strings.TrimSpace(q.HostID); v != "" {
-		return safeHost(v)
-	}
-	host, _ := os.Hostname()
-	if host == "" {
-		return ""
-	}
-	return "host-" + fingerprint("host", host)
-}
-
 // PublishLog tracks asynchronous measurement publishes so the caller can wait
 // for them and report failures before exit instead of letting them go missing
 // silently.
@@ -220,6 +204,7 @@ type PublishLog struct {
 	wg   sync.WaitGroup
 	mu   sync.Mutex
 	errs []error
+	seen map[string]bool
 }
 
 func (l *PublishLog) start() {
@@ -238,6 +223,24 @@ func (l *PublishLog) add(err error) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.errs = append(l.errs, err)
+}
+
+// addOnce records err unless one with the same text is already recorded, so a
+// refusal that every account would repeat is reported once per run.
+func (l *PublishLog) addOnce(err error) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.seen[err.Error()] {
+		return
+	}
+	if l.seen == nil {
+		l.seen = map[string]bool{}
+	}
+	l.seen[err.Error()] = true
 	l.errs = append(l.errs, err)
 }
 
@@ -262,9 +265,8 @@ func (l *PublishLog) Errors() []error {
 // bounded, so it never adds latency to a collection or changes its verdict, but
 // it is tracked by PublishLog so the caller can wait for it and see its error.
 // onDone, when set, reports whether the publish succeeded.
-func (c Collector) publishPresence(source ObservationSource, key string, at time.Time, onDone func(bool)) {
+func (c Collector) publishPresence(source ObservationSource, host, key string, at time.Time, onDone func(bool)) {
 	publisher, ok := source.(PresenceSource)
-	host := c.Config.Quota.presenceHostID()
 	if !ok || !accountKeyRE.MatchString(key) || host == "" {
 		if onDone != nil {
 			onDone(false)
@@ -349,15 +351,16 @@ func (c Collector) maybePresence(source ObservationSource, key string, allowed b
 	if !allowed || o.Stale || o.Degraded || o.Source != SourceHandoffkeep {
 		return
 	}
-	host := c.Config.Quota.presenceHostID()
-	if host == "" {
+	host, err := c.Config.Quota.presenceHostID()
+	if err != nil {
+		c.PublishLog.addOnce(err)
 		return
 	}
 	ts, due := c.presenceDue(host, key, c.quotaNow())
 	if !due {
 		return
 	}
-	c.publishPresence(source, key, c.quotaNow(), func(ok bool) {
+	c.publishPresence(source, host, key, c.quotaNow(), func(ok bool) {
 		if !ok {
 			c.presenceUndo(host, key, ts)
 		}

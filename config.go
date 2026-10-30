@@ -49,6 +49,7 @@ type QuotaConfig struct {
 	URL                string             `toml:"url"`
 	CredentialEnv      string             `toml:"credential_env"`
 	HostID             string             `toml:"host_id"`
+	NodeEnv            string             `toml:"node_env"`
 	FreshTTLS          float64            `toml:"fresh_ttl_s"`
 	PoolFreshTTLS      map[string]float64 `toml:"pool_fresh_ttl_s"`
 	LeaseTTLS          int                `toml:"lease_ttl_s"`

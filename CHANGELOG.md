@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The presence host id is now the node's `HUB_MACHINE_ID`, read from the panewire
+  node env file (new `[quota] node_env`, default `~/.config/panewire/hub-node.env`).
+  `PACELEVER_HOST_ID`, `HANDOFFKEEP_HOST_ID` and `[quota] host_id` are accepted only
+  when equal to it; a mismatch refuses presence publishing. The hostname-hash
+  fallback is removed: with no node id nothing is published and one warning is
+  printed. Shared reads and measurement publishes are unchanged. (PL-1)
 - Removed every retired-tool trace: `SCOPEFUEL_*` environment aliases, the
   `SCOPEFUEL_CACHE` snapshot and bench SQLite fallbacks, and the legacy
   `/v1/documents/quota/*` publish path
