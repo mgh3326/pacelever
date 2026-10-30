@@ -2,9 +2,8 @@
 
 **Measure AI quota, choose model profiles, and admit work at a sustainable pace.**
 
-pacelever is a Go CLI and library for quota-aware AI work. It replaces scopefuel's
-core while keeping the command contract that spawners and quota collectors use.
-It supports Claude, Codex, Devin, Kimi, Grok, Kiro, ClinePass, Command Code and
+pacelever is a Go CLI and library for quota-aware AI work: spawners and quota
+collectors call its gate, launch and recommendation commands. It supports Claude, Codex, Devin, Kimi, Grok, Kiro, ClinePass, Command Code and
 Antigravity, plus manual observations for credit balances and unavailable probes.
 
 ```sh
@@ -25,9 +24,10 @@ CGO_ENABLED=0 go build -o dist/pacelever ./cmd/pacelever
 | 6 | Subscription disabled |
 
 An admitted gate writes a `profile=… pool=… used_pct=… class=…` first line to
-stdout. Refusals go to stderr. `--gate-output FILE` writes the compatible
-`scopefuel.gate.v1` audit record. `policy launch` emits the compatible JSON
-shape and returns 3 when resolution is refused.
+stdout. Refusals go to stderr. `--gate-output FILE` writes the
+`scopefuel.gate.v1` audit record; the schema name is a wire contract that
+runtug checks, so it stays until its consumers move together. `policy launch`
+emits the launch JSON and returns 3 when resolution is refused.
 
 Pace affects ordering and warnings, never admission eligibility. At a configurable
 weekly pace multiple of 1.2, alternatives from other pools move ahead of the
@@ -47,9 +47,9 @@ includes a `label` with profile, effort, `baseline|downshift`, and a nullable
 experiment ID. [Exploration and PR outcomes](docs/experiments.md) describes the
 policy, labels and outcome evidence.
 
-Existing `~/.config/scopefuel/config.toml`, JSON observations and read-only
-SQLite bench data are recognized automatically. New writes belong to pacelever.
-Unknown pool sections produce a warning. See [configuration](docs/config.md),
+Configuration lives in `~/.config/pacelever/config.toml`. For one release a
+host that has only the previous configuration file still loads it, with a
+warning to move it. Unknown pool sections produce a warning. See [configuration](docs/config.md),
 [design and migration](DESIGN.md), and [the CLI reference](docs/cli.md).
 
 The root package is importable without subprocesses:
@@ -76,11 +76,11 @@ arm64, plus `SHA256SUMS`. CI runs gofmt, vet, staticcheck, race tests, four cros
 probe tests. Development uses focused tests; `scripts/check.sh` is the final
 verification command. No external database server is needed.
 
-The compatibility suite records 59 installed-scopefuel gate cases and 56 launch
+The golden suite (`testdata/gate_golden.json`) records 59 gate cases and 56 launch
 cases, including 39 successful reference launch JSONs. Their existing fields remain
-identical; the new mandatory label is checked separately. Three credit builder-seat cases
-intentionally implement the newer seat rule. Regenerate only with the read-only
-fixture procedure in [DESIGN.md](DESIGN.md).
+identical; the mandatory label is checked separately. Three credit builder-seat cases
+intentionally implement the newer seat rule. The fixture is a compatibility
+contract: change it only together with the callers it describes.
 
 `.mergewake/policy.yaml` uses shadow mode (`enabled: false`). Landing, recovery,
 installation and service management are separate operator actions.

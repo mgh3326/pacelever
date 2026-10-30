@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
-	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -133,26 +134,32 @@ func TestRepWriteAheadRetry(t *testing.T) {
 		t.Fatalf("retry changed identity: %+v %v", ids, e)
 	}
 }
-func TestLegacyBenchReader(t *testing.T) {
-	isolate(t)
-	t.Setenv("SCOPEFUEL_BENCH_DB", "testdata/legacy_bench.sqlite3")
-	before, _ := os.ReadFile("testdata/legacy_bench.sqlite3")
-	rows, e := legacyRows("scores", false)
-	if e != nil || len(rows) != 1 || str(rows[0]["model_id"]) != "example-model" {
-		t.Fatalf("scores: %+v %v", rows, e)
-	}
-	rows, e = legacyRows("reps", false)
-	if e != nil || len(rows) != 1 {
-		t.Fatalf("reps: %+v %v", rows, e)
-	}
-	after, _ := os.ReadFile("testdata/legacy_bench.sqlite3")
-	if string(before) != string(after) {
-		t.Fatal("legacy database modified")
-	}
-}
 func TestBundledCatalogMonotonic(t *testing.T) {
 	if e := ValidateMonotonic(BundledCatalog().Rows); e != nil {
 		t.Fatal(e)
+	}
+}
+
+// A launch on a harness that takes an effort flag must carry a rung: runtug
+// refuses an empty effort for these seats ("canon launch data incomplete").
+// Devin-hosted profiles bill to other pools but take no effort.
+func TestBundledLaunchesCarryEffortWhereTheHarnessNeedsOne(t *testing.T) {
+	c := BundledCatalog()
+	pools := map[string]bool{}
+	for _, r := range c.Rows {
+		if r.RetiredAt == nil && !strings.HasPrefix(r.Profile, "devin-") {
+			pools[r.Profile] = pools[r.Profile] || r.Pool == "claude" || r.Pool == "codex" || r.Pool == "grok" || r.Pool == "kiro"
+		}
+	}
+	for _, profile := range slices.Sorted(maps.Keys(pools)) {
+		if !pools[profile] {
+			continue
+		}
+		// The consult seats launch only as a round-extension reviewer.
+		d, err := ResolveLaunch(c, Config{}, Request{Profile: profile, Role: "reviewer", Purpose: "round-extension", OperatorRequest: "hk:doc/round-ext/fixture"})
+		if err == nil && d.Effort == "" {
+			t.Errorf("%s launches without an effort", profile)
+		}
 	}
 }
 

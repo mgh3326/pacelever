@@ -40,22 +40,27 @@ type ManualStore struct {
 	Latest  map[string]string   `json:"latest"`
 }
 
+// manualSchema names the local manual store. Stores written before the
+// rename carry manualSchemaPrevious; they still load for one release and are
+// rewritten under manualSchema on the next save.
+const (
+	manualSchema         = "pacelever.manual.v1"
+	manualSchemaPrevious = "scopefuel.manual.v1"
+)
+
 func LoadManual() (ManualStore, error) {
 	var s ManualStore
-	p := filepath.Join(CacheDir(), "manual.json")
-	e := ReadJSON(p, &s)
+	e := ReadJSON(filepath.Join(CacheDir(), "manual.json"), &s)
 	if os.IsNotExist(e) {
-		e = ReadJSON(filepath.Join(filepath.Dir(legacyCachePath()), "manual.json"), &s)
-	}
-	if os.IsNotExist(e) {
-		return ManualStore{Schema: "scopefuel.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}, nil
+		return ManualStore{Schema: manualSchema, History: []ManualObservation{}, Latest: map[string]string{}}, nil
 	}
 	if e != nil {
 		return s, e
 	}
-	if (s.Schema != "scopefuel.manual.v1" && s.Schema != "pacelever.manual.v1") || s.Latest == nil || s.History == nil {
+	if (s.Schema != manualSchema && s.Schema != manualSchemaPrevious) || s.Latest == nil || s.History == nil {
 		return s, fmt.Errorf("invalid manual observation store")
 	}
+	s.Schema = manualSchema
 	return s, nil
 }
 func (s ManualStore) Valid(pool string, now time.Time) []ManualObservation {
@@ -222,7 +227,7 @@ func RequiredWindows(pool, plan string, manual bool) []string {
 	return nil
 }
 
-// Preserve legacy audit fields when copying history into the native store.
+// Preserve audit fields this version does not model when rewriting history.
 func (m *ManualObservation) UnmarshalJSON(data []byte) error {
 	type plain ManualObservation
 	var decoded plain

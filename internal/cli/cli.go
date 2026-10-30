@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	pl "github.com/mgh3326/pacelever"
@@ -60,6 +62,12 @@ func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader
 	}
 	app.Bench = pl.NewBenchClient(app.Config)
 	app.Collector = pl.Collector{Config: app.Config, Providers: pl.DefaultProvidersAt(app.Config, nil, app.Now), Now: app.Now, NoCache: a.flags["no-cache"]}
+	var reportMu sync.Mutex
+	app.Collector.PublishFailed = func(err error) {
+		reportMu.Lock()
+		defer reportMu.Unlock()
+		fmt.Fprintln(errOut, "warning:", err)
+	}
 	for k, p := range app.Collector.Providers {
 		if probe, ok := p.(pl.PTYProvider); ok {
 			probe.Guard = pl.GuardProcess
@@ -101,7 +109,7 @@ func (a *App) catalog(ctx context.Context) pl.Catalog {
 	return c
 }
 func request(a args) pl.Request {
-	return pl.Request{TaskID: a.get("task"), RequiredGrade: a.get("grade"), Profile: a.get("profile"), Effort: a.get("effort"), Role: a.get("role"), Purpose: a.get("purpose"), OperatorRequest: a.get("operator-request"), RequestedBy: a.get("requested-by"), PaceOverride: a.get("pace-override"), E6Arm: pl.FirstEnv("PACELEVER_E6_ARM", "SCOPEFUEL_E6_ARM"), Area: a.get("area")}
+	return pl.Request{TaskID: a.get("task"), RequiredGrade: a.get("grade"), Profile: a.get("profile"), Effort: a.get("effort"), Role: a.get("role"), Purpose: a.get("purpose"), OperatorRequest: a.get("operator-request"), RequestedBy: a.get("requested-by"), PaceOverride: a.get("pace-override"), E6Arm: pl.FirstEnv("PACELEVER_E6_ARM"), Area: a.get("area")}
 }
 func (a *App) localManual() (pl.ManualStore, error) {
 	if a.Config.Quota.URL != "" {
@@ -132,10 +140,7 @@ func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inpu
 	manual = a.Collector.ManualInputs(observations, manual)
 	now := a.now()
 	in := pl.Inputs{Catalog: c, Config: a.Config, Observations: observations, Manual: manual, Now: now, Inflight: map[string]*int{}, FreeLimit: pl.ActiveFreeLimit(now)}
-	for i, o := range in.Observations {
-		if a.Config.Quota.URL == "" && (o.Error != "" || o.Stale) {
-			in.Observations[i] = a.Bench.QuotaFallback(ctx, o, "")
-		}
+	for _, o := range in.Observations {
 		if len(a.Config.Pools[o.ID].InflightReservePct) > 0 {
 			fp := o.PublishFP
 			if fp == "" {
@@ -145,23 +150,8 @@ func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inpu
 			read := a.Bench.Inflight(ctx, o.ID, fp, local, e == nil)
 			in.Inflight[o.ID] = read.N
 			if e == nil && (o.AccountFPKind == pl.FPKindAccount || o.PublishFPKind == pl.FPKindAccount) {
-				_ = a.Bench.PublishInflight(ctx, o.ID, fp, local)
-			}
-		}
-	}
-	// Fusion lead billing uses the configured account independently of the
-	// host's default login, with the same peer-snapshot identity checks.
-	for _, r := range c.Rows {
-		if strings.HasPrefix(r.Profile, "devin-fusion-sol61") {
-			fp := a.Config.Pools[r.Pool].FusionBillingFP
-			if fp != "" && a.Config.Quota.URL == "" {
-				for i, o := range in.Observations {
-					if o.ID == r.Pool && o.PublishFP != fp && o.AccountFP != fp {
-						remote := a.Bench.QuotaFallback(ctx, o, fp)
-						if remote.Source == pl.SourceRemote {
-							in.Observations[i] = remote
-						}
-					}
+				if e = a.Bench.PublishInflight(ctx, o.ID, fp, local); e != nil {
+					fmt.Fprintf(a.Err, "warning: %s inflight publish failed: %v\n", o.ID, e)
 				}
 			}
 		}
@@ -189,17 +179,31 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 		}
 		ctx, cancel := context.WithTimeout(ctx, 50*time.Second)
 		defer cancel()
-		o, e := a.Collector.Refresh(ctx, pool)
+		// Publishing is part of a refresh: a failed presence record fails the
+		// command after the measurement is printed.
+		collector := a.Collector
+		var publishFailed atomic.Bool
+		report := collector.PublishFailed
+		collector.PublishFailed = func(err error) {
+			publishFailed.Store(true)
+			if report != nil {
+				report(err)
+			}
+		}
+		o, e := collector.Refresh(ctx, pool)
 		if e != nil {
 			return pl.Invalid, e
 		}
 		if o.Error != "" {
 			return pl.Unmeasurable, fmt.Errorf("%s", o.Error)
 		}
-		if a.Config.Quota.URL == "" {
-			_ = a.Bench.PublishQuota(ctx, o)
+		if e = a.json(o); e != nil {
+			return pl.Invalid, e
 		}
-		return 0, a.json(o)
+		if publishFailed.Load() {
+			return pl.Unmeasurable, fmt.Errorf("%s measured but not published", pool)
+		}
+		return 0, nil
 	case "observe":
 		pool := "devin"
 		if v.at(1) == "commandcode-limit" {
@@ -629,7 +633,6 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 		collector.TTL = time.Minute
 		if event.Credential != "default" {
 			collector.CachePath = filepath.Join(base, "snapshot-"+event.Provider+"-"+event.Credential+".json")
-			collector.LegacyCachePath = ""
 			collector.Providers = pl.DefaultProvidersAt(a.Config, event.Selectors, a.Now)
 			collector.Selectors = event.Selectors
 			for key, p := range collector.Providers {
@@ -660,7 +663,7 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 	if binary == "" {
 		binary = "herdr"
 	}
-	cmd := exec.CommandContext(ctx, binary, "pane", "report-metadata", "--source", "scopefuel.gauge", event.PaneID, "--token", "scopefuel_quota="+label, "--ttl-ms", "60000")
+	cmd := exec.CommandContext(ctx, binary, "pane", "report-metadata", "--source", "pacelever.gauge", event.PaneID, "--token", "pacelever_quota="+label, "--ttl-ms", "60000")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	return 0, cmd.Run()
