@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,7 @@ type fakeHK struct {
 	// presenceBlock holds the async publish open; presenceDone signals it ran.
 	presenceBlock chan struct{}
 	presenceDone  chan struct{}
+	presenceErr   error
 }
 
 func (f *fakeHK) PublishPresence(ctx context.Context, r PresenceRecord) error {
@@ -45,7 +47,7 @@ func (f *fakeHK) PublishPresence(ctx context.Context, r PresenceRecord) error {
 	if done != nil {
 		done <- struct{}{}
 	}
-	return nil
+	return f.presenceErr
 }
 
 func (f *fakeHK) Latest(ctx context.Context, key string) (SharedLatest, error) {
@@ -329,6 +331,55 @@ func TestPresencePublishDoesNotBlockCollection(t *testing.T) {
 	case <-f.presenceDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("presence never ran")
+	}
+}
+
+// The tracker holds the caller until a slow presence publish finishes, and
+// reports one that failed; a publish that lands reports nothing.
+func TestPublishTrackerWaitsForPresenceAndReportsFailure(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now())}, presenceBlock: make(chan struct{})}
+		if fail {
+			f.presenceErr = errors.New("offline")
+		}
+		c := sharedCollector(t, f)
+		c.Publishes = &PublishTracker{}
+		collectShared(t, c)
+		waited := make(chan []PublishFailure, 1)
+		go func() { waited <- c.Publishes.Wait() }()
+		select {
+		case <-waited:
+			t.Fatal("Wait returned before the presence publish finished")
+		case <-time.After(100 * time.Millisecond):
+		}
+		close(f.presenceBlock)
+		var got []PublishFailure
+		select {
+		case got = <-waited:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Wait never returned")
+		}
+		want := []PublishFailure(nil)
+		if fail {
+			want = []PublishFailure{{"grok", ErrKindPresencePublishFailed}}
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("fail=%v: failures %v, want %v", fail, got, want)
+		}
+	}
+}
+
+// A failed observation write is recorded as well as shown on the observation.
+func TestPublishTrackerRecordsObservationPublishFailure(t *testing.T) {
+	f := &fakeHK{fail: "publish"}
+	c := sharedCollector(t, f)
+	c.Publishes = &PublishTracker{}
+	if o := collectShared(t, c); o.ErrorKind != ErrKindSharedPublishFailed {
+		t.Fatalf("%+v", o)
+	}
+	got := c.Publishes.Wait()
+	if len(got) != 1 || got[0] != (PublishFailure{"grok", ErrKindSharedPublishFailed}) {
+		t.Fatalf("failures %v", got)
 	}
 }
 func TestSharedQuotaRereadAndReadOnly(t *testing.T) {

@@ -33,16 +33,17 @@ const (
 	ErrKindUnsubscribed  = "unsubscribed"   // pool is not subscribed
 
 	// Shared quota.
-	ErrKindAccountMismatch     = "account_mismatch"
-	ErrKindAccountUnknown      = "account_unknown"
-	ErrKindManualOnly          = "manual_only"
-	ErrKindProbeFailed         = "probe_failed"
-	ErrKindSharedFailed        = "shared_failed" // an in-flight shared measurement ended without a publication
-	ErrKindSharedPending       = "shared_pending"
-	ErrKindSharedPublishFailed = "shared_publish_failed"
-	ErrKindSharedReleaseFailed = "shared_release_failed"
-	ErrKindSharedUnavailable   = "shared_unavailable"
-	ErrKindSharedWait          = "shared_wait"
+	ErrKindAccountMismatch       = "account_mismatch"
+	ErrKindAccountUnknown        = "account_unknown"
+	ErrKindManualOnly            = "manual_only"
+	ErrKindPresencePublishFailed = "presence_publish_failed" // the presence record was not accepted
+	ErrKindProbeFailed           = "probe_failed"
+	ErrKindSharedFailed          = "shared_failed" // an in-flight shared measurement ended without a publication
+	ErrKindSharedPending         = "shared_pending"
+	ErrKindSharedPublishFailed   = "shared_publish_failed"
+	ErrKindSharedReleaseFailed   = "shared_release_failed"
+	ErrKindSharedUnavailable     = "shared_unavailable"
+	ErrKindSharedWait            = "shared_wait"
 )
 
 // Observation.Source values: where a reading came from.

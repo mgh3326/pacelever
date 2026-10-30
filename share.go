@@ -16,21 +16,6 @@ import (
 	"time"
 )
 
-type QuotaSnapshot struct {
-	Schema          string  `json:"schema"`
-	Pool            string  `json:"pool"`
-	AccountFP       string  `json:"account_fp"`
-	MeasuredAt      string  `json:"measured_at"`
-	MeasuredAtEpoch float64 `json:"measured_at_epoch"`
-	MeasuredBy      struct {
-		Host      string `json:"host"`
-		AccountFP string `json:"account_fp"`
-	} `json:"measured_by"`
-	Source  string   `json:"source"`
-	Plan    string   `json:"plan"`
-	Buckets []Bucket `json:"buckets"`
-}
-
 func safeHost(host string) string {
 	if !regexp.MustCompile(`^[A-Za-z0-9._-]+$`).MatchString(host) {
 		return "unknown"
@@ -49,65 +34,6 @@ func identity(o Observation) (string, string) {
 		return o.PublishFP, o.PublishFPKind
 	}
 	return o.AccountFP, o.AccountFPKind
-}
-func (b BenchClient) QuotaFallback(ctx context.Context, o Observation, declaredFP string) Observation {
-	if !quotaEnabled() || !b.remote("quota_share") {
-		return o
-	}
-	fp, kind := identity(o)
-	if declaredFP != "" {
-		fp = declaredFP
-		kind = FPKindAccount
-	}
-	if fp == "" || kind != FPKindAccount {
-		return o
-	}
-	var doc struct {
-		Document struct {
-			Body string `json:"body"`
-		} `json:"document"`
-	}
-	key := "quota/" + o.ID + "/" + fp + "/latest"
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if b.Send(ctx, "GET", "/v1/documents/"+url.PathEscape(key), "quota_share", nil, &doc) != nil {
-		return o
-	}
-	var v QuotaSnapshot
-	if json.Unmarshal([]byte(doc.Document.Body), &v) != nil || v.Schema != "scopefuel.quota-share.v1" || v.Pool != o.ID || v.AccountFP != fp {
-		return o
-	}
-	at, e := ParseTime(v.MeasuredAt)
-	if e != nil && v.MeasuredAtEpoch > 0 {
-		at = time.UnixMilli(int64(v.MeasuredAtEpoch * 1000))
-		e = nil
-	}
-	age := b.now().Sub(at).Seconds()
-	if e != nil || age < -60 || age > 900 || len(v.Buckets) == 0 {
-		return o
-	}
-	for _, bucket := range v.Buckets {
-		if !validPct(bucket.UsedPct) {
-			return o
-		}
-	}
-	return Observation{ID: o.ID, Plan: v.Plan, Buckets: v.Buckets, PoolClass: o.PoolClass, Source: SourceRemote, FetchedAt: float64(at.UnixMilli()) / 1000, AgeS: &age, AccountFP: fp, AccountFPKind: FPKindAccount, AccountFPMatch: ptr(true), PublishFP: fp, PublishFPKind: FPKindAccount}
-}
-func (b BenchClient) PublishQuota(ctx context.Context, o Observation) error {
-	if !quotaEnabled() || !b.remote("quota_share") || o.Error != "" || o.Stale || o.FetchedAt <= 0 {
-		return nil
-	}
-	fp, kind := identity(o)
-	if fp == "" || kind != FPKindAccount {
-		return nil
-	}
-	host, _ := os.Hostname()
-	v := QuotaSnapshot{Schema: "scopefuel.quota-share.v1", Pool: o.ID, AccountFP: fp, MeasuredAt: time.UnixMilli(int64(o.FetchedAt * 1000)).UTC().Format(time.RFC3339Nano), MeasuredAtEpoch: o.FetchedAt, Source: o.Source, Plan: o.Plan, Buckets: o.Buckets}
-	v.MeasuredBy.Host = safeHost(host)
-	v.MeasuredBy.AccountFP = fp
-	body, _ := json.Marshal(v)
-	key := "quota/" + o.ID + "/" + fp + "/latest"
-	return b.Send(ctx, "PUT", "/v1/documents/"+url.PathEscape(key), "quota_share", map[string]any{"key": key, "kind": "note", "session": "scopefuel-quota-share", "job": "", "body": string(body)}, nil)
 }
 
 type InflightJob struct {
