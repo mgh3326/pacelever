@@ -79,6 +79,12 @@ func TestRefreshFailsWhenPresencePublishIsRefused(t *testing.T) {
 	defer h.Close()
 	t.Setenv("QUOTA_TEST_CREDENTIAL", "fixture-token")
 	cfg := pl.Config{Bench: pl.BenchConfig{AllowPlaintextQuotaShare: true}, Quota: pl.QuotaConfig{URL: h.URL, CredentialEnv: "QUOTA_TEST_CREDENTIAL", HostID: "fixture-host", Accounts: map[string]string{"grok": "0123456789abcdef"}, MeasurableAccounts: []string{"grok:0123456789abcdef"}}}
+	// An inflight failure only warns; it is not a presence failure.
+	app := App{Err: &strings.Builder{}}
+	app.report(pl.MsgInflightPublishFailed)
+	if app.presenceFailed() != nil {
+		t.Fatal("an inflight failure failed refresh")
+	}
 	for _, tc := range []struct {
 		refuse bool
 		code   int

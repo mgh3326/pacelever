@@ -104,6 +104,17 @@ func TestPreviousManualStoreLoadsAndAuditPreserved(t *testing.T) {
 	if len(s.History) != 1 {
 		t.Fatalf("store at the previous path not loaded: %+v", s)
 	}
+	before, _ := os.ReadFile(path)
+	pct := 20.0
+	if _, e = AddManual(ManualObservation{Pool: "claude", Window: "5h", UsedPct: &pct, Reason: "fixture", MeasuredAt: testNow.Format(time.RFC3339)}, time.Hour, testNow); e != nil {
+		t.Fatal(e)
+	}
+	if after, _ := os.ReadFile(path); string(after) != string(before) {
+		t.Fatal("the previous manual store was rewritten")
+	}
+	if _, e = os.Stat(filepath.Join(CacheDir(), "manual.json")); e != nil {
+		t.Fatalf("the change did not go to the new path: %v", e)
+	}
 	if e = WriteJSON(filepath.Join(CacheDir(), "manual.json"), s); e != nil {
 		t.Fatal(e)
 	}

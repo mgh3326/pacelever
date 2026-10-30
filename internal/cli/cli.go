@@ -43,13 +43,18 @@ func (a *App) report(sentence string) {
 	a.failures = append(a.failures, sentence)
 	fmt.Fprintln(a.Err, "warning:", sentence)
 }
-func (a *App) publishFailed() error {
+
+// presenceFailed is the error for a refused presence publish, the one failure
+// that makes refresh itself fail; other failed publishes only warn.
+func (a *App) presenceFailed() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if len(a.failures) == 0 {
-		return nil
+	for _, f := range a.failures {
+		if f == pl.MsgPresencePublishFailed {
+			return fmt.Errorf("%s", f)
+		}
 	}
-	return fmt.Errorf("%s", a.failures[0])
+	return nil
 }
 
 func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader, version, commit string) int {
@@ -205,7 +210,7 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 		}
 		// refresh publishes: a presence record the store refused is a failed
 		// command, not a warning.
-		if e = a.publishFailed(); e != nil {
+		if e = a.presenceFailed(); e != nil {
 			return pl.Unmeasurable, e
 		}
 		return 0, nil
