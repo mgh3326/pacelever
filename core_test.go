@@ -206,3 +206,33 @@ func TestActiveFreeLimitReadsDamagedRecordsFromDisk(t *testing.T) {
 		t.Fatal("expired default hold still active")
 	}
 }
+
+// Fusion lead billing is judged on the configured billing account: an
+// observation from any other login fails closed instead of admitting.
+func TestFusionBillingAccountFailsClosed(t *testing.T) {
+	c := BundledCatalog()
+	c.Rows = []CatalogRow{{Profile: "devin-fusion-sol61", Effort: "high", ModelID: "fusion-model", Pool: "devin", Grade: "A", Gate: "default", Placed: true}}
+	obs := observation("devin", 10)
+	obs.AccountFP = "devin:0123456789abcdef"
+	in := Inputs{Catalog: c, Now: testNow, Observations: []Observation{obs}, Config: Config{Pools: map[string]PoolPolicy{"devin": {}}}}
+	for name, fp := range map[string]string{"unset": "", "other-account": "devin:fedcba9876543210"} {
+		in.Config.Pools["devin"] = PoolPolicy{FusionBillingFP: fp}
+		d := Gate(in, Request{Profile: "devin-fusion-sol61"})
+		if d.ExitCode != Unmeasurable || d.Reason != "fusion_billing_account_unavailable" {
+			t.Fatalf("%s: %+v", name, d)
+		}
+	}
+	in.Config.Pools["devin"] = PoolPolicy{FusionBillingFP: obs.AccountFP}
+	if d := Gate(in, Request{Profile: "devin-fusion-sol61"}); d.Reason == "fusion_billing_account_unavailable" {
+		t.Fatalf("matching billing account refused: %+v", d)
+	}
+}
+
+// A consult launch of fable without an effort carries the catalog default rung;
+// the golden fixture only records the ungated (blocked) requests.
+func TestFableLaunchDefaultsToHigh(t *testing.T) {
+	d, e := ResolveLaunch(BundledCatalog(), Config{}, Request{Profile: "fable", OperatorRequest: "hk:task/1"})
+	if e != nil || d.Effort != "high" || d.ModelID != "claude-fable-5-1" {
+		t.Fatalf("fable default launch: %+v %v", d, e)
+	}
+}

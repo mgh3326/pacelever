@@ -80,7 +80,7 @@ func envPath(key, fallback string) string {
 }
 
 // FirstEnv is the first non-blank variable among keys, trimmed. Callers list
-// the pacelever name before its legacy scopefuel or handoffkeep alias.
+// the pacelever name before an accepted alias.
 func FirstEnv(keys ...string) string {
 	for _, k := range keys {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
@@ -107,20 +107,21 @@ func CachePath() string {
 	}
 	return filepath.Join(CacheDir(), "snapshots.json")
 }
-func legacyCachePath() string {
-	if p := os.Getenv("SCOPEFUEL_CACHE"); p != "" {
-		return p
-	}
-	return filepath.Join(cacheBase(), "scopefuel", "snapshots.json")
-}
 func LoadConfig() (Config, error) {
 	path := ConfigPath()
 	b, e := os.ReadFile(path)
+	legacy := ""
 	if os.IsNotExist(e) && os.Getenv("PACELEVER_CONFIG") == "" {
-		path = filepath.Join(configBase(), "scopefuel", "config.toml")
-		b, e = os.ReadFile(path)
+		// One release: a pre-existing scopefuel config still loads so an upgrade
+		// never silently drops pool and quota policy. Reads only; edits always
+		// write the pacelever file.
+		legacy = filepath.Join(configBase(), "scopefuel", "config.toml")
+		b, e = os.ReadFile(legacy)
 	}
 	c := Config{Pools: map[string]PoolPolicy{}, Profiles: map[string]ProfilePolicy{}, Settings: map[string]float64{}, Raw: map[string]any{}, Path: path}
+	if legacy != "" && e == nil {
+		c.Warnings = append(c.Warnings, "legacy scopefuel config.toml is still in use; move it to "+path)
+	}
 	if os.IsNotExist(e) {
 		return c, nil
 	}
@@ -236,8 +237,7 @@ func (c Config) CreditMaxAge(pool string) time.Duration {
 	return 72 * time.Hour
 }
 
-// EditConfig preserves all unrecognized sections and keys. Legacy input is copied
-// into the pacelever config; the scopefuel file is never changed.
+// EditConfig preserves all unrecognized sections and keys.
 func EditConfig(edit func(map[string]any) error) error {
 	return WithFileLock(ConfigPath()+".lock", false, func() error {
 		c, e := LoadConfig()

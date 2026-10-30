@@ -141,7 +141,12 @@ func (b BenchClient) RetryRep(ctx context.Context, r Rep) (Rep, error) {
 }
 func (b BenchClient) ReadReps(ctx context.Context, profile string) ([]Rep, string, error) {
 	raw, source, e := b.ReadRows(ctx, "reps")
-	if e != nil && source != BenchLocal {
+	if e != nil && b.localOnly("reps") {
+		// No remote was configured, so nothing was fetched and nothing failed:
+		// the local reps are the whole answer.
+		raw, source, e = nil, BenchLocal, nil
+	}
+	if e != nil {
 		return nil, source, e
 	}
 	var rows []Rep
@@ -153,8 +158,10 @@ func (b BenchClient) ReadReps(ctx context.Context, profile string) ([]Rep, strin
 		if json.Unmarshal(data, &r) != nil {
 			return nil, source, fmt.Errorf("invalid rep field types")
 		}
+		// A stored or foreign record whose outcome fields fail validation
+		// stays listed; it is marked pending instead of blocking the read.
 		if err := HydrateRepOutcomes(&r); err != nil {
-			return nil, source, err
+			r.Pending = true
 		}
 
 		if profile == "" || r.Profile == profile {
@@ -168,7 +175,7 @@ func (b BenchClient) ReadReps(ctx context.Context, profile string) ([]Rep, strin
 	}
 	for _, r := range local {
 		if err := HydrateRepOutcomes(&r); err != nil {
-			return nil, source, err
+			r.Pending = true
 		}
 		if profile != "" && r.Profile != profile {
 			continue
@@ -176,14 +183,14 @@ func (b BenchClient) ReadReps(ctx context.Context, profile string) ([]Rep, strin
 		if r.ID > 0 && seen[fmt.Sprintf("%d", r.ID)] {
 			continue
 		}
-		r.Pending = r.ID == 0 && b.remote("reps")
+		r.Pending = r.Pending || r.ID == 0 && b.remote("reps")
 		rows = append(rows, r)
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].RecordedAt > rows[j].RecordedAt })
 	if len(raw) >= 5000 && source != BenchLocal {
 		source += "-truncated"
 	}
-	return rows, source, e
+	return rows, source, nil
 }
 func RepRef(r Rep) string {
 	if r.LocalID > 0 {

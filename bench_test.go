@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -133,21 +132,48 @@ func TestRepWriteAheadRetry(t *testing.T) {
 		t.Fatalf("retry changed identity: %+v %v", ids, e)
 	}
 }
-func TestLegacyBenchReader(t *testing.T) {
+
+// A stored or foreign rep whose outcome fields fail validation is listed as
+// pending instead of refusing the whole listing.
+func TestRepsListToleratesInvalidStoredOutcome(t *testing.T) {
 	isolate(t)
-	t.Setenv("SCOPEFUEL_BENCH_DB", "testdata/legacy_bench.sqlite3")
-	before, _ := os.ReadFile("testdata/legacy_bench.sqlite3")
-	rows, e := legacyRows("scores", false)
-	if e != nil || len(rows) != 1 || str(rows[0]["model_id"]) != "example-model" {
-		t.Fatalf("scores: %+v %v", rows, e)
+	good := Rep{LocalID: 1, Profile: "sonnet", ModelID: "model-a", TaskRef: "task-a", Notes: `{"experiment_arm":"downshift","experiment_id":"e-1"}`, RecordedAt: testNow.Format(time.RFC3339)}
+	bad := Rep{LocalID: 2, Profile: "sonnet", ModelID: "model-a", TaskRef: "task-b", Notes: `{"experiment_arm":"control"}`, RecordedAt: testNow.Add(time.Minute).Format(time.RFC3339)}
+	if e := WriteJSON(repsPath(), []Rep{good, bad}); e != nil {
+		t.Fatal(e)
 	}
-	rows, e = legacyRows("reps", false)
-	if e != nil || len(rows) != 1 {
-		t.Fatalf("reps: %+v %v", rows, e)
+	rows, source, e := (BenchClient{}).ReadReps(context.Background(), "")
+	if e != nil || source != BenchLocal || len(rows) != 2 {
+		t.Fatalf("stored outcome blocked listing: %v %q %+v", e, source, rows)
 	}
-	after, _ := os.ReadFile("testdata/legacy_bench.sqlite3")
-	if string(before) != string(after) {
-		t.Fatal("legacy database modified")
+	for _, r := range rows {
+		wantPending := r.LocalID == 2
+		if r.Pending != wantPending {
+			t.Fatalf("pending mismatch: %+v", r)
+		}
+	}
+}
+
+// With no remote configured nothing was read, so ReadRows reports no usable
+// source with its error; ReadReps answers from the local reps alone, and a
+// configured handoffkeep backend that is unreachable stays an error.
+func TestBenchSourceMatchesError(t *testing.T) {
+	isolate(t)
+	rows, source, e := (BenchClient{}).ReadRows(context.Background(), "reps")
+	if e == nil || source != BenchUnavailable || rows != nil {
+		t.Fatalf("no backend: %v %q %+v", e, source, rows)
+	}
+	if ex, e := (BenchClient{}).ReadAreaExceptions(context.Background()); e != nil || ex != nil {
+		t.Fatalf("local-only area exceptions: %v %+v", e, ex)
+	}
+	var cfg Config
+	cfg.Bench.Backend = "handoffkeep"
+	if _, e = (BenchClient{Config: cfg}).ReadAreaExceptions(context.Background()); e == nil {
+		t.Fatal("unreachable handoffkeep area exceptions read as empty")
+	}
+	_, source, e = (BenchClient{Config: cfg}).ReadReps(context.Background(), "")
+	if e == nil || source != BenchUnavailable {
+		t.Fatalf("unreachable handoffkeep: %v %q", e, source)
 	}
 }
 func TestBundledCatalogMonotonic(t *testing.T) {

@@ -339,7 +339,7 @@ func gate(in Inputs, req Request) Decision {
 	if len(policy.InflightReservePct) > 0 {
 		count := in.Inflight[row.Pool]
 		if count == nil {
-			d.Inflight = "inflight=unknown(local|remote)"
+			d.Inflight = "inflight=unknown(local)"
 		} else {
 			d.Inflight = fmt.Sprintf("inflight=%d", *count)
 			for _, b := range buckets {

@@ -234,7 +234,7 @@ func (in Inputs) creditGate(d Decision, now time.Time) (Decision, bool) {
 	if len(policy.InflightReservePct) > 0 {
 		count := in.Inflight[d.ProviderID]
 		if count == nil {
-			d.Inflight = "inflight=unknown(local|remote)"
+			d.Inflight = "inflight=unknown(local)"
 		} else {
 			d.Inflight = fmt.Sprintf("inflight=%d", *count)
 			if reserve := policy.InflightReservePct["credit"]; reserve > 0 && st.UsedPct != nil && *st.UsedPct+float64(*count)*reserve >= cutoff {

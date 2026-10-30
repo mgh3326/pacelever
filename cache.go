@@ -23,59 +23,50 @@ type CacheEntry struct {
 	LastError     *Observation `json:"last_error,omitempty"`
 	LastErrorAt   float64      `json:"last_error_at,omitempty"`
 	NegativeUntil float64      `json:"negative_until,omitempty"`
-	// legacy marks an entry imported from the scopefuel cache. Its negative
-	// state must not block a pool pacelever measures with its own provider.
-	legacy bool
 }
 type Collector struct {
-	Shared          ObservationSource
-	Selectors       map[string]string
-	CachePath       string
-	LegacyCachePath string
-	Config          Config
-	Providers       map[string]Provider
-	Now             func() time.Time
-	TTL             time.Duration
-	NoCache         bool
+	Shared    ObservationSource
+	Selectors map[string]string
+	CachePath string
+	Config    Config
+	Providers map[string]Provider
+	Now       func() time.Time
+	TTL       time.Duration
+	NoCache   bool
+	// PublishLog collects publish failures so the caller can report them
+	// before exit; nil keeps failures off the record.
+	PublishLog *PublishLog
 }
 
 func LoadSnapshots() (map[string]CacheEntry, error) {
-	return loadSnapshots(CachePath(), legacyCachePath())
+	return loadSnapshots(CachePath())
 }
-func loadSnapshots(ownPath, legacyPath string) (map[string]CacheEntry, error) {
+func loadSnapshots(ownPath string) (map[string]CacheEntry, error) {
 	merged := map[string]CacheEntry{}
-	for i, path := range []string{legacyPath, ownPath} {
-		if path == "" {
+	if ownPath == "" {
+		return merged, nil
+	}
+	var raw map[string]json.RawMessage
+	if e := ReadJSON(ownPath, &raw); e != nil {
+		if os.IsNotExist(e) {
+			return merged, nil
+		}
+		return nil, e
+	}
+	for pool, data := range raw {
+		if !knownPool(pool) {
 			continue
 		}
-		var raw map[string]json.RawMessage
-		if e := ReadJSON(path, &raw); e != nil {
-			if os.IsNotExist(e) {
-				continue
-			}
-			return nil, e
+		var entry CacheEntry
+		if e := json.Unmarshal(data, &entry); e != nil {
+			return nil, fmt.Errorf("invalid cache entry for pool %s", pool)
 		}
-		for pool, data := range raw {
-			if !knownPool(pool) {
-				continue
-			}
-			var entry CacheEntry
-			if e := json.Unmarshal(data, &entry); e != nil {
-				return nil, fmt.Errorf("invalid cache entry for pool %s", pool)
-			}
-			previous := merged[pool]
-			if entry.FetchedAt <= 0 && previous.FetchedAt > 0 {
-				entry.FetchedAt = previous.FetchedAt
-				entry.Result = previous.Result
-			}
-			entry.legacy = i == 0
-			merged[pool] = entry
-		}
+		merged[pool] = entry
 	}
 	return merged, nil
 }
 
-// Legacy scopefuel records failed-probe text as a string; native entries may
+// Imported snapshots may record failed-probe text as a string; native entries
 // carry a structured observation. Both forms preserve the last good snapshot.
 func (c *CacheEntry) UnmarshalJSON(data []byte) error {
 	type plain CacheEntry
@@ -159,12 +150,11 @@ func ttlFor(pool string) time.Duration {
 	return 60 * time.Second
 }
 func (c Collector) Collect(ctx context.Context, pools []string) ([]Observation, error) {
-	own, legacy := c.CachePath, c.LegacyCachePath
+	own := c.CachePath
 	if own == "" {
 		own = CachePath()
-		legacy = legacyCachePath()
 	}
-	entries, e := loadSnapshots(own, legacy)
+	entries, e := loadSnapshots(own)
 	if e != nil {
 		if c.sharedSource() == nil {
 			return nil, e
@@ -249,9 +239,7 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		return o
 	}
 	provider := c.Providers[pool]
-	// A legacy scopefuel backoff describes scopefuel's own probe, not
-	// pacelever's; a pool with a native provider fetches through it anyway.
-	if entry.NegativeUntil > float64(now.UnixMilli())/1000 && !(entry.legacy && provider != nil) {
+	if entry.NegativeUntil > float64(now.UnixMilli())/1000 {
 		kind := ErrKindBackoff
 		if entry.LastError != nil && entry.LastError.ErrorKind != "" {
 			kind = entry.LastError.ErrorKind

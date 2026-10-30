@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -166,26 +167,34 @@ func sameOrigin(a, b string) bool {
 	return oa != "" && oa == origin(b)
 }
 
+// accountKey resolves the shared account this host may measure. Pools with a
+// derivable login (claude, codex, devin) take their key from the local
+// credential; a configured fingerprint for them is ignored, so a stale or
+// mismatched entry never blocks measurement, presence or publish. Other pools
+// use the configured fingerprint and may measure only when the key is listed
+// in measurable_accounts.
 func (c Collector) accountKey(pool string) (string, bool) {
-	local := localAccountFP(pool, c.Selectors)
-	fp := c.Config.Quota.Accounts[pool]
-	if fp == "" {
-		fp = local
+	if local := localAccountFP(pool, c.Selectors); local != "" {
+		if !accountFPRE.MatchString(local) {
+			return "", false
+		}
+		return pool + ":" + local, true
 	}
+	switch pool {
+	case "claude", "codex", "devin":
+		return "", false
+	}
+	fp := c.Config.Quota.Accounts[pool]
 	if !accountFPRE.MatchString(fp) {
 		return "", false
 	}
 	key := pool + ":" + fp
-	allowed := false
 	for _, v := range c.Config.Quota.MeasurableAccounts {
 		if v == key {
-			allowed = true
+			return key, true
 		}
 	}
-	if (pool == "claude" || pool == "codex" || pool == "devin") && local != fp {
-		allowed = false
-	}
-	return key, allowed
+	return key, false
 }
 
 // presenceHostID is stable per host and never the raw hostname when an explicit
@@ -204,8 +213,54 @@ func (q QuotaConfig) presenceHostID() string {
 	return "host-" + fingerprint("host", host)
 }
 
+// PublishLog tracks asynchronous measurement publishes so the caller can wait
+// for them and report failures before exit instead of letting them go missing
+// silently.
+type PublishLog struct {
+	wg   sync.WaitGroup
+	mu   sync.Mutex
+	errs []error
+}
+
+func (l *PublishLog) start() {
+	if l != nil {
+		l.wg.Add(1)
+	}
+}
+func (l *PublishLog) done() {
+	if l != nil {
+		l.wg.Done()
+	}
+}
+func (l *PublishLog) add(err error) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.errs = append(l.errs, err)
+}
+
+// Wait blocks until every tracked publish has finished.
+func (l *PublishLog) Wait() {
+	if l != nil {
+		l.wg.Wait()
+	}
+}
+
+// Errors returns the recorded failures in arrival order.
+func (l *PublishLog) Errors() []error {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]error(nil), l.errs...)
+}
+
 // publishPresence records where an account was measured. It is asynchronous and
-// bounded, so it never adds latency to a collection or changes its verdict.
+// bounded, so it never adds latency to a collection or changes its verdict, but
+// it is tracked by PublishLog so the caller can wait for it and see its error.
 // onDone, when set, reports whether the publish succeeded.
 func (c Collector) publishPresence(source ObservationSource, key string, at time.Time, onDone func(bool)) {
 	publisher, ok := source.(PresenceSource)
@@ -217,10 +272,15 @@ func (c Collector) publishPresence(source ObservationSource, key string, at time
 		return
 	}
 	record := PresenceRecord{HostID: host, AccountKey: key, LastSeen: at}
+	c.PublishLog.start()
 	go func() {
+		defer c.PublishLog.done()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		err := publisher.PublishPresence(ctx, record)
+		if err != nil {
+			c.PublishLog.add(fmt.Errorf("presence publish failed for %s: %w", key, err))
+		}
 		if onDone != nil {
 			onDone(err == nil)
 		}
@@ -542,10 +602,10 @@ func (c Collector) quotaNow() time.Time { return ClockNow(c.Now) }
 
 // ClaudeBar keeps a rate limiter per account: a 429 suppresses another fetch
 // for Retry-After (or a five-minute default), while the last good reading stays
-// available as stale evidence. A legacy scopefuel backoff does not transfer to
-// shared mode because it was not recorded against this account key.
+// available as stale evidence. A backoff recorded against another account key
+// does not apply here.
 func sharedRateLimitBackoffActive(entry CacheEntry, pool, key string, now time.Time) bool {
-	if entry.legacy || entry.NegativeUntil <= float64(now.UnixMilli())/1000 || entry.LastError == nil || entry.LastError.ErrorKind != ErrKindRateLimited {
+	if entry.NegativeUntil <= float64(now.UnixMilli())/1000 || entry.LastError == nil || entry.LastError.ErrorKind != ErrKindRateLimited {
 		return false
 	}
 	fp, kind := identity(*entry.LastError)
@@ -724,9 +784,6 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		return finish(fail(ErrKindAccountMismatch))
 	}
 	if pool == "devin" {
-		if localAccountFP(pool, c.Selectors) != accountKeyFP(key) {
-			return finish(fail(ErrKindAccountMismatch))
-		}
 		// The free bucket is unmeasurable and independent of paid-credit
 		// probes. A failed probe contributes no paid percentage or plan.
 		if observed.Error != "" || observed.Warning != "" || observed.Stale {
