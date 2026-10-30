@@ -37,6 +37,7 @@ const (
 	ErrKindAccountUnknown      = "account_unknown"
 	ErrKindManualOnly          = "manual_only"
 	ErrKindProbeFailed         = "probe_failed"
+	ErrKindSharedFailed        = "shared_failed" // an in-flight shared measurement ended without a publication
 	ErrKindSharedPending       = "shared_pending"
 	ErrKindSharedPublishFailed = "shared_publish_failed"
 	ErrKindSharedReleaseFailed = "shared_release_failed"

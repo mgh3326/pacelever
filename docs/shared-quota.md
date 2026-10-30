@@ -134,9 +134,17 @@ Failure signatures:
 Every collection reads hk first, including `refresh` and `--no-cache`. A fresh
 shared observation bypasses local cache and probing. Stale/missing data causes
 an eligible host to acquire a short lease, re-read, probe within the lease
-budget, publish, and release. Other hosts wait briefly and read again. No host
-probes independently during an hk outage. Lease expiry permits takeover; hk
-fences a late publisher. There are no new workers or persistent processes.
+budget, publish, and release. A measuring host that loses the race waits for
+the in-flight publisher until that holder's lease expires; an expired window
+means the publication failed, so the host takes the slot over once and
+measures itself. Read-only hosts wait briefly and read again. The report is
+`shared_pending` while a publisher is still inside its lease window,
+`shared_failed` when a window closed without a publication, and
+`shared_unavailable` when hk itself cannot be reached. A holder that fails to
+measure or publish releases the lease before returning, so no lease is held
+across a failed measurement. No host probes independently during an hk
+outage. Lease expiry permits takeover; hk fences a late publisher. There are
+no new workers or persistent processes.
 
 A same-account local snapshot is used when hk calls fail, and also when hk is
 reachable but has no usable observation and the local probe is rate-limited or

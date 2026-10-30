@@ -605,9 +605,13 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		return finish(o)
 	}
 	backingOff := sharedRateLimitBackoffActive(entry, pool, key, c.quotaNow())
-	// Read-only hosts also wait briefly for an in-flight publisher.
+	// A measuring host that loses the lease waits for the in-flight publisher
+	// until that holder's lease expires, then takes over the expired slot once:
+	// a failed or killed publication never strands the account on "pending".
+	// Read-only hosts keep the short wait and re-read.
 	holder := ""
-	if allowed && (!backingOff || pool == "devin") {
+	publisherGone := false
+	for attempts := 0; attempts < 2 && holder == "" && allowed && (!backingOff || pool == "devin"); attempts++ {
 		holder, err = holderToken()
 		if err != nil {
 			return fail(ErrKindSharedUnavailable)
@@ -617,8 +621,48 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 			reachable = false
 			return fail(ErrKindSharedUnavailable)
 		}
+		publisherGone = false
+		waitedOut := false
+		// Wall clock pacing: each window ends at the holder's lease expiry and
+		// the whole wait is bounded by ctx and by two lease windows, so the
+		// loop terminates even if the server keeps reporting new contention.
+		deadline := time.Now().Add(2 * time.Duration(c.Config.Quota.leaseTTL()) * time.Second)
+		for !lease.Acquired || lease.Holder != holder {
+			if !lease.ExpiresAt.After(time.Now()) {
+				publisherGone = true
+				break
+			}
+			if time.Now().After(deadline) {
+				waitedOut = true
+				break
+			}
+			wait := c.Config.Quota.waitTime()
+			if rem := time.Until(lease.ExpiresAt); rem < wait {
+				wait = rem
+			}
+			if waitQuota(ctx, wait) != nil {
+				return fail(ErrKindSharedWait)
+			}
+			latest, err = source.Latest(ctx, key)
+			if err != nil {
+				reachable = false
+				return fail(ErrKindSharedUnavailable)
+			}
+			if o, ok := fresh(); ok {
+				return finish(o)
+			}
+			// A holder that finishes or fails early releases its lease;
+			// retrying each poll ends the wait on release, not on expiry. A
+			// failed retry keeps the wait on the last seen expiry.
+			if retry, e := source.Lease(ctx, key, holder, c.Config.Quota.leaseTTL()); e == nil {
+				lease = retry
+			}
+		}
 		if !lease.Acquired || lease.Holder != holder {
 			holder = ""
+		}
+		if waitedOut {
+			break
 		}
 	}
 	if holder == "" {
@@ -635,6 +679,9 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		}
 		if backingOff {
 			return finish(failWith(ErrKindRateLimited, "provider backoff active"))
+		}
+		if publisherGone {
+			return finish(failWith(ErrKindSharedFailed, "shared measurement failed"))
 		}
 		return finish(fail(ErrKindSharedPending))
 	}
