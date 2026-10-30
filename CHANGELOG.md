@@ -13,6 +13,10 @@
   (claude, codex, devin); `measurable_accounts` now gates only pools that
   cannot derive a login, and a configured fingerprint that disagrees with the
   login never blocks measurement, presence or publish.
+- Fusion lead billing (`devin-fusion-sol61*`) is judged on this host's own
+  measurement: the gate admits only when the observation's account matches
+  `fusion_billing_fp`, otherwise it exits 4 (`fusion_billing_account_unavailable`).
+  It no longer fetches the billing account's reading from the shared store.
 - Presence publishes are tracked by `PublishLog`; the CLI waits for them before
   exiting and reports failures on stderr.
 - `reps list` tolerates stored or foreign records whose outcome fields fail
