@@ -136,9 +136,11 @@ New state lives under `$XDG_CACHE_HOME/pacelever` (default `~/.cache/pacelever`)
 snapshot/manual/limit files are read as a fallback. Native snapshot entries win.
 Historical bench data is read from `$XDG_DATA_HOME/scopefuel/bench.db`; the default
 is `~/.local/share/scopefuel/bench.db`. `PACELEVER_BENCH_DB` can select a read-only
-copy. For one release `SCOPEFUEL_BENCH_DB` and `SCOPEFUEL_CACHE` are still honored
-as read-only overrides, and `SCOPEFUEL_QUOTA_SHARE` still opts out of sharing, so a
-running host keeps its history, evidence and opt-out. No database server, SQL service or CGO driver is required.
+copy. For one release every retired `SCOPEFUEL_*` override is still read after its
+`PACELEVER_*` name: the provider binary and auth paths, `SCOPEFUEL_STALE_WARN`,
+`SCOPEFUEL_QUOTA_SHARE` (an opt-out), `SCOPEFUEL_E6_ARM`, `SCOPEFUEL_CACHE` and
+`SCOPEFUEL_BENCH_DB` (read-only), so a running host keeps its settings, evidence and
+history. No database server, SQL service or CGO driver is required.
 
 New files use mode 0600, atomic rename and stable kernel-lock inodes. A killed
 owner releases its lock. Provider errors retain the last successful snapshot and
