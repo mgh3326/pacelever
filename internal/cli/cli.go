@@ -628,7 +628,9 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 	if binary == "" {
 		binary = "herdr"
 	}
-	cmd := exec.CommandContext(ctx, binary, "pane", "report-metadata", "--source", "pacelever.gauge", event.PaneID, "--token", "pacelever_quota="+label, "--ttl-ms", "60000")
+	// The gauge source/token names are the herdr pane-metadata wire contract
+	// other tools match on; like the stdout schema names they stay verbatim.
+	cmd := exec.CommandContext(ctx, binary, "pane", "report-metadata", "--source", "scopefuel.gauge", event.PaneID, "--token", "scopefuel_quota="+label, "--ttl-ms", "60000")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	return 0, cmd.Run()
