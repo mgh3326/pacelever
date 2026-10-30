@@ -89,8 +89,10 @@ func TestCreditMaxAgeConfig(t *testing.T) {
 
 func TestManualAuditFieldsPreserved(t *testing.T) {
 	isolate(t)
-	path := filepath.Join(CacheDir(), "manual.json")
 	data := `{"schema":"scopefuel.manual.v1","latest":{"claude:5h":"old"},"history":[{"event":"set","manual_observation_id":"old","pool":"claude","window":"5h","used_pct":10,"measured_at":"2026-10-28T00:00:00Z","expires_at":"2026-10-28T01:00:00Z","account_ref":{"verification":"unverified","local_only":true},"execution_context":{"kind":"fixture"}}]}`
+	// Grace path 1: a store the current release wrote under the retired schema
+	// name at the pacelever path.
+	path := filepath.Join(CacheDir(), "manual.json")
 	if e := AtomicWrite(path, []byte(data)); e != nil {
 		t.Fatal(e)
 	}
@@ -98,12 +100,40 @@ func TestManualAuditFieldsPreserved(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if e = WriteJSON(filepath.Join(CacheDir(), "manual.json"), s); e != nil {
+	if e = WriteJSON(path, s); e != nil {
 		t.Fatal(e)
 	}
-	after, _ := os.ReadFile(filepath.Join(CacheDir(), "manual.json"))
+	after, _ := os.ReadFile(path)
 	if !strings.Contains(string(after), "execution_context") || !strings.Contains(string(after), "account_ref") {
 		t.Fatal("legacy audit fields lost")
+	}
+	// Grace path 2: a host whose only store still lives at the retired cache
+	// path reads it; the next save lands in the pacelever file and leaves the
+	// old file untouched.
+	isolate(t)
+	legacy := filepath.Join(cacheBase(), "scopefuel", "manual.json")
+	path = filepath.Join(CacheDir(), "manual.json")
+	if e := AtomicWrite(legacy, []byte(data)); e != nil {
+		t.Fatal(e)
+	}
+	s, e = LoadManual()
+	if e != nil || s.Latest["claude:5h"] != "old" {
+		t.Fatalf("retired-path store not loaded: %+v %v", s, e)
+	}
+	if e = WriteJSON(path, s); e != nil {
+		t.Fatal(e)
+	}
+	before, _ := os.ReadFile(legacy)
+	if string(before) != data {
+		t.Fatal("retired manual store modified")
+	}
+	// A pacelever-path store wins over the retired path.
+	if e := AtomicWrite(path, []byte(`{"schema":"pacelever.manual.v1","latest":{"claude:5h":"new"},"history":[]}`)); e != nil {
+		t.Fatal(e)
+	}
+	s, e = LoadManual()
+	if e != nil || s.Latest["claude:5h"] != "new" {
+		t.Fatalf("pacelever store did not win: %+v %v", s, e)
 	}
 }
 

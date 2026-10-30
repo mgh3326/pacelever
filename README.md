@@ -50,8 +50,9 @@ policy, labels and outcome evidence.
 Every state file is pacelever's own. For one release, two host files written
 under the retired naming keep loading: a host whose only configuration is
 `~/.config/scopefuel/config.toml` still reads it (it is never edited; the first
-policy edit writes a new pacelever file), and a `scopefuel.manual.v1` manual
-store still parses. Unknown pool sections produce a warning.
+policy edit writes a new pacelever file), and a manual store still named
+`scopefuel.manual.v1` or still at `~/.cache/scopefuel/manual.json` loads
+read-only. Unknown pool sections produce a warning.
 See [configuration](docs/config.md), [design](DESIGN.md), and
 [the CLI reference](docs/cli.md).
 

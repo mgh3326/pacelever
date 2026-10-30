@@ -159,8 +159,9 @@ tool's names, environment variables, cache/config paths and fallbacks are
 gone. Two read-only graces remain for one release so a running host keeps
 loading: `~/.config/scopefuel/config.toml` when it is a host's only
 configuration (it is never edited; the first policy edit writes a new
-pacelever file), and a `scopefuel.manual.v1` manual store. Both are removed
-in the release after this cleanup ships.
+pacelever file), and a manual store still named `scopefuel.manual.v1` or still
+at `~/.cache/scopefuel/manual.json` (read-only; the next save lands in the
+pacelever file). Both are removed in the release after this cleanup ships.
 
 Shadow comparison is recorded history: the golden fixture under `testdata/`
 pins the exit codes, pool, scope, selected rung, cutoff, subscription, manual

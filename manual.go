@@ -45,14 +45,20 @@ func LoadManual() (ManualStore, error) {
 	p := filepath.Join(CacheDir(), "manual.json")
 	e := ReadJSON(p, &s)
 	if os.IsNotExist(e) {
+		// One-release grace: a host whose only manual store still lives at the
+		// retired cache path keeps loading it, read-only; the next save lands
+		// in the pacelever file. Remove in the release after the 10-30 cleanup
+		// ships.
+		e = ReadJSON(filepath.Join(cacheBase(), "scopefuel", "manual.json"), &s)
+	}
+	if os.IsNotExist(e) {
 		return ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}, nil
 	}
 	if e != nil {
 		return s, e
 	}
-	// One-release grace: stores written while the schema was still named
-	// scopefuel.manual.v1 keep loading. Remove the alternate in the release
-	// after the 10-30 cleanup ships.
+	// The same grace accepts the scopefuel.manual.v1 schema name on either
+	// path; new stores always write pacelever.manual.v1.
 	if (s.Schema != "pacelever.manual.v1" && s.Schema != "scopefuel.manual.v1") || s.Latest == nil || s.History == nil {
 		return s, fmt.Errorf("invalid manual observation store")
 	}

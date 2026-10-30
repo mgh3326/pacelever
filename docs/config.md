@@ -135,8 +135,10 @@ forwarded bearer token.
 
 New state lives under `$XDG_CACHE_HOME/pacelever` (default `~/.cache/pacelever`).
 `PACELEVER_CACHE` selects a snapshot file. For one release a manual store whose
-schema is still named `scopefuel.manual.v1` keeps loading; every other file must
-be pacelever's own. No database server, SQL service or CGO driver is required.
+schema is still named `scopefuel.manual.v1`, or which still lives at
+`$XDG_CACHE_HOME/scopefuel/manual.json`, loads read-only; the next save lands in
+the pacelever file and never edits the old one. Every other file must be
+pacelever's own. No database server, SQL service or CGO driver is required.
 
 New files use mode 0600, atomic rename and stable kernel-lock inodes. A killed
 owner releases its lock. Provider errors retain the last successful snapshot and
