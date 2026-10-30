@@ -14,6 +14,10 @@ import (
 // defaultNodeEnv is the panewire node env file, relative to the home directory.
 const defaultNodeEnv = ".config/panewire/hub-node.env"
 
+// nodeEnvMaxBytes bounds the node env read; a larger file is refused, not
+// truncated, so a cut-off assignment can never leave a stale id in use.
+const nodeEnvMaxBytes = 1 << 20
+
 // Presence refusals. The messages carry no id, path or file content.
 var (
 	errNoNodeID     = errors.New("presence not published: no node id (HUB_MACHINE_ID in the node env file)")
@@ -53,11 +57,11 @@ func (q QuotaConfig) nodeID() (string, bool) {
 		return "", false
 	}
 	defer f.Close()
-	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() || info.Size() > nodeEnvMaxBytes {
 		return "", false
 	}
 	id := ""
-	scanner := bufio.NewScanner(io.LimitReader(f, 1<<20))
+	scanner := bufio.NewScanner(io.LimitReader(f, nodeEnvMaxBytes))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -95,7 +99,7 @@ func (q QuotaConfig) presenceHostID() (string, error) {
 	if !ok {
 		return "", errNoNodeID
 	}
-	for _, explicit := range []string{FirstEnv("PACELEVER_HOST_ID", "HANDOFFKEEP_HOST_ID"), strings.TrimSpace(q.HostID)} {
+	for _, explicit := range []string{FirstEnv("PACELEVER_HOST_ID"), FirstEnv("HANDOFFKEEP_HOST_ID"), strings.TrimSpace(q.HostID)} {
 		if explicit != "" && explicit != id {
 			return "", errHostMismatch
 		}

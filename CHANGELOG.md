@@ -56,8 +56,6 @@
   when the `credential_env` variable is unset or empty instead of blanking the
   token, but only if `quota.url` is the same origin as the stored
   `HANDOFFKEEP_URL`; a non-empty variable still wins.
-- Add `[quota] host_id` for the presence host id; precedence is environment, then
-  config, then the hashed hostname.
 - Merge Antigravity's per-model quota list into the `agy` observation so a
   metering group the quota summary omits (e.g. this account's gemini session
   window) still reaches the gate; an unmappable model stays under the `unknown`

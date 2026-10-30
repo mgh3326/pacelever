@@ -119,7 +119,8 @@ func sampleShared(at time.Time) *SharedObservation {
 }
 func sharedCollector(t *testing.T, f *fakeHK) Collector {
 	t.Helper()
-	return Collector{CachePath: filepath.Join(t.TempDir(), "cache.json"), Shared: f, Config: Config{Quota: QuotaConfig{Accounts: map[string]string{"grok": "0123456789abcdef"}, MeasurableAccounts: []string{sharedTestKey}, WaitS: .06}}, Providers: map[string]Provider{"grok": ProviderFunc(func(context.Context) Observation {
+	clearHostEnv(t)
+	return Collector{CachePath: filepath.Join(t.TempDir(), "cache.json"), Shared: f, Config: Config{Quota: QuotaConfig{NodeEnv: writeNodeEnv(t, "fixture-host"), Accounts: map[string]string{"grok": "0123456789abcdef"}, MeasurableAccounts: []string{sharedTestKey}, WaitS: .06}}, Providers: map[string]Provider{"grok": ProviderFunc(func(context.Context) Observation {
 		return Observation{Buckets: []Bucket{{Window: "7d", UsedPct: Pct(24), Scope: Scope{Kind: "account"}}}}
 	})}}
 }
@@ -730,6 +731,9 @@ func TestPresenceHostIDPrecedence(t *testing.T) {
 		{name: "all three equal", q: QuotaConfig{NodeEnv: node, HostID: "mac-work"}, env: map[string]string{"PACELEVER_HOST_ID": "mac-work"}, want: "mac-work"},
 		{name: "config host_id differs", q: QuotaConfig{NodeEnv: node, HostID: "oci"}, wantErr: errHostMismatch},
 		{name: "env differs", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"PACELEVER_HOST_ID": "oci"}, wantErr: errHostMismatch},
+		{name: "both env aliases equal", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"PACELEVER_HOST_ID": "mac-work", "HANDOFFKEEP_HOST_ID": "mac-work"}, want: "mac-work"},
+		{name: "first env alias equal, legacy differs", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"PACELEVER_HOST_ID": "mac-work", "HANDOFFKEEP_HOST_ID": "oci"}, wantErr: errHostMismatch},
+		{name: "first env alias differs, legacy equal", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"PACELEVER_HOST_ID": "oci", "HANDOFFKEEP_HOST_ID": "mac-work"}, wantErr: errHostMismatch},
 		{name: "legacy env differs", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"HANDOFFKEEP_HOST_ID": "oci"}, wantErr: errHostMismatch},
 		{name: "env equal but config differs", q: QuotaConfig{NodeEnv: node, HostID: "oci"}, env: map[string]string{"PACELEVER_HOST_ID": "mac-work"}, wantErr: errHostMismatch},
 		{name: "config equal but env differs", q: QuotaConfig{NodeEnv: node, HostID: "mac-work"}, env: map[string]string{"PACELEVER_HOST_ID": "oci"}, wantErr: errHostMismatch},
@@ -785,6 +789,12 @@ func TestNodeIDParsing(t *testing.T) {
 	}
 	if _, ok := (QuotaConfig{NodeEnv: t.TempDir()}).nodeID(); ok {
 		t.Fatal("a directory was read as a node env file")
+	}
+	// An id past the read limit must not be trusted: a later assignment could
+	// have been cut off.
+	big := "HUB_MACHINE_ID=node-a\n#" + strings.Repeat("x", 1<<20) + "\nHUB_MACHINE_ID=node-b\n"
+	if got, ok := write(big).nodeID(); ok {
+		t.Fatalf("oversized node env gave %q", got)
 	}
 }
 func TestNodeEnvPath(t *testing.T) {
