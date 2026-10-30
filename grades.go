@@ -224,7 +224,7 @@ func ApplyGrades(p GradeProposal, c Catalog, reps []Rep, only map[string]bool, d
 	if p.Schema != "pacelever.grades.v1" || p.Rule != "1.3" || p.OutcomeRule != OutcomeRule || p.Fingerprint != EvidenceFingerprint(c, reps) {
 		return nil, fmt.Errorf("proposal evidence changed; regenerate proposal")
 	}
-	if (c.Info.Stale || c.Info.Source == "snapshot" || p.RepsSource == "local" || p.RepsSource == "cache-stale" || strings.Contains(p.RepsSource, "truncated")) && strings.TrimSpace(allowDegraded) == "" {
+	if (c.Info.Stale || c.Info.Source == BenchSnapshot || p.RepsSource == BenchLocal || p.RepsSource == BenchCacheStale || strings.Contains(p.RepsSource, "truncated")) && strings.TrimSpace(allowDegraded) == "" {
 		return nil, fmt.Errorf("degraded evidence requires --allow-degraded reason")
 	}
 	if decidedBy == "" || !validRef(ref) {

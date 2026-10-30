@@ -283,7 +283,7 @@ func DisplayObservation(o Observation, cfg Config, manual ManualStore, now time.
 	out.Error = ""
 	out.Warning = ""
 	out.Stale = false
-	out.Source = "operator"
+	out.Source = SourceOperator
 	out.Buckets = nil
 	for _, m := range valid {
 		out.Buckets = append(out.Buckets, accountBucket(m.Window, m.UsedPct, m.ResetsAt))

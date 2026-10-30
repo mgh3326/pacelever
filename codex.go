@@ -86,7 +86,7 @@ func fetchCodex(ctx context.Context, home string, selectors map[string]string, c
 	if o, ok := fetchCodexRPC(ctx, home, cfg, dir); ok {
 		if acct != "" {
 			o.PublishFP = fingerprint("codex-account", acct)
-			o.PublishFPKind = "account"
+			o.PublishFPKind = FPKindAccount
 		}
 		return o
 	}
@@ -97,7 +97,7 @@ func fetchCodex(ctx context.Context, home string, selectors map[string]string, c
 	o := (HTTPProvider{ID: "codex", URL: "https://chatgpt.com/backend-api/wham/usage", Headers: headers, Client: client, Now: now}).Fetch(ctx)
 	if acct != "" {
 		o.PublishFP = fingerprint("codex-account", acct)
-		o.PublishFPKind = "account"
+		o.PublishFPKind = FPKindAccount
 	}
 	return o
 }

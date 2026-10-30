@@ -27,7 +27,7 @@ func devinWebProvider(cfg Config, client HTTPDoer, now func() time.Time) Provide
 		o := fetchDevinWeb(ctx, token, org, client, now)
 		// Attest the organization captured by this provider, independently of
 		// any later changes to the collector's request configuration.
-		o.PublishFP, o.PublishFPKind = fingerprint("devin-account", org), "account"
+		o.PublishFP, o.PublishFPKind = fingerprint("devin-account", org), FPKindAccount
 		return o
 	})
 }
@@ -61,7 +61,7 @@ func fetchDevinWeb(ctx context.Context, token, org string, client HTTPDoer, now 
 }
 
 func parseDevin(raw map[string]any) Observation {
-	o := Observation{ID: "devin", Source: "usage-api"}
+	o := Observation{ID: "devin", Source: SourceUsageAPI}
 	nested := object(raw["quota_usage"])
 	if raw["hide_daily_quota"] != true {
 		if used, reset, ok := devinWindow(raw["daily_percentage"], raw["daily_reset_at"], nested["daily_quota"]); ok {

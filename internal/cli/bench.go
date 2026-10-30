@@ -28,7 +28,7 @@ func (a *App) bench(ctx context.Context, v args) (int, error) {
 			return 0, nil
 		case "status":
 			code := 0
-			if v.flags["check"] && (c.Info.Source == "snapshot" || c.Info.Stale) {
+			if v.flags["check"] && (c.Info.Source == pl.BenchSnapshot || c.Info.Stale) {
 				code = 2
 			}
 			return code, a.json(map[string]any{"catalog": c.Info, "rows": len(c.Rows), "credentials_configured": a.Bench.URL != "" && a.Bench.Token != ""})

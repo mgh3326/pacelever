@@ -43,3 +43,29 @@ const (
 	ErrKindSharedUnavailable   = "shared_unavailable"
 	ErrKindSharedWait          = "shared_wait"
 )
+
+// Observation.Source values: where a reading came from.
+const (
+	SourceUsageAPI    = "usage-api"   // a provider HTTP usage endpoint
+	SourceUsageRPC    = "usage-rpc"   // the Codex app-server JSON-RPC
+	SourceCLI         = "cli:/usage"  // a CLI usage screen or command
+	SourceRemote      = "remote"      // a peer snapshot from the bench server
+	SourceHandoffkeep = "handoffkeep" // the shared quota store
+)
+
+// SourceOperator marks a manual observation and a decision that rests on one.
+const SourceOperator = "operator"
+
+// FPKindAccount is the AccountFPKind/PublishFPKind of a fingerprint that names
+// a provider account, the only kind that may be shared or matched.
+const FPKindAccount = "account"
+
+// Bench row and catalog sources, as reported by ReadRows and CatalogInfo.
+const (
+	BenchLocal       = "local"       // legacy SQLite evidence on this host
+	BenchServer      = "server"      // fetched from the bench server now
+	BenchCache       = "cache"       // a fresh cache of the server
+	BenchCacheStale  = "cache-stale" // a cache older than the stale limit
+	BenchUnavailable = "unavailable" // nothing usable
+	BenchSnapshot    = "snapshot"    // the bundled catalog snapshot
+)

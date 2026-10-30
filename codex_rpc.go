@@ -195,7 +195,7 @@ func codexLimitName(s string) string {
 // fetchCodexRPC runs the whole exchange. It returns ok=false on any failure so
 // the caller falls back to the wham usage API; it never invents a value.
 func fetchCodexRPC(ctx context.Context, home string, cfg Config, codexDir string) (Observation, bool) {
-	o := Observation{ID: "codex", Source: "usage-rpc"}
+	o := Observation{ID: "codex", Source: SourceUsageRPC}
 	bin := codexBinary(home, cfg)
 	if bin == "" {
 		return o, false
@@ -281,7 +281,7 @@ func fetchCodexRPC(ctx context.Context, home string, cfg Config, codexDir string
 		if json.Unmarshal(acct, &a) == nil && a.Account != nil && a.Account.Email != "" {
 			if o.PublishFP == "" {
 				o.PublishFP = fingerprint("codex-account", a.Account.Email)
-				o.PublishFPKind = "account"
+				o.PublishFPKind = FPKindAccount
 			}
 		}
 	}

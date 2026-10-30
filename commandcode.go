@@ -63,7 +63,7 @@ func fetchCommandCode(ctx context.Context, token string, client HTTPDoer, now fu
 	}
 	if fp := fingerprint("commandcode-account", account); fp != "" {
 		o.PublishFP = fp
-		o.PublishFPKind = "account"
+		o.PublishFPKind = FPKindAccount
 	}
 	return o
 }
@@ -78,7 +78,7 @@ func commandCodeStatus(status int, header http.Header, parseError bool, now time
 }
 
 func parseCommandCode(raw map[string]any) Observation {
-	o := Observation{ID: "commandcode", Source: "usage-api"}
+	o := Observation{ID: "commandcode", Source: SourceUsageAPI}
 	data := object(raw["data"])
 	if len(data) == 0 {
 		data = raw

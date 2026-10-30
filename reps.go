@@ -141,7 +141,7 @@ func (b BenchClient) RetryRep(ctx context.Context, r Rep) (Rep, error) {
 }
 func (b BenchClient) ReadReps(ctx context.Context, profile string) ([]Rep, string, error) {
 	raw, source, e := b.ReadRows(ctx, "reps")
-	if e != nil && source != "local" {
+	if e != nil && source != BenchLocal {
 		return nil, source, e
 	}
 	var rows []Rep
@@ -180,7 +180,7 @@ func (b BenchClient) ReadReps(ctx context.Context, profile string) ([]Rep, strin
 		rows = append(rows, r)
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].RecordedAt > rows[j].RecordedAt })
-	if len(raw) >= 5000 && source != "local" {
+	if len(raw) >= 5000 && source != BenchLocal {
 		source += "-truncated"
 	}
 	return rows, source, e

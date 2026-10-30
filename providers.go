@@ -39,7 +39,7 @@ type HTTPProvider struct {
 }
 
 func (p HTTPProvider) Fetch(ctx context.Context) Observation {
-	o := Observation{ID: p.ID, Source: "usage-api"}
+	o := Observation{ID: p.ID, Source: SourceUsageAPI}
 	client := p.Client
 	if client == nil {
 		client = &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -111,7 +111,7 @@ func retryAfterSeconds(header string, now time.Time) float64 {
 // statusObservation is the single mapping from an HTTP status to a safe
 // observation. Response bodies and request URLs never enter the result.
 func statusObservation(id string, status int, header http.Header, now time.Time, authKind, authHint string, rateWait float64) Observation {
-	o := Observation{ID: id, Source: "usage-api"}
+	o := Observation{ID: id, Source: SourceUsageAPI}
 	o.Error = fmt.Sprintf("usage HTTP %d", status)
 	o.ErrorKind = ErrKindHTTP
 	switch status {
@@ -243,7 +243,7 @@ func DefaultProvidersAt(cfg Config, selectors map[string]string, now func() time
 		o := fetchGrokRecord(ctx, record, nil, clock)
 		if record.Fingerprint != "" {
 			o.PublishFP = record.Fingerprint
-			o.PublishFPKind = "account"
+			o.PublishFPKind = FPKindAccount
 		}
 		return o
 	})

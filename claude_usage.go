@@ -45,7 +45,7 @@ type ClaudeCLIProvider struct {
 }
 
 func (p ClaudeCLIProvider) Fetch(ctx context.Context) Observation {
-	result := Observation{ID: "claude", Source: "cli:/usage"}
+	result := Observation{ID: "claude", Source: SourceCLI}
 	timeout := p.Timeout
 	if timeout <= 0 {
 		timeout = 15 * time.Second
@@ -115,7 +115,7 @@ var claudeUsageReset = regexp.MustCompile(`(?i)\bresets?\s+([A-Za-z]{3,9})\.?\s+
 // label-proximity and "% left" rules are ported from ClaudeBar's
 // claude-usage-screen.js (MIT), adjusted for non-rendered CLI output.
 func ParseClaudeUsageScreen(text string, now time.Time) Observation {
-	o := Observation{ID: "claude", Source: "cli:/usage"}
+	o := Observation{ID: "claude", Source: SourceCLI}
 	fail := func() Observation {
 		o.Error = "usage panel incomplete or unrecognized"
 		o.ErrorKind = ErrKindParse

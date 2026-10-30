@@ -60,7 +60,7 @@ func (p PTYProvider) Fetch(ctx context.Context) Observation {
 			return o
 		}
 	}
-	result := Observation{ID: p.ID, Source: "cli:/usage"}
+	result := Observation{ID: p.ID, Source: SourceCLI}
 	timeout := p.Timeout
 	if timeout <= 0 {
 		timeout = 35 * time.Second

@@ -334,7 +334,7 @@ func grokProductName(product string) string {
 }
 
 func parseGrok(raw map[string]any) Observation {
-	o := Observation{ID: "grok", Source: "usage-api"}
+	o := Observation{ID: "grok", Source: SourceUsageAPI}
 	config := object(raw["config"])
 	if len(config) == 0 {
 		config = raw

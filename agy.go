@@ -290,7 +290,7 @@ func fetchAgyModels(ctx context.Context, headers map[string]string, client HTTPD
 }
 
 func parseAgy(raw map[string]any, extraModels map[string]any) Observation {
-	o := Observation{ID: "agy", Source: "usage-api"}
+	o := Observation{ID: "agy", Source: SourceUsageAPI}
 	root := raw
 	if response := object(raw["response"]); len(response) > 0 {
 		root = response

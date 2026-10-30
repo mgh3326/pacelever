@@ -152,7 +152,7 @@ func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inpu
 			local, e := pl.LocalInflight(ctx, o.ID, now)
 			read := a.Bench.Inflight(ctx, o.ID, fp, local, e == nil)
 			in.Inflight[o.ID] = read.N
-			if e == nil && (o.AccountFPKind == "account" || o.PublishFPKind == "account") {
+			if e == nil && (o.AccountFPKind == pl.FPKindAccount || o.PublishFPKind == pl.FPKindAccount) {
 				_ = a.Bench.PublishInflight(ctx, o.ID, fp, local)
 			}
 		}
@@ -166,7 +166,7 @@ func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inpu
 				for i, o := range in.Observations {
 					if o.ID == r.Pool && o.PublishFP != fp && o.AccountFP != fp {
 						remote := a.Bench.QuotaFallback(ctx, o, fp)
-						if remote.Source == "remote" {
+						if remote.Source == pl.SourceRemote {
 							in.Observations[i] = remote
 						}
 					}
@@ -582,7 +582,7 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 		}
 		if d.Source != nil {
 			fmt.Fprintf(a.Out, " source=%s", *d.Source)
-			if *d.Source == "operator" {
+			if *d.Source == pl.SourceOperator {
 				fmt.Fprintf(a.Out, " source_verification=unverified source_claim=self_reported_unverified manual_observation_ids=%s", strings.Join(d.ManualObservationIDs, ","))
 			}
 		}

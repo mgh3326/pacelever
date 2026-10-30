@@ -102,7 +102,7 @@ func claudeAccountFingerprint(provider Provider, identityPath string, shareable 
 		id := str(acct["accountUuid"])
 		if id != "" && shareable {
 			o.AccountFP = fingerprint("claude-account", id)
-			o.AccountFPKind = "account"
+			o.AccountFPKind = FPKindAccount
 		}
 		return o
 	})
