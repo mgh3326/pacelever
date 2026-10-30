@@ -552,9 +552,10 @@ func TestSharedQuotaIdentityBeforeMeasurement(t *testing.T) {
 		t.Fatalf("%s %v", key, allowed)
 	}
 	c.Config.Quota.Accounts = map[string]string{"codex": "0123456789abcdef"}
+	c.Config.Quota.MeasurableAccounts = nil
 	key, allowed = c.accountKey("codex")
-	if allowed {
-		t.Fatal("different login allowed to measure configured account")
+	if key != "codex:"+fp || !allowed {
+		t.Fatalf("a configured mismatch must not block the derived key: %s %v", key, allowed)
 	}
 	if strings.Contains(key, account) {
 		t.Fatal("raw identity leaked")

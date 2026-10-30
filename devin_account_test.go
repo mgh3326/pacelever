@@ -64,14 +64,18 @@ func TestDevinAccountKeyRequiresMatchingLogin(t *testing.T) {
 	}
 	c.Config.Quota.Accounts = map[string]string{"devin": "0123456789abcdef"}
 	c.Config.Quota.MeasurableAccounts = []string{"devin:0123456789abcdef"}
-	if key, allowed := c.accountKey("devin"); key != "devin:0123456789abcdef" || allowed {
-		t.Fatal("mismatched login may only read the configured key")
+	if key, allowed := c.accountKey("devin"); key != "devin:"+fp || !allowed {
+		t.Fatalf("a configured mismatch must not change the derived key: %q, allowed=%v", key, allowed)
+	}
+	c.Config.Quota.MeasurableAccounts = nil
+	if key, allowed := c.accountKey("devin"); key != "devin:"+fp || !allowed {
+		t.Fatalf("a derived key needs no measurable_accounts entry: %q, allowed=%v", key, allowed)
 	}
 	if err := os.Remove(filepath.Join(dataBase(), "devin", "credentials.toml")); err != nil {
 		t.Fatal(err)
 	}
-	if _, allowed := c.accountKey("devin"); allowed {
-		t.Fatal("configured key without login allowed to publish")
+	if key, allowed := c.accountKey("devin"); key != "devin:0123456789abcdef" || allowed {
+		t.Fatal("configured key without login may only be read")
 	}
 	c.Config.Quota.Accounts = nil
 	if key, _ := c.accountKey("devin"); key != "" {

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Shared quota: a host with a Claude, Codex or Devin login keys, measures,
+  publishes and announces presence for that login's account; `quota.accounts`
+  and `measurable_accounts` no longer gate those pools, and a configured
+  fingerprint that differs from the login never blocks measurement. Pools
+  without a local derivation still take their key from `quota.accounts` and
+  measure only what `measurable_accounts` lists.
+- Catalog: `fable`, `kimi-k3`, `kimi-k3-low` and `kimi-k27-code` resolve a
+  default effort, so a launch without `--effort` no longer arrives with an empty
+  rung for spawners that must pass one.
 - `gate --account-key`: when the shared reading is stale and this host holds the
   same account and may measure it, measure, publish and judge on the fresh value
   instead of refusing; other hosts still exit 4 with the reason. A free SWE-2

@@ -206,3 +206,18 @@ func TestActiveFreeLimitReadsDamagedRecordsFromDisk(t *testing.T) {
 		t.Fatal("expired default hold still active")
 	}
 }
+
+// A profile whose harness is told an effort must resolve one when the caller
+// names none, even if its catalog row carries no rung.
+func TestLaunchDefaultsEffortForEmptyRungProfiles(t *testing.T) {
+	for profile, want := range map[string]string{"fable": "high", "kimi-k3": "high", "kimi-k3-low": "low", "kimi-k27-code": "high"} {
+		req := Request{Profile: profile, Role: "worker"}
+		if profile == "fable" {
+			req.Role, req.OperatorRequest = "counsel", "hk:doc/operator-request/test"
+		}
+		d, e := ResolveLaunch(BundledCatalog(), Config{}, req)
+		if e != nil || d.Effort != want {
+			t.Errorf("%s: effort %q, err %v, want %q", profile, d.Effort, e, want)
+		}
+	}
+}
