@@ -270,8 +270,11 @@ sources of an id: each one that is set must equal the node id, otherwise
 presence is not published. With no readable node id nothing is published,
 whatever else is configured. There is no hostname-hash fallback. Either refusal
 prints one `warning:` per run; shared reads, leases and measurement publishes
-are unaffected. The configured value may contain only letters, digits, `.`, `_`
-and `-` (at most 64 characters); anything else makes the configuration invalid.
+are unaffected. Values are compared after trimming surrounding whitespace, and a blank
+value counts as unset. Because `host_id` (and the env variables) must equal the
+node id, set one only to the exact `HUB_MACHINE_ID` form,
+`^[a-z0-9-]{1,32}$`; any other value, even one the configuration check accepts,
+can never match and presence is refused.
 Publishes are
 rate-limited to at most one per `presence_every_s` seconds (default 600) per
 host and account, recorded in a `presence.json` next to the cache file.

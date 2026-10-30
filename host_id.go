@@ -99,7 +99,11 @@ func (q QuotaConfig) presenceHostID() (string, error) {
 	if !ok {
 		return "", errNoNodeID
 	}
-	for _, explicit := range []string{FirstEnv("PACELEVER_HOST_ID"), FirstEnv("HANDOFFKEEP_HOST_ID"), strings.TrimSpace(q.HostID)} {
+	for _, explicit := range []string{
+		strings.TrimSpace(FirstEnv("PACELEVER_HOST_ID")),
+		strings.TrimSpace(FirstEnv("HANDOFFKEEP_HOST_ID")),
+		strings.TrimSpace(q.HostID),
+	} {
 		if explicit != "" && explicit != id {
 			return "", errHostMismatch
 		}
