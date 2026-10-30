@@ -150,24 +150,23 @@ func TestGateAccountStaleOtherAccountStillRefused(t *testing.T) {
 	}
 }
 
-func TestGateAccountStaleRefusedWhenHostCannotMeasure(t *testing.T) {
+// A host that holds the account refreshes a stale reading without any
+// measurable_accounts grant; the allowlist gates only non-derivable pools.
+func TestGateAccountStaleRefreshNeedsNoAllowlist(t *testing.T) {
 	key := devinHost(t, refreshOrg)
-	for _, tc := range []struct {
-		name       string
-		measurable []string
-		failWrite  bool
-		want       string
-	}{
-		{"not measurable here", nil, false, "may not measure"},
-		{"publish refused", []string{key}, true, "local refresh failed (shared_publish_failed)"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			hk := &memoryHK{failWrite: tc.failWrite}
-			code, record, err := gateAccount(t, hk, tc.measurable, "devin-swe2-medium", key)
-			if err == nil || code != pl.Unmeasurable || record["ok"] == true || !strings.Contains(err.Error(), tc.want) || hk.published != 0 {
-				t.Fatalf("code=%d err=%v record=%v published=%d", code, err, record, hk.published)
-			}
-		})
+	hk := &memoryHK{}
+	code, record, err := gateAccount(t, hk, nil, "devin-swe2-medium", key)
+	if err != nil || code != pl.Admitted || record["ok"] != true || hk.published != 1 {
+		t.Fatalf("code=%d err=%v record=%v published=%d", code, err, record, hk.published)
+	}
+}
+
+func TestGateAccountStaleRefusedWhenPublishFails(t *testing.T) {
+	key := devinHost(t, refreshOrg)
+	hk := &memoryHK{failWrite: true}
+	code, record, err := gateAccount(t, hk, []string{key}, "devin-swe2-medium", key)
+	if err == nil || code != pl.Unmeasurable || record["ok"] == true || !strings.Contains(err.Error(), "local refresh failed (shared_publish_failed)") || hk.published != 0 {
+		t.Fatalf("code=%d err=%v record=%v published=%d", code, err, record, hk.published)
 	}
 }
 

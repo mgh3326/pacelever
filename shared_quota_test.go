@@ -546,15 +546,18 @@ func TestSharedQuotaIdentityBeforeMeasurement(t *testing.T) {
 		t.Fatal(e)
 	}
 	fp := fingerprint("codex-account", account)
-	c := Collector{Selectors: map[string]string{"CODEX_HOME": dir}, Config: Config{Quota: QuotaConfig{MeasurableAccounts: []string{"codex:" + fp}}}}
+	c := Collector{Selectors: map[string]string{"CODEX_HOME": dir}, Config: Config{Quota: QuotaConfig{}}}
 	key, allowed := c.accountKey("codex")
 	if key != "codex:"+fp || !allowed {
 		t.Fatalf("%s %v", key, allowed)
 	}
+	// A configured fingerprint or allowlist neither renames nor gates a
+	// derivable account: the local login decides the key on its own.
 	c.Config.Quota.Accounts = map[string]string{"codex": "0123456789abcdef"}
+	c.Config.Quota.MeasurableAccounts = []string{"codex:0123456789abcdef"}
 	key, allowed = c.accountKey("codex")
-	if allowed {
-		t.Fatal("different login allowed to measure configured account")
+	if key != "codex:"+fp || !allowed {
+		t.Fatalf("configured key shadowed or blocked the derived login: %s %v", key, allowed)
 	}
 	if strings.Contains(key, account) {
 		t.Fatal("raw identity leaked")
