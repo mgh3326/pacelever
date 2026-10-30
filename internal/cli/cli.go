@@ -91,7 +91,7 @@ func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader
 	for _, f := range failures {
 		fmt.Fprintf(errOut, "error: shared publish failed: %s (%s)\n", f.Pool, f.Kind)
 	}
-	if len(failures) > 0 && code == 0 && a.at(0) == "refresh" && !a.flags["background"] {
+	if len(failures) > 0 && code == 0 && a.at(0) == "refresh" {
 		code = pl.Invalid
 	}
 	return code
