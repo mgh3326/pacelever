@@ -80,7 +80,7 @@ func envPath(key, fallback string) string {
 }
 
 // FirstEnv is the first non-blank variable among keys, trimmed. Callers list
-// the pacelever name before its legacy scopefuel or handoffkeep alias.
+// the pacelever name before its handoffkeep alias.
 func FirstEnv(keys ...string) string {
 	for _, k := range keys {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
@@ -89,6 +89,12 @@ func FirstEnv(keys ...string) string {
 	}
 	return ""
 }
+
+// retiredConfigDir is the config directory of the retired predecessor. It is
+// the only remaining reference to that tool besides the wire schema ids; see
+// the one-release fallback in LoadConfig.
+const retiredConfigDir = "scopefuel"
+
 func ConfigPath() string {
 	if p := os.Getenv("PACELEVER_CONFIG"); p != "" {
 		return p
@@ -107,17 +113,14 @@ func CachePath() string {
 	}
 	return filepath.Join(CacheDir(), "snapshots.json")
 }
-func legacyCachePath() string {
-	if p := os.Getenv("SCOPEFUEL_CACHE"); p != "" {
-		return p
-	}
-	return filepath.Join(cacheBase(), "scopefuel", "snapshots.json")
-}
 func LoadConfig() (Config, error) {
 	path := ConfigPath()
 	b, e := os.ReadFile(path)
 	if os.IsNotExist(e) && os.Getenv("PACELEVER_CONFIG") == "" {
-		path = filepath.Join(configBase(), "scopefuel", "config.toml")
+		// One-release exception: a running host whose config still lives in the
+		// retired tool's directory keeps loading it until it is moved. Remove
+		// this fallback in the next release.
+		path = filepath.Join(configBase(), retiredConfigDir, "config.toml")
 		b, e = os.ReadFile(path)
 	}
 	c := Config{Pools: map[string]PoolPolicy{}, Profiles: map[string]ProfilePolicy{}, Settings: map[string]float64{}, Raw: map[string]any{}, Path: path}
@@ -236,8 +239,9 @@ func (c Config) CreditMaxAge(pool string) time.Duration {
 	return 72 * time.Hour
 }
 
-// EditConfig preserves all unrecognized sections and keys. Legacy input is copied
-// into the pacelever config; the scopefuel file is never changed.
+// EditConfig preserves all unrecognized sections and keys. A config loaded from
+// the retired directory is copied into the pacelever config; the old file is
+// never changed.
 func EditConfig(edit func(map[string]any) error) error {
 	return WithFileLock(ConfigPath()+".lock", false, func() error {
 		c, e := LoadConfig()

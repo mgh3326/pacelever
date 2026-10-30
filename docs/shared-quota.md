@@ -152,7 +152,8 @@ backs off for five minutes; other provider failures do not suppress the next
 shared probe. Local cache TTL and non-rate-limit provider backoff never bypass
 the shared read. There is no document-based quota fallback or publication: a
 degraded local reading is never turned into a fresh one. Inflight tracking
-keeps its existing behavior.
+keeps its existing behavior. Its document schema id, `scopefuel.quota-inflight.v1`,
+is a wire id shared between hosts and keeps its name, like the gate schema ids.
 
 `manual set`, `manual list`, and `manual clear` use the same account API in shared
 mode. Manual entries are independent per quota window; a write on one host is

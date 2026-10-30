@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-func TestScopefuelGolden(t *testing.T) {
-	b, e := os.ReadFile("testdata/scopefuel_golden.json")
+func TestCompatGolden(t *testing.T) {
+	b, e := os.ReadFile("testdata/compat_golden.json")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -71,7 +71,7 @@ func TestScopefuelGolden(t *testing.T) {
 			}
 			if tt.LaunchCode != 0 {
 				if e == nil {
-					t.Errorf("scopefuel refused launch, pacelever admitted %+v", launch)
+					t.Errorf("reference refused launch, pacelever admitted %+v", launch)
 				}
 				return
 			}
