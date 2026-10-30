@@ -36,6 +36,13 @@ func identity(o Observation) (string, string) {
 	return o.AccountFP, o.AccountFPKind
 }
 
+// inflightSchema names the in-flight job documents. Operator decision: no
+// compatibility shim for the retired tool's name, so documents under the old
+// schema are not read. They are transient (republished on every gate run, and a
+// job counts for at most eight hours), so hosts converge within one gate cycle
+// of upgrading, and the reserve only paces; it never locks admission.
+const inflightSchema = "pacelever.quota-inflight.v1"
+
 type InflightJob struct {
 	JobID     string `json:"job_id"`
 	StartedAt string `json:"started_at"`
@@ -133,7 +140,7 @@ func (b BenchClient) Inflight(ctx context.Context, pool, fp string, local []Infl
 	result.RemoteKnown = true
 	for _, doc := range payload.Documents {
 		var v InflightSnapshot
-		if !strings.HasPrefix(doc.Key, prefix) || json.Unmarshal([]byte(doc.Body), &v) != nil || v.Schema != "pacelever.quota-inflight.v1" || v.Pool != pool || v.AccountFP != fp || v.Host == host {
+		if !strings.HasPrefix(doc.Key, prefix) || json.Unmarshal([]byte(doc.Body), &v) != nil || v.Schema != inflightSchema || v.Pool != pool || v.AccountFP != fp || v.Host == host {
 			continue
 		}
 		at, e := ParseTime(v.PublishedAt)
@@ -158,7 +165,7 @@ func (b BenchClient) PublishInflight(ctx context.Context, pool, fp string, jobs 
 	}
 	host, _ := os.Hostname()
 	host = safeHost(host)
-	v := InflightSnapshot{Schema: "pacelever.quota-inflight.v1", Pool: pool, AccountFP: fp, Host: host, PublishedAt: b.now().Format(time.RFC3339Nano), Jobs: jobs}
+	v := InflightSnapshot{Schema: inflightSchema, Pool: pool, AccountFP: fp, Host: host, PublishedAt: b.now().Format(time.RFC3339Nano), Jobs: jobs}
 	if v.Jobs == nil {
 		v.Jobs = []InflightJob{}
 	}

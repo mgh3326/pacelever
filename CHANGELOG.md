@@ -7,7 +7,8 @@
   `SCOPEFUEL_BIN`-style `<POOL>_BIN` names), the legacy cache, manual and limit
   fallbacks, the read-only SQLite bench reader and its dependency, the capture
   script, and the `scopefuel` herdr metadata names (`pacelever.gauge`,
-  `pacelever_quota`). Inflight documents are now `pacelever.quota-inflight.v1`.
+  `pacelever_quota`). Inflight documents are now `pacelever.quota-inflight.v1`; documents under the old name are not read, so
+  in-flight counts reconverge within one gate cycle after hosts upgrade.
   Kept for one release, as the only exceptions: a configuration at the previous
   tool's config path, and a manual store at the old cache path with its old schema
   name, still load.
