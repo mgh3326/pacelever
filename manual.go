@@ -48,7 +48,7 @@ func LoadManual() (ManualStore, error) {
 		e = ReadJSON(filepath.Join(filepath.Dir(legacyCachePath()), "manual.json"), &s)
 	}
 	if os.IsNotExist(e) {
-		return ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}, nil
+		return ManualStore{Schema: "scopefuel.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}, nil
 	}
 	if e != nil {
 		return s, e
