@@ -16,7 +16,7 @@ func devinSharedCollector(t *testing.T, f *fakeHK) Collector {
 	t.Setenv("PACELEVER_HOST_ID", "")
 	t.Setenv("HANDOFFKEEP_HOST_ID", "")
 	fp := writeDevinLogin(t)
-	return Collector{CachePath: CachePath(), Shared: f, Now: func() time.Time { return testNow }, Config: Config{Quota: QuotaConfig{HostID: "fixture-host", MeasurableAccounts: []string{"devin:" + fp}, WaitS: .001}}}
+	return Collector{CachePath: CachePath(), Shared: f, Now: func() time.Time { return testNow }, Config: Config{Quota: QuotaConfig{NodeEnv: writeNodeEnv(t, "fixture-host"), MeasurableAccounts: []string{"devin:" + fp}, WaitS: .001}}}
 }
 
 func collectDevinShared(t *testing.T, c Collector) Observation {

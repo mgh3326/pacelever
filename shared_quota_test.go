@@ -119,7 +119,8 @@ func sampleShared(at time.Time) *SharedObservation {
 }
 func sharedCollector(t *testing.T, f *fakeHK) Collector {
 	t.Helper()
-	return Collector{CachePath: filepath.Join(t.TempDir(), "cache.json"), Shared: f, Config: Config{Quota: QuotaConfig{Accounts: map[string]string{"grok": "0123456789abcdef"}, MeasurableAccounts: []string{sharedTestKey}, WaitS: .06}}, Providers: map[string]Provider{"grok": ProviderFunc(func(context.Context) Observation {
+	clearHostEnv(t)
+	return Collector{CachePath: filepath.Join(t.TempDir(), "cache.json"), Shared: f, Config: Config{Quota: QuotaConfig{NodeEnv: writeNodeEnv(t, "fixture-host"), Accounts: map[string]string{"grok": "0123456789abcdef"}, MeasurableAccounts: []string{sharedTestKey}, WaitS: .06}}, Providers: map[string]Provider{"grok": ProviderFunc(func(context.Context) Observation {
 		return Observation{Buckets: []Bucket{{Window: "7d", UsedPct: Pct(24), Scope: Scope{Kind: "account"}}}}
 	})}}
 }
@@ -153,8 +154,7 @@ func TestSharedQuotaFreshBeforeProbe(t *testing.T) {
 	}
 }
 func TestSharedQuotaFleetSingleProbe(t *testing.T) {
-	t.Setenv("PACELEVER_HOST_ID", "")
-	t.Setenv("HANDOFFKEEP_HOST_ID", "")
+	clearHostEnv(t)
 	f := &fakeHK{presenceDone: make(chan struct{}, 1)}
 	var probes atomic.Int32
 	var wg sync.WaitGroup
@@ -162,7 +162,7 @@ func TestSharedQuotaFleetSingleProbe(t *testing.T) {
 	hosts := []string{"node-a", "node-b", "node-c", "node-d", "node-e", "node-f"}
 	for i := 0; i < 6; i++ {
 		c := sharedCollector(t, f)
-		c.Config.Quota.HostID = hosts[i]
+		c.Config.Quota.NodeEnv = writeNodeEnv(t, hosts[i])
 		c.Providers["grok"] = ProviderFunc(func(context.Context) Observation {
 			probes.Add(1)
 			time.Sleep(15 * time.Millisecond)
@@ -694,32 +694,147 @@ func TestSameOrigin(t *testing.T) {
 		}
 	}
 }
-func TestPresenceHostIDPrecedence(t *testing.T) {
+
+// writeNodeEnv writes a panewire-style node env file holding id and a token
+// placeholder, and returns its path.
+func writeNodeEnv(t *testing.T, id string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "hub-node.env")
+	if e := os.WriteFile(path, []byte("HUB_MACHINE_ID="+id+"\nHUB_TOKEN=fixture-token\n"), 0o600); e != nil {
+		t.Fatal(e)
+	}
+	return path
+}
+
+// clearHostEnv blanks the explicit host id variables and points HOME at an empty
+// directory, so the default node env path never reads the developer's own file.
+func clearHostEnv(t *testing.T) {
+	t.Helper()
 	t.Setenv("PACELEVER_HOST_ID", "")
 	t.Setenv("HANDOFFKEEP_HOST_ID", "")
-	hashed := QuotaConfig{}.presenceHostID()
-	if !strings.HasPrefix(hashed, "host-") {
-		t.Fatalf("fallback %q", hashed)
+	t.Setenv("HOME", t.TempDir())
+}
+func TestPresenceHostIDPrecedence(t *testing.T) {
+	clearHostEnv(t)
+	node := writeNodeEnv(t, "mac-work")
+	for _, tc := range []struct {
+		name    string
+		q       QuotaConfig
+		env     map[string]string
+		want    string
+		wantErr error
+	}{
+		{name: "node id alone", q: QuotaConfig{NodeEnv: node}, want: "mac-work"},
+		{name: "config host_id equal", q: QuotaConfig{NodeEnv: node, HostID: "mac-work"}, want: "mac-work"},
+		{name: "env equal", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"PACELEVER_HOST_ID": "mac-work"}, want: "mac-work"},
+		{name: "legacy env equal", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"HANDOFFKEEP_HOST_ID": "mac-work"}, want: "mac-work"},
+		{name: "all three equal", q: QuotaConfig{NodeEnv: node, HostID: "mac-work"}, env: map[string]string{"PACELEVER_HOST_ID": "mac-work"}, want: "mac-work"},
+		{name: "env padded with whitespace, equal", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"PACELEVER_HOST_ID": "  mac-work\t"}, want: "mac-work"},
+		{name: "legacy env padded with whitespace, equal", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"HANDOFFKEEP_HOST_ID": " mac-work "}, want: "mac-work"},
+		{name: "whitespace-only env counts as unset", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"PACELEVER_HOST_ID": "   ", "HANDOFFKEEP_HOST_ID": " "}, want: "mac-work"},
+		{name: "padded env still differs", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"PACELEVER_HOST_ID": " oci "}, wantErr: errHostMismatch},
+		{name: "padded config host_id equal", q: QuotaConfig{NodeEnv: node, HostID: " mac-work "}, want: "mac-work"},
+		{name: "config host_id differs", q: QuotaConfig{NodeEnv: node, HostID: "oci"}, wantErr: errHostMismatch},
+		{name: "env differs", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"PACELEVER_HOST_ID": "oci"}, wantErr: errHostMismatch},
+		{name: "both env aliases equal", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"PACELEVER_HOST_ID": "mac-work", "HANDOFFKEEP_HOST_ID": "mac-work"}, want: "mac-work"},
+		{name: "first env alias equal, legacy differs", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"PACELEVER_HOST_ID": "mac-work", "HANDOFFKEEP_HOST_ID": "oci"}, wantErr: errHostMismatch},
+		{name: "first env alias differs, legacy equal", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"PACELEVER_HOST_ID": "oci", "HANDOFFKEEP_HOST_ID": "mac-work"}, wantErr: errHostMismatch},
+		{name: "legacy env differs", q: QuotaConfig{NodeEnv: node}, env: map[string]string{"HANDOFFKEEP_HOST_ID": "oci"}, wantErr: errHostMismatch},
+		{name: "env equal but config differs", q: QuotaConfig{NodeEnv: node, HostID: "oci"}, env: map[string]string{"PACELEVER_HOST_ID": "mac-work"}, wantErr: errHostMismatch},
+		{name: "config equal but env differs", q: QuotaConfig{NodeEnv: node, HostID: "mac-work"}, env: map[string]string{"PACELEVER_HOST_ID": "oci"}, wantErr: errHostMismatch},
+		{name: "explicit id without a node env", q: QuotaConfig{NodeEnv: filepath.Join(t.TempDir(), "absent.env"), HostID: "mac-work"}, wantErr: errNoNodeID},
+		{name: "explicit env without a node env", q: QuotaConfig{NodeEnv: filepath.Join(t.TempDir(), "absent.env")}, env: map[string]string{"PACELEVER_HOST_ID": "mac-work"}, wantErr: errNoNodeID},
+		{name: "no id anywhere, no hash fallback", q: QuotaConfig{NodeEnv: filepath.Join(t.TempDir(), "absent.env")}, wantErr: errNoNodeID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			got, err := tc.q.presenceHostID()
+			if err != tc.wantErr || got != tc.want {
+				t.Fatalf("got %q, %v; want %q, %v", got, err, tc.want, tc.wantErr)
+			}
+		})
 	}
-	q := QuotaConfig{HostID: "mac-work"}
-	if got := q.presenceHostID(); got != "mac-work" {
-		t.Fatalf("config host_id %q", got)
+}
+func TestNodeIDParsing(t *testing.T) {
+	clearHostEnv(t)
+	write := func(body string) QuotaConfig {
+		path := filepath.Join(t.TempDir(), "node.env")
+		if e := os.WriteFile(path, []byte(body), 0o600); e != nil {
+			t.Fatal(e)
+		}
+		return QuotaConfig{NodeEnv: path}
 	}
-	t.Setenv("HANDOFFKEEP_HOST_ID", "oci")
-	if got := q.presenceHostID(); got != "oci" {
-		t.Fatalf("env did not override config: %q", got)
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"plain", "HUB_MACHINE_ID=node-a\nHUB_TOKEN=x\n", "node-a"},
+		{"comments and blanks", "# note\n\nHUB_TOKEN=x\nHUB_MACHINE_ID=node-a\n", "node-a"},
+		{"export prefix", "export HUB_MACHINE_ID=node-a\n", "node-a"},
+		{"quoted", "HUB_MACHINE_ID=\"node-a\"\n", "node-a"},
+		{"last assignment wins", "HUB_MACHINE_ID=node-a\nHUB_MACHINE_ID=node-b\n", "node-b"},
+		{"spaces around", "  HUB_MACHINE_ID = node-a  \n", "node-a"},
+		{"missing key", "HUB_TOKEN=x\n", ""},
+		{"empty value", "HUB_MACHINE_ID=\n", ""},
+		{"operator is a valid id but never inferred", "HUB_MACHINE_ID=operator\n", "operator"},
+		{"uppercase", "HUB_MACHINE_ID=Node-A\n", ""},
+		{"underscore", "HUB_MACHINE_ID=node_a\n", ""},
+		{"too long", "HUB_MACHINE_ID=" + strings.Repeat("a", 33) + "\n", ""},
+		{"max length", "HUB_MACHINE_ID=" + strings.Repeat("a", 32) + "\n", strings.Repeat("a", 32)},
+		{"malformed line", "HUB_MACHINE_ID=node-a\nnot a pair\n", ""},
+		{"bad quoting", "HUB_MACHINE_ID=\"node-a\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := write(tc.body).nodeID()
+			if got != tc.want || ok != (tc.want != "") {
+				t.Fatalf("got %q, %v; want %q", got, ok, tc.want)
+			}
+		})
 	}
-	t.Setenv("PACELEVER_HOST_ID", "rpi")
-	if got := q.presenceHostID(); got != "rpi" {
-		t.Fatalf("PACELEVER_HOST_ID %q", got)
+	if _, ok := (QuotaConfig{NodeEnv: t.TempDir()}).nodeID(); ok {
+		t.Fatal("a directory was read as a node env file")
+	}
+	// An id past the read limit must not be trusted: a later assignment could
+	// have been cut off.
+	big := "HUB_MACHINE_ID=node-a\n#" + strings.Repeat("x", 1<<20) + "\nHUB_MACHINE_ID=node-b\n"
+	if got, ok := write(big).nodeID(); ok {
+		t.Fatalf("oversized node env gave %q", got)
+	}
+}
+func TestNodeEnvPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, tc := range []struct{ configured, want string }{
+		{"", filepath.Join(home, ".config", "panewire", "hub-node.env")},
+		{"~/n/hub.env", filepath.Join(home, "n", "hub.env")},
+		{"/etc/panewire/node.env", "/etc/panewire/node.env"},
+	} {
+		if got := (QuotaConfig{NodeEnv: tc.configured}).nodeEnvPath(); got != tc.want {
+			t.Fatalf("node_env %q resolved to %q, want %q", tc.configured, got, tc.want)
+		}
+	}
+}
+func TestNodeIDFromDefaultPath(t *testing.T) {
+	clearHostEnv(t)
+	home := os.Getenv("HOME")
+	dir := filepath.Join(home, ".config", "panewire")
+	if e := os.MkdirAll(dir, 0o700); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.WriteFile(filepath.Join(dir, "hub-node.env"), []byte("HUB_MACHINE_ID=default-node\n"), 0o600); e != nil {
+		t.Fatal(e)
+	}
+	if got, err := (QuotaConfig{}).presenceHostID(); err != nil || got != "default-node" {
+		t.Fatalf("default path gave %q, %v", got, err)
 	}
 }
 func TestQuotaHostIDFromConfigFile(t *testing.T) {
 	isolate(t)
-	t.Setenv("PACELEVER_HOST_ID", "")
-	t.Setenv("HANDOFFKEEP_HOST_ID", "")
+	clearHostEnv(t)
+	node := writeNodeEnv(t, "mac-dev")
 	path := filepath.Join(configBase(), "pacelever", "config.toml")
-	if e := AtomicWrite(path, []byte("[quota]\nhost_id = \"mac-dev\"\n")); e != nil {
+	if e := AtomicWrite(path, []byte("[quota]\nhost_id = \"mac-dev\"\nnode_env = \""+node+"\"\n")); e != nil {
 		t.Fatal(e)
 	}
 	t.Setenv("PACELEVER_CONFIG", path)
@@ -727,8 +842,11 @@ func TestQuotaHostIDFromConfigFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Quota.presenceHostID(); got != "mac-dev" {
-		t.Fatalf("host_id %q", got)
+	if cfg.Quota.NodeEnv != node {
+		t.Fatalf("node_env %q", cfg.Quota.NodeEnv)
+	}
+	if got, err := cfg.Quota.presenceHostID(); err != nil || got != "mac-dev" {
+		t.Fatalf("host_id %q, %v", got, err)
 	}
 	if e := (QuotaConfig{HostID: "bad host/name"}).Validate(); e == nil || strings.Contains(e.Error(), "bad host") {
 		t.Fatalf("invalid host_id accepted or echoed: %v", e)
@@ -737,22 +855,113 @@ func TestQuotaHostIDFromConfigFile(t *testing.T) {
 		t.Fatal("overlong host_id accepted")
 	}
 }
-func TestPresenceUsesConfiguredHostID(t *testing.T) {
-	t.Setenv("PACELEVER_HOST_ID", "")
-	t.Setenv("HANDOFFKEEP_HOST_ID", "")
-	f := &fakeHK{presenceDone: make(chan struct{}, 1)}
+
+// presenceCollector is a shared collector whose node env holds nodeID ("" for
+// no node env at all).
+func presenceCollector(t *testing.T, f *fakeHK, nodeID string) Collector {
+	t.Helper()
+	clearHostEnv(t)
 	c := sharedCollector(t, f)
-	c.Config.Quota.HostID = "desktop"
-	collectShared(t, c)
-	select {
-	case <-f.presenceDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("presence never ran")
+	c.Config.Quota.NodeEnv = filepath.Join(t.TempDir(), "absent.env")
+	if nodeID != "" {
+		c.Config.Quota.NodeEnv = writeNodeEnv(t, nodeID)
+	}
+	c.PublishLog = &PublishLog{}
+	return c
+}
+func presenceSeen(f *fakeHK, wait bool) []PresenceRecord {
+	if wait {
+		select {
+		case <-f.presenceDone:
+		case <-time.After(2 * time.Second):
+		}
+	} else {
+		time.Sleep(100 * time.Millisecond)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.presence) != 1 || f.presence[0].HostID != "desktop" {
-		t.Fatalf("presence %+v", f.presence)
+	return append([]PresenceRecord(nil), f.presence...)
+}
+func TestPresenceUsesNodeID(t *testing.T) {
+	f := &fakeHK{presenceDone: make(chan struct{}, 1)}
+	c := presenceCollector(t, f, "desktop")
+	collectShared(t, c)
+	if got := presenceSeen(f, true); len(got) != 1 || got[0].HostID != "desktop" {
+		t.Fatalf("presence %+v", got)
+	}
+}
+func TestPresenceAcceptsEqualExplicitHostID(t *testing.T) {
+	f := &fakeHK{presenceDone: make(chan struct{}, 1)}
+	c := presenceCollector(t, f, "desktop")
+	c.Config.Quota.HostID = "desktop"
+	t.Setenv("PACELEVER_HOST_ID", "desktop")
+	collectShared(t, c)
+	if got := presenceSeen(f, true); len(got) != 1 || got[0].HostID != "desktop" {
+		t.Fatalf("presence %+v", got)
+	}
+	c.PublishLog.Wait()
+	if errs := c.PublishLog.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected warnings %v", errs)
+	}
+}
+
+// A configured id that is not the node's refuses presence, warns once, and
+// leaves the shared read and the verdict alone.
+func TestPresenceRefusedOnMismatch(t *testing.T) {
+	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now().Add(-time.Minute))}}
+	c := presenceCollector(t, f, "desktop")
+	c.NoCache = true
+	c.Config.Quota.HostID = "laptop"
+	o := collectShared(t, c)
+	if o.Stale || o.Degraded || o.Source != "handoffkeep" || len(o.Buckets) == 0 {
+		t.Fatalf("read changed by a presence refusal: %+v", o)
+	}
+	if got := presenceSeen(f, false); len(got) != 0 {
+		t.Fatalf("published despite mismatch: %+v", got)
+	}
+	c.PublishLog.Wait()
+	errs := c.PublishLog.Errors()
+	if len(errs) != 1 || errs[0] != errHostMismatch {
+		t.Fatalf("warnings %v", errs)
+	}
+	if strings.Contains(errs[0].Error(), "laptop") || strings.Contains(errs[0].Error(), "desktop") {
+		t.Fatalf("warning echoes an id: %v", errs[0])
+	}
+}
+
+// With no node env and no explicit id nothing is published, a warning is
+// recorded once, and reads still work.
+func TestPresenceNotPublishedWithoutNodeID(t *testing.T) {
+	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now().Add(-time.Minute))}}
+	c := presenceCollector(t, f, "")
+	c.NoCache = true
+	o := collectShared(t, c)
+	if o.Stale || o.Degraded || o.Source != "handoffkeep" || len(o.Buckets) == 0 {
+		t.Fatalf("read changed by missing node id: %+v", o)
+	}
+	if got := presenceSeen(f, false); len(got) != 0 {
+		t.Fatalf("published without a node id: %+v", got)
+	}
+	c.PublishLog.Wait()
+	if errs := c.PublishLog.Errors(); len(errs) != 1 || errs[0] != errNoNodeID {
+		t.Fatalf("warnings %v", errs)
+	}
+	// The explicit id alone is no substitute for the node id.
+	c.Config.Quota.HostID = "desktop"
+	collectShared(t, c)
+	if got := presenceSeen(f, false); len(got) != 0 {
+		t.Fatalf("explicit host_id published without a node id: %+v", got)
+	}
+}
+func TestPublishLogAddOnce(t *testing.T) {
+	var l *PublishLog
+	l.addOnce(errNoNodeID)
+	l = &PublishLog{}
+	l.addOnce(errNoNodeID)
+	l.addOnce(errNoNodeID)
+	l.addOnce(errHostMismatch)
+	if errs := l.Errors(); len(errs) != 2 {
+		t.Fatalf("errors %v", errs)
 	}
 }
 

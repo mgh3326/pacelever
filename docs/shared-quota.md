@@ -33,7 +33,8 @@ this opt-in configuration in each host's private pacelever config:
 [quota]
 url = "https://YOUR_HK_ENDPOINT"
 credential_env = "HANDOFFKEEP_TOKEN"
-host_id = "mac-work"
+host_id = "mac-work"        # optional; must equal HUB_MACHINE_ID in the node env file
+# node_env = "~/.config/panewire/hub-node.env"   # default
 fresh_ttl_s = 300
 lease_ttl_s = 120
 wait_s = 1
@@ -111,7 +112,7 @@ allow_plaintext_quota_share = true   # only if quota.url is http://
 [quota]
 url = "http://YOUR_HK_HOST:PORT"
 credential_env = "HANDOFFKEEP_TOKEN"
-host_id = "your-host-id"
+host_id = "your-host-id"    # optional; must equal HUB_MACHINE_ID in the node env file
 measurable_accounts = [
   "claude:0123456789abcdef",
   "grok:fedcba9876543210",
@@ -256,16 +257,25 @@ identity checks that gate probing); read-only hosts never publish:
 
 ```
 PUT /v1/quota/presence
-{"host_id":"host-<stable-id>","account_key":"<pool>:<fingerprint>","last_seen":"<RFC3339>"}
+{"host_id":"<node-id>","account_key":"<pool>:<fingerprint>","last_seen":"<RFC3339>"}
 ```
 
 It is a separate record from the quota observation, which deliberately carries
-no host metadata. `host_id` is, in order of precedence: `PACELEVER_HOST_ID` or
-`HANDOFFKEEP_HOST_ID` from the environment; `[quota] host_id` from the private
-config (use the machine id placement matches on, e.g. `mac-work`); otherwise a
-truncated SHA-256 of the local hostname. The raw hostname is never sent. The
-configured value may contain only letters, digits, `.`, `_` and `-` (at most 64
-characters); anything else makes the configuration invalid. Publishes are
+no host metadata. `host_id` is the node's `HUB_MACHINE_ID`, read directly from the panewire node
+env file (`[quota] node_env`, default `~/.config/panewire/hub-node.env`; a
+leading `~/` is expanded). pacelever neither runs the panewire binary nor calls
+the hub, and it reads only that one key. The id must match `^[a-z0-9-]{1,32}$`.
+`PACELEVER_HOST_ID` / `HANDOFFKEEP_HOST_ID` and `[quota] host_id` are not
+sources of an id: each one that is set must equal the node id, otherwise
+presence is not published. With no readable node id nothing is published,
+whatever else is configured. There is no hostname-hash fallback. Either refusal
+prints one `warning:` per run; shared reads, leases and measurement publishes
+are unaffected. Values are compared after trimming surrounding whitespace, and a blank
+value counts as unset. Because `host_id` (and the env variables) must equal the
+node id, set one only to the exact `HUB_MACHINE_ID` form,
+`^[a-z0-9-]{1,32}$`; any other value, even one the configuration check accepts,
+can never match and presence is refused.
+Publishes are
 rate-limited to at most one per `presence_every_s` seconds (default 600) per
 host and account, recorded in a `presence.json` next to the cache file.
 Publication is
