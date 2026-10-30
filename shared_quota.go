@@ -279,7 +279,7 @@ func (c Collector) publishPresence(source ObservationSource, key string, at time
 		defer cancel()
 		err := publisher.PublishPresence(ctx, record)
 		if err != nil {
-			c.PublishLog.add(fmt.Errorf("presence publish failed for %s", key))
+			c.PublishLog.add(fmt.Errorf("presence publish failed for %s: %w", key, err))
 		}
 		if onDone != nil {
 			onDone(err == nil)

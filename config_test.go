@@ -48,6 +48,41 @@ func TestConfigLoadAndEdit(t *testing.T) {
 		t.Fatalf("config keys lost: %v", e)
 	}
 }
+func TestConfigLegacyPathStillLoadsWithWarning(t *testing.T) {
+	isolate(t)
+	path := filepath.Join(configBase(), "scopefuel", "config.toml")
+	if e := AtomicWrite(path, []byte("[pools.claude]\nsubscribed = false\n")); e != nil {
+		t.Fatal(e)
+	}
+	c, e := LoadConfig()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if c.Subscribed("", "claude") {
+		t.Fatal("legacy config not loaded")
+	}
+	found := false
+	for _, w := range c.Warnings {
+		if strings.Contains(w, "legacy scopefuel config") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("migration warning missing: %v", c.Warnings)
+	}
+	// Policy edits still write only the pacelever file.
+	if e = EditConfig(func(raw map[string]any) error {
+		raw["settings"] = map[string]any{"altlane_pace_multiple": 1.5}
+		return nil
+	}); e != nil {
+		t.Fatal(e)
+	}
+	after, _ := os.ReadFile(path)
+	if string(after) != "[pools.claude]\nsubscribed = false\n" {
+		t.Fatal("legacy config modified")
+	}
+}
+
 func TestConfigMalformedDoesNotLeak(t *testing.T) {
 	isolate(t)
 	sentinel := "DO-NOT-PRINT-CREDENTIAL"
@@ -79,6 +114,19 @@ func TestCreditMaxAgeConfig(t *testing.T) {
 		if _, e = LoadConfig(); e == nil {
 			t.Fatalf("credit_max_age_s = %s accepted", value)
 		}
+	}
+}
+
+func TestLegacyManualPathStillLoads(t *testing.T) {
+	isolate(t)
+	path := filepath.Join(cacheBase(), "scopefuel", "manual.json")
+	data := `{"schema":"scopefuel.manual.v1","latest":{"claude:5h":"old"},"history":[{"event":"set","manual_observation_id":"old","pool":"claude","window":"5h","used_pct":10,"measured_at":"2026-10-28T00:00:00Z","expires_at":"2026-10-28T01:00:00Z"}]}`
+	if e := AtomicWrite(path, []byte(data)); e != nil {
+		t.Fatal(e)
+	}
+	s, e := LoadManual()
+	if e != nil || len(s.History) != 1 {
+		t.Fatalf("legacy manual not loaded: %v", e)
 	}
 }
 

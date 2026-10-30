@@ -2,8 +2,10 @@
 
 pacelever reads `PACELEVER_CONFIG` when set. Otherwise it reads
 `$XDG_CONFIG_HOME/pacelever/config.toml`;
-`XDG_CONFIG_HOME` defaults to `~/.config`.
-Policy edits change only the requested values and preserve unrelated keys.
+`XDG_CONFIG_HOME` defaults to `~/.config`. For one release a pre-existing
+`~/.config/scopefuel/config.toml` still loads when the pacelever file is
+absent, with a warning to move it. Policy edits change only the requested
+values and preserve unrelated keys; edits always write the pacelever file.
 Comments and formatting may be rewritten.
 
 Unknown pool sections are ignored with a warning naming the section. A malformed
@@ -133,7 +135,9 @@ forwarded bearer token.
 ## State and manual evidence
 
 New state lives under `$XDG_CACHE_HOME/pacelever` (default `~/.cache/pacelever`).
-`PACELEVER_CACHE` selects a snapshot file.
+`PACELEVER_CACHE` selects a snapshot file. For one release, manual observations
+stored at `~/.cache/scopefuel/manual.json` still load when the pacelever manual
+file is absent; new writes go to the pacelever file.
 No database server, SQL service or CGO driver is required.
 
 New files use mode 0600, atomic rename and stable kernel-lock inodes. A killed

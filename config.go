@@ -110,7 +110,18 @@ func CachePath() string {
 func LoadConfig() (Config, error) {
 	path := ConfigPath()
 	b, e := os.ReadFile(path)
+	legacy := ""
+	if os.IsNotExist(e) && os.Getenv("PACELEVER_CONFIG") == "" {
+		// One release: a pre-existing scopefuel config still loads so an upgrade
+		// never silently drops pool and quota policy. Reads only; edits always
+		// write the pacelever file.
+		legacy = filepath.Join(configBase(), "scopefuel", "config.toml")
+		b, e = os.ReadFile(legacy)
+	}
 	c := Config{Pools: map[string]PoolPolicy{}, Profiles: map[string]ProfilePolicy{}, Settings: map[string]float64{}, Raw: map[string]any{}, Path: path}
+	if legacy != "" && e == nil {
+		c.Warnings = append(c.Warnings, "legacy scopefuel config.toml is still in use; move it to "+path)
+	}
 	if os.IsNotExist(e) {
 		return c, nil
 	}
