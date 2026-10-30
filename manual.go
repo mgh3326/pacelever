@@ -47,7 +47,7 @@ func LoadManual() (ManualStore, error) {
 	if os.IsNotExist(e) {
 		// A running host's existing manual store keeps loading for one
 		// release (operator decision 10-30).
-		e = ReadJSON(filepath.Join(cacheBase(), "scopefuel", "manual.json"), &s)
+		e = ReadJSON(filepath.Join(filepath.Dir(legacyCachePath()), "manual.json"), &s)
 	}
 	if os.IsNotExist(e) {
 		return ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}, nil

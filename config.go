@@ -107,6 +107,16 @@ func CachePath() string {
 	}
 	return filepath.Join(CacheDir(), "snapshots.json")
 }
+
+// legacyCachePath locates retired host state under the old cache dir. It is
+// kept for one release (operator decision 10-30) so existing config, manual
+// stores, limit records and snapshots keep loading.
+func legacyCachePath() string {
+	if p := os.Getenv("SCOPEFUEL_CACHE"); p != "" {
+		return p
+	}
+	return filepath.Join(cacheBase(), "scopefuel", "snapshots.json")
+}
 func LoadConfig() (Config, error) {
 	path := ConfigPath()
 	b, e := os.ReadFile(path)
@@ -182,6 +192,12 @@ func LoadConfig() (Config, error) {
 			return c, fmt.Errorf("invalid pools.%s.credit_max_age_s", name)
 		}
 		c.Pools[name] = p
+	}
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(name, "SCOPEFUEL_") && name != "SCOPEFUEL_CACHE" && name != "SCOPEFUEL_BENCH_DB" {
+			c.Warnings = append(c.Warnings, fmt.Sprintf("retired environment variable %s ignored", name))
+		}
 	}
 	sort.Strings(c.Warnings)
 	return c, nil

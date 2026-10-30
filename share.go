@@ -165,7 +165,7 @@ func readLimits(pool string) limitStore {
 	if e := ReadJSON(limitPath(pool), &s); os.IsNotExist(e) {
 		// An existing limit record keeps loading for one release (operator
 		// decision 10-30); a lost free-limit hold could admit spent quota.
-		_ = ReadJSON(filepath.Join(cacheBase(), "scopefuel", filepath.Base(limitPath(pool))), &s)
+		_ = ReadJSON(filepath.Join(filepath.Dir(legacyCachePath()), filepath.Base(limitPath(pool))), &s)
 	}
 	if s.Records == nil {
 		s.Records = map[string]LimitRecord{}

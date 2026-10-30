@@ -4,7 +4,9 @@ pacelever reads `PACELEVER_CONFIG` when set, otherwise
 `$XDG_CONFIG_HOME/pacelever/config.toml` (`XDG_CONFIG_HOME` defaults to
 `~/.config`). A host whose config still lives at the retired
 `$XDG_CONFIG_HOME/scopefuel/config.toml` keeps loading for one release
-(operator decision 10-30); new writes go to the pacelever file only. The
+(operator decision 10-30); new writes go to the pacelever file only. A
+retired `SCOPEFUEL_*` variable other than `SCOPEFUEL_CACHE` and
+`SCOPEFUEL_BENCH_DB` is reported as ignored. The
 first policy edit preserves all parsed keys and changes
 only the requested values. Comments and formatting may be rewritten.
 
@@ -134,9 +136,10 @@ forwarded bearer token.
 ## State and manual evidence
 
 New state lives under `$XDG_CACHE_HOME/pacelever` (default `~/.cache/pacelever`).
-`PACELEVER_CACHE` selects a snapshot file. Existing
-`scopefuel/manual.json` and `scopefuel/*-limit.json` stores keep loading
-for one release for the same reason.
+`PACELEVER_CACHE` selects a snapshot file. For one release, retired
+`SCOPEFUEL_CACHE` data — `snapshots.json`, `manual.json` and
+`*-limit.json` — keeps loading; native entries win and a retired
+backoff never blocks a native probe.
 The historical bench database is still read from
 `$XDG_DATA_HOME/scopefuel/bench.db` (default `~/.local/share/scopefuel/bench.db`,
 or `SCOPEFUEL_BENCH_DB`) for one release because it is the only copy of that

@@ -129,3 +129,19 @@ func TestFailedRefreshRetainsMeasurementAndIdentity(t *testing.T) {
 		})
 	}
 }
+
+// The retired snapshots file still supplies last-good readings during the
+// one-release transition, and its backoff does not block a native provider.
+func TestLegacySnapshotStillLoads(t *testing.T) {
+	isolate(t)
+	entry := map[string]CacheEntry{"claude": {FetchedAt: float64(testNow.Unix()), Result: observation("claude", 10)}}
+	if e := WriteJSON(legacyCachePath(), entry); e != nil {
+		t.Fatal(e)
+	}
+	var called bool
+	c := Collector{Providers: map[string]Provider{"claude": ProviderFunc(func(context.Context) Observation { called = true; return observation("claude", 50) })}, Now: func() time.Time { return testNow }}
+	rows, e := c.Collect(context.Background(), []string{"claude"})
+	if e != nil || called || *rows[0].Buckets[0].UsedPct != 10 {
+		t.Fatalf("legacy snapshot not read: %+v %v", rows, e)
+	}
+}

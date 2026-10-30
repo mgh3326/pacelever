@@ -48,11 +48,12 @@ experiment ID. [Exploration and PR outcomes](docs/experiments.md) describes the
 policy, labels and outcome evidence.
 
 For one release (operator decision 10-30), running host state keeps loading
-from the retired paths: `~/.config/scopefuel/config.toml`, `manual.json` and
-`*-limit.json` under `~/.cache/scopefuel`, the `scopefuel.manual.v1` store
-schema, and the read-only SQLite bench data at
-`~/.local/share/scopefuel/bench.db` (`SCOPEFUEL_BENCH_DB`).
-New writes belong to pacelever.
+from the retired paths: `~/.config/scopefuel/config.toml`, `SCOPEFUEL_CACHE`
+snapshots, `manual.json` and `*-limit.json` under `~/.cache/scopefuel`, the
+`scopefuel.manual.v1` store schema, and the read-only SQLite bench data at
+`~/.local/share/scopefuel/bench.db` (`SCOPEFUEL_BENCH_DB`). Other retired
+`SCOPEFUEL_*` variables are reported as ignored. New writes belong to
+pacelever.
 Unknown pool sections produce a warning. See [configuration](docs/config.md),
 [design and migration](DESIGN.md), and [the CLI reference](docs/cli.md).
 

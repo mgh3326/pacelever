@@ -23,44 +23,95 @@ type CacheEntry struct {
 	LastError     *Observation `json:"last_error,omitempty"`
 	LastErrorAt   float64      `json:"last_error_at,omitempty"`
 	NegativeUntil float64      `json:"negative_until,omitempty"`
+	// legacy marks an entry imported from the retired cache. Its negative
+	// state must not block a pool pacelever measures with its own provider.
+	legacy bool
 }
 type Collector struct {
 	Shared    ObservationSource
 	Selectors map[string]string
 	CachePath string
-	Config    Config
-	Providers map[string]Provider
-	Now       func() time.Time
-	TTL       time.Duration
-	NoCache   bool
+	// LegacyCachePath selects the retired snapshots file read during the
+	// one-release transition (operator decision 10-30).
+	LegacyCachePath string
+	Config          Config
+	Providers       map[string]Provider
+	Now             func() time.Time
+	TTL             time.Duration
+	NoCache         bool
 	// Publish, when set, joins asynchronous shared publishes so the caller can
 	// wait for them and report failures before exiting.
 	Publish *PublishTracker
 }
 
 func LoadSnapshots() (map[string]CacheEntry, error) {
-	return loadSnapshots(CachePath())
+	return loadSnapshots(CachePath(), legacyCachePath())
 }
-func loadSnapshots(path string) (map[string]CacheEntry, error) {
+func loadSnapshots(ownPath, legacyPath string) (map[string]CacheEntry, error) {
 	merged := map[string]CacheEntry{}
-	var raw map[string]json.RawMessage
-	if e := ReadJSON(path, &raw); e != nil {
-		if os.IsNotExist(e) {
-			return merged, nil
-		}
-		return nil, e
-	}
-	for pool, data := range raw {
-		if !knownPool(pool) {
+	for i, path := range []string{legacyPath, ownPath} {
+		if path == "" {
 			continue
 		}
-		var entry CacheEntry
-		if e := json.Unmarshal(data, &entry); e != nil {
-			return nil, fmt.Errorf("invalid cache entry for pool %s", pool)
+		var raw map[string]json.RawMessage
+		if e := ReadJSON(path, &raw); e != nil {
+			if os.IsNotExist(e) {
+				continue
+			}
+			return nil, e
 		}
-		merged[pool] = entry
+		for pool, data := range raw {
+			if !knownPool(pool) {
+				continue
+			}
+			var entry CacheEntry
+			if e := json.Unmarshal(data, &entry); e != nil {
+				return nil, fmt.Errorf("invalid cache entry for pool %s", pool)
+			}
+			previous := merged[pool]
+			if entry.FetchedAt <= 0 && previous.FetchedAt > 0 {
+				entry.FetchedAt = previous.FetchedAt
+				entry.Result = previous.Result
+			}
+			entry.legacy = i == 0
+			merged[pool] = entry
+		}
 	}
 	return merged, nil
+}
+
+// The retired cache records failed-probe text as a string; native entries may
+// carry a structured observation. Both forms preserve the last good snapshot.
+func (c *CacheEntry) UnmarshalJSON(data []byte) error {
+	type plain CacheEntry
+	var fields map[string]json.RawMessage
+	if e := json.Unmarshal(data, &fields); e != nil {
+		return fmt.Errorf("invalid cache entry")
+	}
+	failed := fields["last_error"]
+	delete(fields, "last_error")
+	body, e := json.Marshal(fields)
+	if e != nil {
+		return e
+	}
+	var value plain
+	if e = json.Unmarshal(body, &value); e != nil {
+		return fmt.Errorf("invalid cache entry fields")
+	}
+	if len(failed) > 0 && string(failed) != "null" {
+		var message string
+		if json.Unmarshal(failed, &message) == nil {
+			value.LastError = &Observation{Error: message, ErrorKind: ErrKindLegacyFailure}
+		} else {
+			var observation Observation
+			if json.Unmarshal(failed, &observation) != nil {
+				return fmt.Errorf("invalid cache failure metadata")
+			}
+			value.LastError = &observation
+		}
+	}
+	*c = CacheEntry(value)
+	return nil
 }
 
 func updateSnapshot(ownPath, pool string, obs Observation, now time.Time, previous CacheEntry) error {
@@ -113,11 +164,12 @@ func ttlFor(pool string) time.Duration {
 	return 60 * time.Second
 }
 func (c Collector) Collect(ctx context.Context, pools []string) ([]Observation, error) {
-	own := c.CachePath
+	own, legacy := c.CachePath, c.LegacyCachePath
 	if own == "" {
 		own = CachePath()
+		legacy = legacyCachePath()
 	}
-	entries, e := loadSnapshots(own)
+	entries, e := loadSnapshots(own, legacy)
 	if e != nil {
 		if c.sharedSource() == nil {
 			return nil, e
@@ -202,7 +254,9 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		return o
 	}
 	provider := c.Providers[pool]
-	if entry.NegativeUntil > float64(now.UnixMilli())/1000 {
+	// A retired backoff describes the old tool's own probe, not pacelever's; a
+	// pool with a native provider fetches through it anyway.
+	if entry.NegativeUntil > float64(now.UnixMilli())/1000 && !(entry.legacy && provider != nil) {
 		kind := ErrKindBackoff
 		if entry.LastError != nil && entry.LastError.ErrorKind != "" {
 			kind = entry.LastError.ErrorKind

@@ -163,3 +163,57 @@ func TestQuotaPoolFreshTTLConfig(t *testing.T) {
 		}
 	}
 }
+
+// A host whose config still lives at the retired path keeps loading for one
+// release, and a retired SCOPEFUEL_* variable is reported as ignored.
+func TestConfigLegacyFileLoads(t *testing.T) {
+	isolate(t)
+	path := filepath.Join(configBase(), "scopefuel", "config.toml")
+	if e := AtomicWrite(path, []byte("[pools.claude]\nclass = 'preserve'\n")); e != nil {
+		t.Fatal(e)
+	}
+	t.Setenv("SCOPEFUEL_E6_ARM", "retired@arm")
+	c, e := LoadConfig()
+	if e != nil || c.Pool("claude", testNow).Class != "preserve" {
+		t.Fatalf("legacy config not read: %v %+v", e, c.Pool("claude", testNow))
+	}
+	found := false
+	for _, w := range c.Warnings {
+		if strings.Contains(w, "SCOPEFUEL_E6_ARM") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("retired env not reported: %v", c.Warnings)
+	}
+}
+
+// An existing manual store under the retired cache dir keeps loading.
+func TestLegacyManualFileLoads(t *testing.T) {
+	isolate(t)
+	m, e := prepareManual(ManualObservation{Pool: "claude", Window: "5h", UsedPct: Pct(20), MeasuredAt: testNow.Format(time.RFC3339), Reason: "fixture"}, time.Hour, testNow)
+	if e != nil {
+		t.Fatal(e)
+	}
+	s := ManualStore{Schema: "scopefuel.manual.v1", History: []ManualObservation{m}, Latest: map[string]string{"claude:5h": m.ID}}
+	if e := WriteJSON(filepath.Join(filepath.Dir(legacyCachePath()), "manual.json"), s); e != nil {
+		t.Fatal(e)
+	}
+	got, e := LoadManual()
+	if e != nil || len(got.Valid("claude", testNow)) != 1 {
+		t.Fatalf("legacy manual store lost: %v %+v", e, got)
+	}
+}
+
+// An existing limit record under the retired cache dir still holds.
+func TestLegacyLimitFileLoads(t *testing.T) {
+	isolate(t)
+	reset := testNow.Add(time.Hour).Format(time.RFC3339)
+	s := limitStore{Records: map[string]LimitRecord{limitIdentity("devin"): {ResetAt: reset, ObservedAt: testNow.Format(time.RFC3339)}}}
+	if e := WriteJSON(filepath.Join(filepath.Dir(legacyCachePath()), "devin-free-limit.json"), s); e != nil {
+		t.Fatal(e)
+	}
+	if r := ActiveFreeLimit(testNow); r == nil || r.ResetAt != reset {
+		t.Fatalf("legacy limit record lost: %+v", r)
+	}
+}

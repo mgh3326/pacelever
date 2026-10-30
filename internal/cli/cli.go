@@ -621,6 +621,7 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 		collector.TTL = time.Minute
 		if event.Credential != "default" {
 			collector.CachePath = filepath.Join(base, "snapshot-"+event.Provider+"-"+event.Credential+".json")
+			collector.LegacyCachePath = ""
 			collector.Providers = pl.DefaultProvidersAt(a.Config, event.Selectors, a.Now)
 			collector.Selectors = event.Selectors
 			for key, p := range collector.Providers {

@@ -26,10 +26,11 @@ const (
 	ErrKindTokenExpired    = "token_expired"     // the saved login is past its expiry
 
 	// Collector and pool state.
-	ErrKindBackoff      = "backoff"      // a negative cache entry without a recorded kind
-	ErrKindCache        = "cache_error"  // the observation could not be persisted
-	ErrKindExcluded     = "excluded"     // pool class is exclude
-	ErrKindUnsubscribed = "unsubscribed" // pool is not subscribed
+	ErrKindBackoff       = "backoff"        // a negative cache entry without a recorded kind
+	ErrKindCache         = "cache_error"    // the observation could not be persisted
+	ErrKindExcluded      = "excluded"       // pool class is exclude
+	ErrKindLegacyFailure = "legacy_failure" // imported retired-tool failure
+	ErrKindUnsubscribed  = "unsubscribed"   // pool is not subscribed
 
 	// Shared quota.
 	ErrKindAccountMismatch     = "account_mismatch"
