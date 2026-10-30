@@ -1,8 +1,8 @@
 # pacelever conventions
 
-Read README.md and DESIGN.md first. The gate exit codes, `scopefuel.v1` /
-`scopefuel.gate.v1` JSON and the golden fixtures in `testdata/` are a
-compatibility contract: a refactor must leave them unchanged.
+Read README.md and DESIGN.md first. The gate exit codes, the `scopefuel.v1` /
+`scopefuel.gate.v1` wire schema names and the golden fixtures in `testdata/`
+are a compatibility contract: a refactor must leave them unchanged.
 
 ## Layout
 

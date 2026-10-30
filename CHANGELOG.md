@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Removed every retired-tool trace: `SCOPEFUEL_*` environment aliases, the
+  `~/.config/scopefuel` config and cache fallbacks, the scopefuel bench SQLite
+  reader, and the legacy `/v1/documents/quota/*` publish path
+  (`PublishQuota`/`QuotaFallback`, `scopefuel.quota-share.v1`, remote inflight
+  documents). Shared observations publish only to `/v1/quota/*`.
+- Shared account keys come from the local credential for derivable pools
+  (claude, codex, devin); `measurable_accounts` now gates only pools that
+  cannot derive a login, and a configured fingerprint that disagrees with the
+  login never blocks measurement, presence or publish.
+- Presence publishes are tracked by `PublishLog`; the CLI waits for them before
+  exiting and reports failures on stderr.
+- `reps list` tolerates stored or foreign records whose outcome fields fail
+  validation: the rep is marked pending instead of refusing the listing.
+- The bundled catalog gives `fable` a default `high` effort so consult launches
+  carry the rung their seat requires.
+
 - `gate --account-key`: when the shared reading is stale and this host holds the
   same account and may measure it, measure, publish and judge on the fresh value
   instead of refusing; other hosts still exit 4 with the reason. A free SWE-2

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -133,21 +132,25 @@ func TestRepWriteAheadRetry(t *testing.T) {
 		t.Fatalf("retry changed identity: %+v %v", ids, e)
 	}
 }
-func TestLegacyBenchReader(t *testing.T) {
+
+// A stored or foreign rep whose outcome fields fail validation is listed as
+// pending instead of refusing the whole listing.
+func TestRepsListToleratesInvalidStoredOutcome(t *testing.T) {
 	isolate(t)
-	t.Setenv("SCOPEFUEL_BENCH_DB", "testdata/legacy_bench.sqlite3")
-	before, _ := os.ReadFile("testdata/legacy_bench.sqlite3")
-	rows, e := legacyRows("scores", false)
-	if e != nil || len(rows) != 1 || str(rows[0]["model_id"]) != "example-model" {
-		t.Fatalf("scores: %+v %v", rows, e)
+	good := Rep{LocalID: 1, Profile: "sonnet", ModelID: "model-a", TaskRef: "task-a", Notes: `{"experiment_arm":"downshift","experiment_id":"e-1"}`, RecordedAt: testNow.Format(time.RFC3339)}
+	bad := Rep{LocalID: 2, Profile: "sonnet", ModelID: "model-a", TaskRef: "task-b", Notes: `{"experiment_arm":"control"}`, RecordedAt: testNow.Add(time.Minute).Format(time.RFC3339)}
+	if e := WriteJSON(repsPath(), []Rep{good, bad}); e != nil {
+		t.Fatal(e)
 	}
-	rows, e = legacyRows("reps", false)
-	if e != nil || len(rows) != 1 {
-		t.Fatalf("reps: %+v %v", rows, e)
+	rows, _, e := (BenchClient{}).ReadReps(context.Background(), "")
+	if e != nil || len(rows) != 2 {
+		t.Fatalf("stored outcome blocked listing: %v %+v", e, rows)
 	}
-	after, _ := os.ReadFile("testdata/legacy_bench.sqlite3")
-	if string(before) != string(after) {
-		t.Fatal("legacy database modified")
+	for _, r := range rows {
+		wantPending := r.LocalID == 2
+		if r.Pending != wantPending {
+			t.Fatalf("pending mismatch: %+v", r)
+		}
 	}
 }
 func TestBundledCatalogMonotonic(t *testing.T) {

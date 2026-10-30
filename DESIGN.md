@@ -32,8 +32,10 @@ never by primary/secondary position.
 
 Gate exits remain 0 admitted, 3 quota/policy, 4 unmeasurable, 5 role-denied and
 6 unsubscribed; malformed input or output failures use 2. The CLI preserves the
-admission first-line format and `scopefuel.gate.v1` audit schema. JSON quota
+admission first-line format and the `scopefuel.gate.v1` audit schema. JSON quota
 summaries keep `scopefuel.v1`, including provider status/source and scoped buckets.
+These schema names are the wire contract downstream tools parse; they are kept
+verbatim even though they carry a historical name.
 Launch JSON keeps the original fields, including catalog provenance, billing,
 provider family and the nullable E6 marker. Launch refusals use exit 3. The operator-requested `label` is an additive field on
 every successful launch; it identifies actual profile/effort and experiment arm.
@@ -96,7 +98,7 @@ fingerprint, verifies the approved subset and effort monotonicity, and writes a
 catalog artifact. Degraded evidence requires a recorded reason. Publishing is a
 separate `bench push-catalog` operation.
 
-## Scopefuel parity
+## Feature coverage
 
 | Feature | pacelever status |
 | --- | --- |
@@ -124,13 +126,10 @@ separate `bench push-catalog` operation.
 | Retired providers, provider plugin loaders, one-shot migrations | Deliberately omitted |
 | Quota-v2 experimental shadow CLI, historical benchmark ingestion/backfills | Outside this core; no legacy command aliases |
 
-## Parity fixtures
+## Golden fixtures
 
-`scripts/capture_goldens.py` executes the installed `scopefuel` command using a
-temporary config, data directory and synthetic fresh cache. It disables remote
-catalog selection, quota sharing and stale checks. No provider is invoked, no
-operator files are changed and no server writes occur. The generated fixture
-records 59 gate exits and 56 launch outcomes across profiles, rungs and seats.
+`testdata/golden.json` records 59 gate exits and 56 launch outcomes across
+profiles, rungs and seats.
 The 39 successful reference JSONs are compared structurally after removing only
 the new, mandatory `label` field requested for experiments. Every existing field
 and its provenance must remain identical; separate assertions verify the label.
@@ -151,35 +150,15 @@ with short-lived helpers only, verifying deadlines, killed-owner lock release
 and parent-death cleanup. Backend tests use an injected HTTP client and local
 files.
 
-## Migration
+## Migration status
 
-1. Keep scopefuel installed and keep all existing callers unchanged. Build or
-   download a separately named pacelever binary. Do not install a replacement yet.
-2. Let pacelever read legacy config and observations. Confirm warnings name only
-   retired/unknown pool sections and check `bench catalog status` provenance.
-   New writes go to pacelever; the legacy files remain unchanged.
-3. Run shadow comparisons with notifications and quota publishing disabled:
-
-   ```sh
-   PACELEVER_NOTIFY=0 PACELEVER_QUOTA_SHARE=0 PACELEVER_STALE_WARN=0 \
-     ./dist/pacelever gate -m sonnet --effort high --role worker \
-     --gate-output /tmp/pacelever-gate.json
-   scopefuel gate -m sonnet --effort high --role worker \
-     --gate-output /tmp/scopefuel-gate.json
-   ```
-
-   Capture each command's exit independently. Compare codes, pool, scope, selected
-   rung, cutoff, subscription, manual provenance and alternatives. Preserve code 5
-   separately from quota denial. Compare fresh observations close in time; usage
-   can change between the two reads. Expect the documented credit builder change.
-4. Witness authenticated provider probes on the intended platform, including a
-   Command Code caller with a short timeout. Check fresh and stale/manual cases,
-   free model scope, retired/unsubscribed pools and area routing. No production
-   catalog push is needed for shadow validation.
-5. After operator review, change one caller or let a Go spawner import the package.
-   Monitor verdict differences before changing the next caller. Retain scopefuel
-   and its original files for rollback. Installation and service changes are
-   separate work, not part of building this repository.
+The migration is complete. pacelever reads only its own config
+(`~/.config/pacelever/config.toml`), cache (`$XDG_CACHE_HOME/pacelever`) and
+stores. Retired tool paths, `SCOPEFUEL_*` environment variables and the legacy
+`/v1/documents/quota/*` publish path are gone; observations publish only to the
+shared `/v1/quota/*` store, and a publish failure is reported instead of
+swallowed. The `scopefuel.v1` / `scopefuel.gate.v1` schema strings remain as
+wire names.
 
 ## Continuous downshift experiments
 

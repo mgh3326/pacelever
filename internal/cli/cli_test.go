@@ -21,7 +21,7 @@ func isolated(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(base, "cache"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(base, "data"))
 	t.Setenv("HANDOFFKEEP_CONFIG", filepath.Join(base, "absent.env"))
-	for _, key := range []string{"PACELEVER_CONFIG", "PACELEVER_CACHE", "SCOPEFUEL_CACHE", "HANDOFFKEEP_URL", "HANDOFFKEEP_TOKEN", "PACELEVER_E6_ARM", "SCOPEFUEL_E6_ARM"} {
+	for _, key := range []string{"PACELEVER_CONFIG", "PACELEVER_CACHE", "HANDOFFKEEP_URL", "HANDOFFKEEP_TOKEN", "PACELEVER_E6_ARM"} {
 		t.Setenv(key, "")
 	}
 }
@@ -34,7 +34,7 @@ func TestHelp(t *testing.T) {
 }
 func TestLaunchCLIGoldens(t *testing.T) {
 	isolated(t)
-	data, e := os.ReadFile("../../testdata/scopefuel_golden.json")
+	data, e := os.ReadFile("../../testdata/golden.json")
 	if e != nil {
 		t.Fatal(e)
 	}

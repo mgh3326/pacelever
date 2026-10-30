@@ -77,7 +77,12 @@ func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader
 			app.Collector.NoCache = true
 		}
 	}
+	app.Collector.PublishLog = &pl.PublishLog{}
 	code, e := app.run(ctx, a)
+	app.Collector.PublishLog.Wait()
+	for _, err := range app.Collector.PublishLog.Errors() {
+		fmt.Fprintln(errOut, "warning:", err)
+	}
 	if e != nil {
 		fmt.Fprintln(errOut, "error:", e)
 		if code == 0 {
@@ -101,7 +106,7 @@ func (a *App) catalog(ctx context.Context) pl.Catalog {
 	return c
 }
 func request(a args) pl.Request {
-	return pl.Request{TaskID: a.get("task"), RequiredGrade: a.get("grade"), Profile: a.get("profile"), Effort: a.get("effort"), Role: a.get("role"), Purpose: a.get("purpose"), OperatorRequest: a.get("operator-request"), RequestedBy: a.get("requested-by"), PaceOverride: a.get("pace-override"), E6Arm: pl.FirstEnv("PACELEVER_E6_ARM", "SCOPEFUEL_E6_ARM"), Area: a.get("area")}
+	return pl.Request{TaskID: a.get("task"), RequiredGrade: a.get("grade"), Profile: a.get("profile"), Effort: a.get("effort"), Role: a.get("role"), Purpose: a.get("purpose"), OperatorRequest: a.get("operator-request"), RequestedBy: a.get("requested-by"), PaceOverride: a.get("pace-override"), E6Arm: pl.FirstEnv("PACELEVER_E6_ARM"), Area: a.get("area")}
 }
 func (a *App) localManual() (pl.ManualStore, error) {
 	if a.Config.Quota.URL != "" {
@@ -132,38 +137,11 @@ func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inpu
 	manual = a.Collector.ManualInputs(observations, manual)
 	now := a.now()
 	in := pl.Inputs{Catalog: c, Config: a.Config, Observations: observations, Manual: manual, Now: now, Inflight: map[string]*int{}, FreeLimit: pl.ActiveFreeLimit(now)}
-	for i, o := range in.Observations {
-		if a.Config.Quota.URL == "" && (o.Error != "" || o.Stale) {
-			in.Observations[i] = a.Bench.QuotaFallback(ctx, o, "")
-		}
+	for _, o := range in.Observations {
 		if len(a.Config.Pools[o.ID].InflightReservePct) > 0 {
-			fp := o.PublishFP
-			if fp == "" {
-				fp = o.AccountFP
-			}
 			local, e := pl.LocalInflight(ctx, o.ID, now)
-			read := a.Bench.Inflight(ctx, o.ID, fp, local, e == nil)
+			read := pl.InflightCount(local, e == nil, now)
 			in.Inflight[o.ID] = read.N
-			if e == nil && (o.AccountFPKind == pl.FPKindAccount || o.PublishFPKind == pl.FPKindAccount) {
-				_ = a.Bench.PublishInflight(ctx, o.ID, fp, local)
-			}
-		}
-	}
-	// Fusion lead billing uses the configured account independently of the
-	// host's default login, with the same peer-snapshot identity checks.
-	for _, r := range c.Rows {
-		if strings.HasPrefix(r.Profile, "devin-fusion-sol61") {
-			fp := a.Config.Pools[r.Pool].FusionBillingFP
-			if fp != "" && a.Config.Quota.URL == "" {
-				for i, o := range in.Observations {
-					if o.ID == r.Pool && o.PublishFP != fp && o.AccountFP != fp {
-						remote := a.Bench.QuotaFallback(ctx, o, fp)
-						if remote.Source == pl.SourceRemote {
-							in.Observations[i] = remote
-						}
-					}
-				}
-			}
 		}
 	}
 	return in, nil
@@ -196,9 +174,6 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 		if o.Error != "" {
 			return pl.Unmeasurable, fmt.Errorf("%s", o.Error)
 		}
-		if a.Config.Quota.URL == "" {
-			_ = a.Bench.PublishQuota(ctx, o)
-		}
 		return 0, a.json(o)
 	case "observe":
 		pool := "devin"
@@ -228,13 +203,7 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 		}
 		pool := v.get("pool")
 		local, e := pl.LocalInflight(ctx, pool, a.now())
-		entries, _ := pl.LoadSnapshots()
-		o := entries[pool].Result
-		fp := o.PublishFP
-		if fp == "" {
-			fp = o.AccountFP
-		}
-		return 0, a.json(a.Bench.Inflight(ctx, pool, fp, local, e == nil))
+		return 0, a.json(pl.InflightCount(local, e == nil, a.now()))
 	case "herdr-event":
 		return a.herdr(ctx)
 	case "models":
@@ -629,7 +598,6 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 		collector.TTL = time.Minute
 		if event.Credential != "default" {
 			collector.CachePath = filepath.Join(base, "snapshot-"+event.Provider+"-"+event.Credential+".json")
-			collector.LegacyCachePath = ""
 			collector.Providers = pl.DefaultProvidersAt(a.Config, event.Selectors, a.Now)
 			collector.Selectors = event.Selectors
 			for key, p := range collector.Providers {
@@ -660,7 +628,7 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 	if binary == "" {
 		binary = "herdr"
 	}
-	cmd := exec.CommandContext(ctx, binary, "pane", "report-metadata", "--source", "scopefuel.gauge", event.PaneID, "--token", "scopefuel_quota="+label, "--ttl-ms", "60000")
+	cmd := exec.CommandContext(ctx, binary, "pane", "report-metadata", "--source", "pacelever.gauge", event.PaneID, "--token", "pacelever_quota="+label, "--ttl-ms", "60000")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	return 0, cmd.Run()
