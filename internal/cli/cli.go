@@ -59,7 +59,7 @@ func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader
 		app.Config.Bench.AllowPlaintextReps = true
 	}
 	app.Bench = pl.NewBenchClient(app.Config)
-	app.Collector = pl.Collector{Config: app.Config, Providers: pl.DefaultProvidersAt(app.Config, nil, app.Now), Now: app.Now, NoCache: a.flags["no-cache"]}
+	app.Collector = pl.Collector{Config: app.Config, Providers: pl.DefaultProvidersAt(app.Config, nil, app.Now), Now: app.Now, NoCache: a.flags["no-cache"], Publishes: &pl.PublishTracker{}}
 	for k, p := range app.Collector.Providers {
 		if probe, ok := p.(pl.PTYProvider); ok {
 			probe.Guard = pl.GuardProcess
@@ -83,6 +83,16 @@ func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader
 		if code == 0 {
 			code = pl.Invalid
 		}
+	}
+	// Presence publishes run beside the collection; finish them before exit and
+	// say which failed. Only a command whose contract is to publish fails on it:
+	// a gate verdict never depends on a shared write.
+	failures := app.Collector.Publishes.Wait()
+	for _, f := range failures {
+		fmt.Fprintf(errOut, "error: shared publish failed: %s (%s)\n", f.Pool, f.Kind)
+	}
+	if len(failures) > 0 && code == 0 && a.at(0) == "refresh" {
+		code = pl.Invalid
 	}
 	return code
 }
@@ -132,10 +142,7 @@ func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inpu
 	manual = a.Collector.ManualInputs(observations, manual)
 	now := a.now()
 	in := pl.Inputs{Catalog: c, Config: a.Config, Observations: observations, Manual: manual, Now: now, Inflight: map[string]*int{}, FreeLimit: pl.ActiveFreeLimit(now)}
-	for i, o := range in.Observations {
-		if a.Config.Quota.URL == "" && (o.Error != "" || o.Stale) {
-			in.Observations[i] = a.Bench.QuotaFallback(ctx, o, "")
-		}
+	for _, o := range in.Observations {
 		if len(a.Config.Pools[o.ID].InflightReservePct) > 0 {
 			fp := o.PublishFP
 			if fp == "" {
@@ -145,23 +152,8 @@ func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inpu
 			read := a.Bench.Inflight(ctx, o.ID, fp, local, e == nil)
 			in.Inflight[o.ID] = read.N
 			if e == nil && (o.AccountFPKind == pl.FPKindAccount || o.PublishFPKind == pl.FPKindAccount) {
-				_ = a.Bench.PublishInflight(ctx, o.ID, fp, local)
-			}
-		}
-	}
-	// Fusion lead billing uses the configured account independently of the
-	// host's default login, with the same peer-snapshot identity checks.
-	for _, r := range c.Rows {
-		if strings.HasPrefix(r.Profile, "devin-fusion-sol61") {
-			fp := a.Config.Pools[r.Pool].FusionBillingFP
-			if fp != "" && a.Config.Quota.URL == "" {
-				for i, o := range in.Observations {
-					if o.ID == r.Pool && o.PublishFP != fp && o.AccountFP != fp {
-						remote := a.Bench.QuotaFallback(ctx, o, fp)
-						if remote.Source == pl.SourceRemote {
-							in.Observations[i] = remote
-						}
-					}
+				if a.Bench.PublishInflight(ctx, o.ID, fp, local) != nil {
+					a.Collector.Publishes.Fail(o.ID, pl.ErrKindInflightPublishFailed)
 				}
 			}
 		}
@@ -195,9 +187,6 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 		}
 		if o.Error != "" {
 			return pl.Unmeasurable, fmt.Errorf("%s", o.Error)
-		}
-		if a.Config.Quota.URL == "" {
-			_ = a.Bench.PublishQuota(ctx, o)
 		}
 		return 0, a.json(o)
 	case "observe":

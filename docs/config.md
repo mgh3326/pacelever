@@ -51,7 +51,8 @@ to 99% for spend or 90% for preserve. The weekly pace threshold never blocks a
 launch. `exclude` and `subscribed = false` skip automatic probes. A subscribed
 profile override can re-enable that profile on an unsubscribed pool.
 `fusion_billing_fp` optionally selects the billing account for a Fusion lead;
-its value is not printed by policy list.
+its value is not printed by policy list. The Fusion lead is admitted only when
+this host's login (or the shared reading for the named account) matches it.
 
 Credit pools (`anthropic-api`) accept `credit_max_age_s`, defaulting to 259200
 (three days). A hand-entered balance older than that still admits with a
@@ -198,7 +199,7 @@ It admits while the balance is positive and unexpired and below that cutoff;
 admission. A stale entry still admits, with a warning, so the operator can
 update it by hand.
 
-`PACELEVER_QUOTA_SHARE=0` disables peer snapshot exchange. `PACELEVER_NOTIFY=0`
+`PACELEVER_QUOTA_SHARE=0` disables peer inflight exchange. `PACELEVER_NOTIFY=0`
 disables exhaustion notices. `PACELEVER_STALE_WARN=0` disables stale-build checks.
 The legacy quota-share and stale-warning switches remain supported. Use these
 controls while comparing shadow verdicts. `operator-switch` is an explicit

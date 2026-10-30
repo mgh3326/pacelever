@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Removed the legacy document quota publication and fallback (`PublishQuota`,
+  `QuotaFallback`, the `scopefuel.quota-share.v1` document and the
+  `/v1/documents/quota/<pool>/<fp>/latest` path); nothing read it. A Fusion lead
+  is now judged only on this host's login or the shared reading.
+  Documents already written under `quota/<pool>/<fp>/latest` stay in the
+  handoffkeep store, which pacelever does not manage; the operator can delete
+  them there. They hold only an account fingerprint and usage percentages.
+- The CLI waits for in-flight presence publishes before it exits and prints each
+  failed shared write (presence, observation, lease release, inflight) to
+  stderr; `refresh` exits 2 when one failed. Gate exit codes are unchanged.
 - Shared quota: a host with a Claude, Codex or Devin login keys, measures,
   publishes and announces presence for that login's account; `quota.accounts`
   and `measurable_accounts` no longer gate those pools, and a configured

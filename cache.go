@@ -37,6 +37,10 @@ type Collector struct {
 	Now             func() time.Time
 	TTL             time.Duration
 	NoCache         bool
+	// Publishes, when set, tracks the asynchronous shared writes this collector
+	// starts and records the ones that fail; the caller waits on it before it
+	// exits. A nil tracker leaves them fire-and-forget.
+	Publishes *PublishTracker
 }
 
 func LoadSnapshots() (map[string]CacheEntry, error) {

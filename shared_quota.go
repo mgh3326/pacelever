@@ -1,6 +1,7 @@
 package pacelever
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -13,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -213,6 +215,58 @@ func (q QuotaConfig) presenceHostID() string {
 	return "host-" + fingerprint("host", host)
 }
 
+// PublishFailure names a shared write that did not land. It carries a pool and
+// an error kind only, never a URL, response body or credential.
+type PublishFailure struct{ Pool, Kind string }
+
+// PublishTracker waits for a collector's in-flight presence publishes and
+// collects its shared-write failures.
+type PublishTracker struct {
+	wg       sync.WaitGroup
+	mu       sync.Mutex
+	failures []PublishFailure
+}
+
+func (t *PublishTracker) begin() {
+	if t != nil {
+		t.wg.Add(1)
+	}
+}
+func (t *PublishTracker) end() {
+	if t != nil {
+		t.wg.Done()
+	}
+}
+
+// Fail records a shared write that did not land; a repeat is kept once.
+func (t *PublishTracker) Fail(pool, kind string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	f := PublishFailure{pool, kind}
+	if !slices.Contains(t.failures, f) {
+		t.failures = append(t.failures, f)
+	}
+}
+
+// Wait blocks until every tracked publish has finished, then returns the
+// failures ordered by pool and kind. Each publish is bounded by its own timeout.
+func (t *PublishTracker) Wait() []PublishFailure {
+	if t == nil {
+		return nil
+	}
+	t.wg.Wait()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := slices.Clone(t.failures)
+	slices.SortFunc(out, func(a, b PublishFailure) int {
+		return cmp.Or(strings.Compare(a.Pool, b.Pool), strings.Compare(a.Kind, b.Kind))
+	})
+	return out
+}
+
 // publishPresence records where an account was measured. It is asynchronous and
 // bounded, so it never adds latency to a collection or changes its verdict.
 // onDone, when set, reports whether the publish succeeded.
@@ -226,10 +280,16 @@ func (c Collector) publishPresence(source ObservationSource, key string, at time
 		return
 	}
 	record := PresenceRecord{HostID: host, AccountKey: key, LastSeen: at}
+	c.Publishes.begin()
 	go func() {
+		defer c.Publishes.end()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		err := publisher.PublishPresence(ctx, record)
+		if err != nil {
+			pool, _, _ := strings.Cut(key, ":")
+			c.Publishes.Fail(pool, ErrKindPresencePublishFailed)
+		}
 		if onDone != nil {
 			onDone(err == nil)
 		}
@@ -811,6 +871,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	}
 	if source.Publish(ctx, key, holder, x) != nil {
 		reachable = false
+		c.Publishes.Fail(pool, ErrKindSharedPublishFailed)
 		return finish(fail(ErrKindSharedPublishFailed))
 	}
 	o, ok := sharedAuto(&x, pool, key, at, c.Config.Quota.freshTTL(pool), false)
@@ -819,6 +880,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	}
 	if releaseQuota(source, key, holder) != nil {
 		reachable = false
+		c.Publishes.Fail(pool, ErrKindSharedReleaseFailed)
 		return finish(fail(ErrKindSharedReleaseFailed))
 	}
 	released = true

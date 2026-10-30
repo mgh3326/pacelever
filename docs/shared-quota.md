@@ -150,9 +150,9 @@ during an hk outage it is also degraded. A different account's cache is
 discarded. A `rate_limited` probe result honours `Retry-After` and otherwise
 backs off for five minutes; other provider failures do not suppress the next
 shared probe. Local cache TTL and non-rate-limit provider backoff never bypass
-the shared read. Shared mode disables the legacy document-based quota
-fallback/publication so it cannot turn a degraded local reading into a fresh
-one. Inflight tracking keeps its existing behavior.
+the shared read. There is no document-based quota fallback or publication: a
+degraded local reading is never turned into a fresh one. Inflight tracking
+keeps its existing behavior.
 
 `manual set`, `manual list`, and `manual clear` use the same account API in shared
 mode. Manual entries are independent per quota window; a write on one host is
@@ -255,6 +255,13 @@ probing); read-only hosts never publish:
 PUT /v1/quota/presence
 {"host_id":"host-<stable-id>","account_key":"<pool>:<fingerprint>","last_seen":"<RFC3339>"}
 ```
+
+The publish runs beside the collection, so it never delays a verdict, but the
+CLI waits for it (at most 3 seconds) before it exits. A presence, observation or
+lease-release write that fails is printed to stderr as
+`error: shared publish failed: <pool> (<kind>)` with kind `presence_publish_failed`,
+`shared_publish_failed`, `shared_release_failed` or `inflight_publish_failed`. `refresh` also exits 2 when
+any shared write failed; `gate` and the other commands keep their exit codes.
 
 It is a separate record from the quota observation, which deliberately carries
 no host metadata. `host_id` is, in order of precedence: `PACELEVER_HOST_ID` or
