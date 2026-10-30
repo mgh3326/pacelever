@@ -18,8 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/alicebob/sqlittle"
 )
 
 type BenchClient struct {
@@ -178,11 +176,7 @@ func (b BenchClient) ReadRows(ctx context.Context, scope string) ([]map[string]a
 		if b.Config.Bench.Backend == "handoffkeep" {
 			return nil, BenchUnavailable, fmt.Errorf("configured handoffkeep backend unavailable")
 		}
-		rows, e := legacyRows(scope, false)
-		if os.IsNotExist(e) {
-			e = nil
-		}
-		return rows, BenchLocal, e
+		return nil, BenchLocal, nil
 	}
 	var cache benchCache
 	_ = ReadJSON(b.cachePath(scope), &cache)
@@ -201,11 +195,7 @@ func (b BenchClient) ReadRows(ctx context.Context, scope string) ([]map[string]a
 	if cache.EndpointID == b.endpointID() && cache.Rows != nil && age >= 0 && age < ttl {
 		return cache.Rows, BenchCache, nil
 	}
-	if cache.Rows == nil {
-		if rows, at, endpoint, e := legacyRemoteRows(scope); e == nil && endpoint == b.endpointID() {
-			cache = benchCache{Rows: rows, FetchedAt: at, EndpointID: endpoint}
-		}
-	}
+
 	var payload map[string]json.RawMessage
 	query := ""
 	if scope == "catalog" {
@@ -385,94 +375,6 @@ func ValidateMonotonic(rows []CatalogRow) error {
 		}
 	}
 	return nil
-}
-func legacyDBPath() string {
-	if p := os.Getenv("SCOPEFUEL_BENCH_DB"); p != "" {
-		return p
-	}
-	return filepath.Join(dataBase(), "scopefuel", "bench.db")
-}
-func legacyRows(scope string, remote bool) ([]map[string]any, error) {
-	path := legacyDBPath()
-	if _, e := os.Stat(path); e != nil {
-		return nil, e
-	}
-	db, e := sqlittle.Open(path)
-	if e != nil {
-		return nil, fmt.Errorf("legacy bench database unavailable (read-only)")
-	}
-	defer db.Close()
-	table := map[string]string{"scores": "model_scores", "reps": "reps", "catalog": "bench_cache_catalog", "grades": "bench_cache_grades", "area-exceptions": "bench_cache_area_exceptions"}[scope]
-	if remote {
-		if scope == "reps" || scope == "scores" {
-			table = "bench_cache_" + scope
-		}
-	}
-	columns := map[string][]string{
-		"scores":          {"model_id", "effort", "harness", "source", "metric", "score", "rank", "captured_at", "time_per_task_min", "cost_per_task_usd"},
-		"reps":            {"profile", "model_id", "task_ref", "tier", "role", "rounds", "blockers_found", "completed", "input_tokens", "output_tokens", "notes", "recorded_at", "effort", "grade", "table_grade"},
-		"catalog":         {"profile", "effort", "model_id", "pool", "grade", "score", "gate", "gate_reason", "boundary_version", "deviation_ref", "decided_at", "decided_by", "retired_at"},
-		"grades":          {"profile", "grade", "boundary_version", "deviation_ref", "decided_at", "decided_by"},
-		"area-exceptions": {"profile", "effort", "area", "action", "expires_with_model_id", "reason"},
-	}[scope]
-	if table == "" {
-		return nil, fmt.Errorf("unsupported legacy bench scope")
-	}
-	if scope == "reps" {
-		if remote {
-			columns = append([]string{"server_id", "origin_id"}, columns...)
-		} else {
-			columns = append([]string{"id"}, columns...)
-		}
-	}
-	var rows []map[string]any
-	e = db.Select(table, func(r sqlittle.Row) {
-		row := map[string]any{}
-		for i, k := range columns {
-			if i < len(r) {
-				v := r[i]
-				if b, ok := v.([]byte); ok {
-					v = string(b)
-				}
-				key := k
-				if scope == "reps" && k == "server_id" {
-					key = "id"
-				}
-				if scope == "reps" && k == "id" && !remote {
-					key = "local_id"
-				}
-				row[key] = v
-			}
-		}
-		rows = append(rows, row)
-	}, columns...)
-	if e != nil {
-		return nil, fmt.Errorf("legacy bench table unavailable (read-only)")
-	}
-	return rows, nil
-}
-func legacyRemoteRows(scope string) ([]map[string]any, string, string, error) {
-	path := legacyDBPath()
-	if _, e := os.Stat(path); e != nil {
-		return nil, "", "", e
-	}
-	db, e := sqlittle.Open(path)
-	if e != nil {
-		return nil, "", "", e
-	}
-	defer db.Close()
-	var at, endpoint string
-	e = db.Select("bench_cache_meta", func(r sqlittle.Row) {
-		var name, stamp, id string
-		if r.Scan(&name, &stamp, &id) == nil && name == scope {
-			at, endpoint = stamp, id
-		}
-	}, "scope", "fetched_at", "endpoint_id")
-	if e != nil || at == "" {
-		return nil, "", "", fmt.Errorf("legacy cache metadata unavailable")
-	}
-	rows, e := legacyRows(scope, true)
-	return rows, at, endpoint, e
 }
 func mapInt(v any) int64 {
 	switch n := v.(type) {

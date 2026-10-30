@@ -402,7 +402,7 @@ func TestSharedQuotaRateLimitBackoffUsesLocalLastGood(t *testing.T) {
 	if len(first.Buckets) != 1 || !first.Buckets[0].RolledOver || first.Buckets[0].UsedPct == nil || *first.Buckets[0].UsedPct != 0 || first.Buckets[0].ResetsAt != "" {
 		t.Fatalf("expired local bucket not rolled over: %+v", first.Buckets)
 	}
-	entries, e := loadSnapshots(c.CachePath, "")
+	entries, e := loadSnapshots(c.CachePath)
 	if e != nil || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt < 299 || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt > 300 {
 		t.Fatalf("default rate-limit backoff not persisted: %+v %v", entries["grok"], e)
 	}
@@ -430,7 +430,7 @@ func TestSharedQuotaRateLimitHonoursRetryAfter(t *testing.T) {
 		return Observation{Error: "usage HTTP 429", ErrorKind: "rate_limited", RetryAfterS: 720}
 	})
 	collectShared(t, c)
-	entries, e := loadSnapshots(c.CachePath, "")
+	entries, e := loadSnapshots(c.CachePath)
 	if e != nil || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt < 719 || entries["grok"].NegativeUntil-entries["grok"].LastErrorAt > 720 {
 		t.Fatalf("Retry-After backoff not persisted: %+v %v", entries["grok"], e)
 	}
@@ -551,10 +551,12 @@ func TestSharedQuotaIdentityBeforeMeasurement(t *testing.T) {
 	if key != "codex:"+fp || !allowed {
 		t.Fatalf("%s %v", key, allowed)
 	}
+	// A configured fingerprint that disagrees with the derived login never
+	// blocks the local credential's own key.
 	c.Config.Quota.Accounts = map[string]string{"codex": "0123456789abcdef"}
 	key, allowed = c.accountKey("codex")
-	if allowed {
-		t.Fatal("different login allowed to measure configured account")
+	if !allowed || key != "codex:"+fp {
+		t.Fatalf("configured mismatch blocked derived key: %s %v", key, allowed)
 	}
 	if strings.Contains(key, account) {
 		t.Fatal("raw identity leaked")

@@ -29,7 +29,7 @@ const (
 	ErrKindBackoff       = "backoff"        // a negative cache entry without a recorded kind
 	ErrKindCache         = "cache_error"    // the observation could not be persisted
 	ErrKindExcluded      = "excluded"       // pool class is exclude
-	ErrKindLegacyFailure = "legacy_failure" // imported scopefuel failure
+	ErrKindLegacyFailure = "legacy_failure" // failure text imported from a prior cache format
 	ErrKindUnsubscribed  = "unsubscribed"   // pool is not subscribed
 
 	// Shared quota.
@@ -50,7 +50,7 @@ const (
 	SourceUsageAPI    = "usage-api"   // a provider HTTP usage endpoint
 	SourceUsageRPC    = "usage-rpc"   // the Codex app-server JSON-RPC
 	SourceCLI         = "cli:/usage"  // a CLI usage screen or command
-	SourceRemote      = "remote"      // a peer snapshot from the bench server
+	SourceRemote      = "remote"      // a snapshot from the bench server
 	SourceHandoffkeep = "handoffkeep" // the shared quota store
 )
 
@@ -63,7 +63,7 @@ const FPKindAccount = "account"
 
 // Bench row and catalog sources, as reported by ReadRows and CatalogInfo.
 const (
-	BenchLocal       = "local"       // legacy SQLite evidence on this host
+	BenchLocal       = "local"       // local evidence on this host
 	BenchServer      = "server"      // fetched from the bench server now
 	BenchCache       = "cache"       // a fresh cache of the server
 	BenchCacheStale  = "cache-stale" // a cache older than the stale limit
