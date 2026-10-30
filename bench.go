@@ -386,6 +386,11 @@ func ValidateMonotonic(rows []CatalogRow) error {
 	}
 	return nil
 }
+
+// legacyDBPath is the read-only historical bench database. Hosts keep only
+// this copy of their bench evidence, so the legacy path and env stay readable
+// for one release (operator decision 10-30); new evidence goes through the
+// bench server.
 func legacyDBPath() string {
 	if p := os.Getenv("SCOPEFUEL_BENCH_DB"); p != "" {
 		return p

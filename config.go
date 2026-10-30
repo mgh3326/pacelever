@@ -80,7 +80,7 @@ func envPath(key, fallback string) string {
 }
 
 // FirstEnv is the first non-blank variable among keys, trimmed. Callers list
-// the pacelever name before its legacy scopefuel or handoffkeep alias.
+// the pacelever name before any handoffkeep alias.
 func FirstEnv(keys ...string) string {
 	for _, k := range keys {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
@@ -107,6 +107,10 @@ func CachePath() string {
 	}
 	return filepath.Join(CacheDir(), "snapshots.json")
 }
+
+// legacyCachePath locates retired host state under the old cache dir. It is
+// kept for one release (operator decision 10-30) so existing config, manual
+// stores, limit records and snapshots keep loading.
 func legacyCachePath() string {
 	if p := os.Getenv("SCOPEFUEL_CACHE"); p != "" {
 		return p
@@ -116,6 +120,9 @@ func legacyCachePath() string {
 func LoadConfig() (Config, error) {
 	path := ConfigPath()
 	b, e := os.ReadFile(path)
+	// A running host whose config still lives at the retired tool's path keeps
+	// loading for one release (operator decision 10-30); new writes go to the
+	// pacelever file only.
 	if os.IsNotExist(e) && os.Getenv("PACELEVER_CONFIG") == "" {
 		path = filepath.Join(configBase(), "scopefuel", "config.toml")
 		b, e = os.ReadFile(path)
@@ -186,6 +193,12 @@ func LoadConfig() (Config, error) {
 		}
 		c.Pools[name] = p
 	}
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(name, "SCOPEFUEL_") && name != "SCOPEFUEL_CACHE" && name != "SCOPEFUEL_BENCH_DB" {
+			c.Warnings = append(c.Warnings, fmt.Sprintf("retired environment variable %s ignored", name))
+		}
+	}
 	sort.Strings(c.Warnings)
 	return c, nil
 }
@@ -236,8 +249,7 @@ func (c Config) CreditMaxAge(pool string) time.Duration {
 	return 72 * time.Hour
 }
 
-// EditConfig preserves all unrecognized sections and keys. Legacy input is copied
-// into the pacelever config; the scopefuel file is never changed.
+// EditConfig preserves all unrecognized sections and keys.
 func EditConfig(edit func(map[string]any) error) error {
 	return WithFileLock(ConfigPath()+".lock", false, func() error {
 		c, e := LoadConfig()

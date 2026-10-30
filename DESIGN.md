@@ -32,8 +32,9 @@ never by primary/secondary position.
 
 Gate exits remain 0 admitted, 3 quota/policy, 4 unmeasurable, 5 role-denied and
 6 unsubscribed; malformed input or output failures use 2. The CLI preserves the
-admission first-line format and `scopefuel.gate.v1` audit schema. JSON quota
+admission first-line format and the `scopefuel.gate.v1` audit schema name. JSON quota
 summaries keep `scopefuel.v1`, including provider status/source and scoped buckets.
+Those two schema names are the external wire contract and are kept on purpose.
 Launch JSON keeps the original fields, including catalog provenance, billing,
 provider family and the nullable E6 marker. Launch refusals use exit 3. The operator-requested `label` is an additive field on
 every successful launch; it identifies actual profile/effort and experiment arm.
@@ -95,7 +96,7 @@ fingerprint, verifies the approved subset and effort monotonicity, and writes a
 catalog artifact. Degraded evidence requires a recorded reason. Publishing is a
 separate `bench push-catalog` operation.
 
-## Scopefuel parity
+## Compatibility
 
 | Feature | pacelever status |
 | --- | --- |
@@ -125,10 +126,8 @@ separate `bench push-catalog` operation.
 
 ## Parity fixtures
 
-`scripts/capture_goldens.py` executes the installed `scopefuel` command using a
-temporary config, data directory and synthetic fresh cache. It disables remote
-catalog selection, quota sharing and stale checks. No provider is invoked, no
-operator files are changed and no server writes occur. The generated fixture
+`testdata/golden.json` is a frozen fixture captured from the retired tool
+before its removal; it is no longer regenerated. It
 records 59 gate exits and 56 launch outcomes across profiles, rungs and seats.
 The 39 successful reference JSONs are compared structurally after removing only
 the new, mandatory `label` field requested for experiments. Every existing field
@@ -149,36 +148,6 @@ panels. HTTP tests use an injected client and a fake server, including the
 with short-lived helpers only, verifying deadlines, killed-owner lock release
 and parent-death cleanup. Backend tests use an injected HTTP client and local
 files.
-
-## Migration
-
-1. Keep scopefuel installed and keep all existing callers unchanged. Build or
-   download a separately named pacelever binary. Do not install a replacement yet.
-2. Let pacelever read legacy config and observations. Confirm warnings name only
-   retired/unknown pool sections and check `bench catalog status` provenance.
-   New writes go to pacelever; the legacy files remain unchanged.
-3. Run shadow comparisons with notifications and quota publishing disabled:
-
-   ```sh
-   PACELEVER_NOTIFY=0 PACELEVER_STALE_WARN=0 \
-     ./dist/pacelever gate -m sonnet --effort high --role worker \
-     --gate-output /tmp/pacelever-gate.json
-   scopefuel gate -m sonnet --effort high --role worker \
-     --gate-output /tmp/scopefuel-gate.json
-   ```
-
-   Capture each command's exit independently. Compare codes, pool, scope, selected
-   rung, cutoff, subscription, manual provenance and alternatives. Preserve code 5
-   separately from quota denial. Compare fresh observations close in time; usage
-   can change between the two reads. Expect the documented credit builder change.
-4. Witness authenticated provider probes on the intended platform, including a
-   Command Code caller with a short timeout. Check fresh and stale/manual cases,
-   free model scope, retired/unsubscribed pools and area routing. No production
-   catalog push is needed for shadow validation.
-5. After operator review, change one caller or let a Go spawner import the package.
-   Monitor verdict differences before changing the next caller. Retain scopefuel
-   and its original files for rollback. Installation and service changes are
-   separate work, not part of building this repository.
 
 ## Continuous downshift experiments
 

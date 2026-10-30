@@ -23,14 +23,16 @@ type CacheEntry struct {
 	LastError     *Observation `json:"last_error,omitempty"`
 	LastErrorAt   float64      `json:"last_error_at,omitempty"`
 	NegativeUntil float64      `json:"negative_until,omitempty"`
-	// legacy marks an entry imported from the scopefuel cache. Its negative
+	// legacy marks an entry imported from the retired cache. Its negative
 	// state must not block a pool pacelever measures with its own provider.
 	legacy bool
 }
 type Collector struct {
-	Shared          ObservationSource
-	Selectors       map[string]string
-	CachePath       string
+	Shared    ObservationSource
+	Selectors map[string]string
+	CachePath string
+	// LegacyCachePath selects the retired snapshots file read during the
+	// one-release transition (operator decision 10-30).
 	LegacyCachePath string
 	Config          Config
 	Providers       map[string]Provider
@@ -78,7 +80,7 @@ func loadSnapshots(ownPath, legacyPath string) (map[string]CacheEntry, error) {
 	return merged, nil
 }
 
-// Legacy scopefuel records failed-probe text as a string; native entries may
+// The retired cache records failed-probe text as a string; native entries may
 // carry a structured observation. Both forms preserve the last good snapshot.
 func (c *CacheEntry) UnmarshalJSON(data []byte) error {
 	type plain CacheEntry
@@ -252,8 +254,8 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		return o
 	}
 	provider := c.Providers[pool]
-	// A legacy scopefuel backoff describes scopefuel's own probe, not
-	// pacelever's; a pool with a native provider fetches through it anyway.
+	// A retired backoff describes the old tool's own probe, not pacelever's; a
+	// pool with a native provider fetches through it anyway.
 	if entry.NegativeUntil > float64(now.UnixMilli())/1000 && !(entry.legacy && provider != nil) {
 		kind := ErrKindBackoff
 		if entry.LastError != nil && entry.LastError.ErrorKind != "" {
