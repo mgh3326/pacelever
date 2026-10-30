@@ -34,7 +34,7 @@ type BenchClient struct {
 
 func NewBenchClient(cfg Config) BenchClient {
 	b := BenchClient{Config: cfg}
-	envOverride := firstEnv("HANDOFFKEEP_URL", "HANDOFFKEEP_TOKEN") != ""
+	envOverride := FirstEnv("HANDOFFKEEP_URL", "HANDOFFKEEP_TOKEN") != ""
 	values := map[string]string{}
 	if !envOverride {
 		path := os.Getenv("HANDOFFKEEP_CONFIG")
@@ -176,13 +176,13 @@ func (b BenchClient) ReadRows(ctx context.Context, scope string) ([]map[string]a
 	}
 	if !b.remote(use) {
 		if b.Config.Bench.Backend == "handoffkeep" {
-			return nil, "unavailable", fmt.Errorf("configured handoffkeep backend unavailable")
+			return nil, BenchUnavailable, fmt.Errorf("configured handoffkeep backend unavailable")
 		}
 		rows, e := legacyRows(scope, false)
 		if os.IsNotExist(e) {
 			e = nil
 		}
-		return rows, "local", e
+		return rows, BenchLocal, e
 	}
 	var cache benchCache
 	_ = ReadJSON(b.cachePath(scope), &cache)
@@ -199,7 +199,7 @@ func (b BenchClient) ReadRows(ctx context.Context, scope string) ([]map[string]a
 	stamp, _ := ParseTime(cache.FetchedAt)
 	age := b.now().Sub(stamp).Seconds()
 	if cache.EndpointID == b.endpointID() && cache.Rows != nil && age >= 0 && age < ttl {
-		return cache.Rows, "cache", nil
+		return cache.Rows, BenchCache, nil
 	}
 	if cache.Rows == nil {
 		if rows, at, endpoint, e := legacyRemoteRows(scope); e == nil && endpoint == b.endpointID() {
@@ -234,9 +234,9 @@ func (b BenchClient) ReadRows(ctx context.Context, scope string) ([]map[string]a
 	if e == nil {
 		cache = benchCache{FetchedAt: b.now().Format(time.RFC3339Nano), EndpointID: b.endpointID(), Rows: rows}
 		if err := WriteJSON(b.cachePath(scope), cache); err != nil {
-			return rows, "server", fmt.Errorf("cannot persist bench cache")
+			return rows, BenchServer, fmt.Errorf("cannot persist bench cache")
 		}
-		return rows, "server", nil
+		return rows, BenchServer, nil
 	}
 	if cache.EndpointID == b.endpointID() && cache.Rows != nil {
 		stamp, _ := ParseTime(cache.FetchedAt)
@@ -245,13 +245,13 @@ func (b BenchClient) ReadRows(ctx context.Context, scope string) ([]map[string]a
 		if max <= 0 {
 			max = 86400
 		}
-		source := "cache"
+		source := BenchCache
 		if age < 0 || age >= max {
-			source = "cache-stale"
+			source = BenchCacheStale
 		}
 		return cache.Rows, source, nil
 	}
-	return nil, "unavailable", e
+	return nil, BenchUnavailable, e
 }
 func decodeCatalog(rows []map[string]any) ([]CatalogRow, error) {
 	if len(rows) == 0 {
@@ -336,7 +336,7 @@ func (b BenchClient) ReadCatalog(ctx context.Context) (Catalog, error) {
 		}
 	}
 	base.Rows = decoded
-	base.Info = CatalogInfo{Source: source, Stale: source == "cache-stale"}
+	base.Info = CatalogInfo{Source: source, Stale: source == BenchCacheStale}
 	var cache benchCache
 	if ReadJSON(b.cachePath("catalog"), &cache) == nil {
 		if at, e := ParseTime(cache.FetchedAt); e == nil {

@@ -195,7 +195,7 @@ func (in Inputs) creditGate(d Decision, now time.Time) (Decision, bool) {
 	m, _ := latestCreditObservation(in.Manual, d.ProviderID)
 	d.Credit = st
 	d.UsedPct = st.UsedPct
-	d.Source = ptr("operator")
+	d.Source = ptr(SourceOperator)
 	d.SourceVerification = ptr("unverified")
 	label := m.SourceLabel
 	if label == "" {

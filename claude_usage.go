@@ -45,7 +45,7 @@ type ClaudeCLIProvider struct {
 }
 
 func (p ClaudeCLIProvider) Fetch(ctx context.Context) Observation {
-	result := Observation{ID: "claude", Source: "cli:/usage"}
+	result := Observation{ID: "claude", Source: SourceCLI}
 	timeout := p.Timeout
 	if timeout <= 0 {
 		timeout = 15 * time.Second
@@ -54,14 +54,12 @@ func (p ClaudeCLIProvider) Fetch(ctx context.Context) Observation {
 	defer cancel()
 	base := filepath.Join(CacheDir(), "probes", "claude-cli")
 	if e := os.MkdirAll(base, 0700); e != nil {
-		result.Error = "usage CLI directory unavailable"
-		result.ErrorKind = ErrKindProbe
+		result.fail(ErrKindProbe, "usage CLI directory unavailable")
 		return result
 	}
 	dir, e := os.MkdirTemp(base, "run-")
 	if e != nil {
-		result.Error = "usage CLI directory unavailable"
-		result.ErrorKind = ErrKindProbe
+		result.fail(ErrKindProbe, "usage CLI directory unavailable")
 		return result
 	}
 	defer os.RemoveAll(dir)
@@ -71,8 +69,7 @@ func (p ClaudeCLIProvider) Fetch(ctx context.Context) Observation {
 	}
 	text, e := run(probeCtx, p.Binary, dir, p.Env)
 	if e != nil {
-		result.Error = "usage CLI unavailable"
-		result.ErrorKind = ErrKindProbe
+		result.fail(ErrKindProbe, "usage CLI unavailable")
 		return result
 	}
 	return ParseClaudeUsageScreen(text, ClockNow(p.Now))
@@ -115,10 +112,9 @@ var claudeUsageReset = regexp.MustCompile(`(?i)\bresets?\s+([A-Za-z]{3,9})\.?\s+
 // label-proximity and "% left" rules are ported from ClaudeBar's
 // claude-usage-screen.js (MIT), adjusted for non-rendered CLI output.
 func ParseClaudeUsageScreen(text string, now time.Time) Observation {
-	o := Observation{ID: "claude", Source: "cli:/usage"}
+	o := Observation{ID: "claude", Source: SourceCLI}
 	fail := func() Observation {
-		o.Error = "usage panel incomplete or unrecognized"
-		o.ErrorKind = ErrKindParse
+		o.fail(ErrKindParse, msgPanelUnrecognized)
 		return o
 	}
 	lines := strings.Split(CleanScreen(text), "\n")

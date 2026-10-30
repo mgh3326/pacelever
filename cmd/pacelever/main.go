@@ -18,7 +18,7 @@ func main() {
 	if len(os.Args) == 3 && os.Args[1] == "_reap" {
 		pid, e := strconv.Atoi(os.Args[2])
 		if e != nil || pl.RunReaper(pid) != nil {
-			os.Exit(2)
+			os.Exit(pl.Invalid)
 		}
 		return
 	}

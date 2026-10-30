@@ -51,7 +51,7 @@ func BundledCatalog() Catalog {
 	if e := json.Unmarshal(snapshot, &v); e != nil {
 		panic(e)
 	}
-	return Catalog{Rows: v.Rows, Info: CatalogInfo{Source: "snapshot"}, Defaults: v.Defaults, Aliases: v.Aliases}
+	return Catalog{Rows: v.Rows, Info: CatalogInfo{Source: BenchSnapshot}, Defaults: v.Defaults, Aliases: v.Aliases}
 }
 func (c Catalog) Canonical(profile string) string {
 	if v := c.Aliases[profile]; v != "" {

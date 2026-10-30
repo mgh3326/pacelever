@@ -21,5 +21,5 @@ func devinAccountFP() string {
 	}
 	config := readObject(filepath.Join(configBase(), "devin", "config.json"))
 	org := strings.TrimSpace(str(object(config["devin"])["org_id"]))
-	return fingerprint("devin-account", org)
+	return accountFP("devin", org)
 }

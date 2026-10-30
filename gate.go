@@ -281,7 +281,7 @@ func gate(in Inputs, req Request) Decision {
 					expires = t
 				}
 			}
-			d.Source = ptr("operator")
+			d.Source = ptr(SourceOperator)
 			d.SourceVerification = ptr("unverified")
 			d.SourceLabel = ptr("self-reported manual observation")
 			d.LastAutoError = &obs.Error
@@ -310,7 +310,7 @@ func gate(in Inputs, req Request) Decision {
 		return failure(d, Unmeasurable, "no measured matching quota windows")
 	}
 	d.UsedPct = &maxUsed
-	for _, w := range RequiredWindows(row.Pool, obs.Plan, d.Source != nil && *d.Source == "operator") {
+	for _, w := range RequiredWindows(row.Pool, obs.Plan, d.Source != nil && *d.Source == SourceOperator) {
 		if !covered[w] {
 			d.MissingWindows = append(d.MissingWindows, w)
 		}
@@ -358,8 +358,8 @@ func gate(in Inputs, req Request) Decision {
 			d.Reason += fmt.Sprintf("\npace-warning pool=%s window=%s multiple=%.2f", row.Pool, b.Window, *p)
 		}
 	}
-	if d.Source == nil && obs.Source == "remote" {
-		d.Source = ptr("remote")
+	if d.Source == nil && obs.Source == SourceRemote {
+		d.Source = ptr(SourceRemote)
 		d.MeasuredAt = ptr(time.UnixMilli(int64(obs.FetchedAt * 1000)).UTC().Format(time.RFC3339Nano))
 		d.ObservedAgeS = obs.AgeS
 	}

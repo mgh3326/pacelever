@@ -37,11 +37,10 @@ func resetIn(s string, now time.Time) string {
 	return now.Add(d).UTC().Format(time.RFC3339Nano)
 }
 func ParseScreen(pool, text string, now time.Time) Observation {
-	o := Observation{ID: pool, Source: "cli:/usage"}
+	o := Observation{ID: pool, Source: SourceCLI}
 	clean := CleanScreen(text)
 	fail := func() Observation {
-		o.Error = "usage panel incomplete or unrecognized"
-		o.ErrorKind = ErrKindParse
+		o.fail(ErrKindParse, msgPanelUnrecognized)
 		o.Buckets = nil
 		return o
 	}

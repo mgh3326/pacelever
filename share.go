@@ -41,7 +41,7 @@ func safeHost(host string) string {
 	return host
 }
 func quotaEnabled() bool {
-	v := normalize(firstEnv("PACELEVER_QUOTA_SHARE", "SCOPEFUEL_QUOTA_SHARE"))
+	v := normalize(FirstEnv("PACELEVER_QUOTA_SHARE", "SCOPEFUEL_QUOTA_SHARE"))
 	return v != "0" && v != "off" && v != "false"
 }
 func identity(o Observation) (string, string) {
@@ -57,9 +57,9 @@ func (b BenchClient) QuotaFallback(ctx context.Context, o Observation, declaredF
 	fp, kind := identity(o)
 	if declaredFP != "" {
 		fp = declaredFP
-		kind = "account"
+		kind = FPKindAccount
 	}
-	if fp == "" || kind != "account" {
+	if fp == "" || kind != FPKindAccount {
 		return o
 	}
 	var doc struct {
@@ -91,14 +91,14 @@ func (b BenchClient) QuotaFallback(ctx context.Context, o Observation, declaredF
 			return o
 		}
 	}
-	return Observation{ID: o.ID, Plan: v.Plan, Buckets: v.Buckets, PoolClass: o.PoolClass, Source: "remote", FetchedAt: float64(at.UnixMilli()) / 1000, AgeS: &age, AccountFP: fp, AccountFPKind: "account", AccountFPMatch: ptr(true), PublishFP: fp, PublishFPKind: "account"}
+	return Observation{ID: o.ID, Plan: v.Plan, Buckets: v.Buckets, PoolClass: o.PoolClass, Source: SourceRemote, FetchedAt: float64(at.UnixMilli()) / 1000, AgeS: &age, AccountFP: fp, AccountFPKind: FPKindAccount, AccountFPMatch: ptr(true), PublishFP: fp, PublishFPKind: FPKindAccount}
 }
 func (b BenchClient) PublishQuota(ctx context.Context, o Observation) error {
 	if !quotaEnabled() || !b.remote("quota_share") || o.Error != "" || o.Stale || o.FetchedAt <= 0 {
 		return nil
 	}
 	fp, kind := identity(o)
-	if fp == "" || kind != "account" {
+	if fp == "" || kind != FPKindAccount {
 		return nil
 	}
 	host, _ := os.Hostname()
@@ -141,7 +141,7 @@ func validJob(j InflightJob, now time.Time) bool {
 	return e == nil && j.JobID != "" && age >= -time.Minute && age <= 8*time.Hour
 }
 func LocalInflight(ctx context.Context, pool string, now time.Time) ([]InflightJob, error) {
-	binary := firstEnv("ARBITER_BIN")
+	binary := FirstEnv("ARBITER_BIN")
 	if binary == "" {
 		binary = "arbiter"
 	}
@@ -275,7 +275,7 @@ type limitStore struct {
 func limitIdentity(pool string) string {
 	entries, _ := LoadSnapshots()
 	o := entries[pool].Result
-	if o.AccountFP != "" && o.AccountFPKind == "account" {
+	if o.AccountFP != "" && o.AccountFPKind == FPKindAccount {
 		return "account-" + longFingerprint("account\x00"+o.AccountFP)
 	}
 	host, _ := os.Hostname()

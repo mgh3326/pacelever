@@ -78,7 +78,10 @@ func envPath(key, fallback string) string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, fallback)
 }
-func firstEnv(keys ...string) string {
+
+// FirstEnv is the first non-blank variable among keys, trimmed. Callers list
+// the pacelever name before its legacy scopefuel or handoffkeep alias.
+func FirstEnv(keys ...string) string {
 	for _, k := range keys {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
 			return v

@@ -182,7 +182,7 @@ func (c Collector) Collect(ctx context.Context, pools []string) ([]Observation, 
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
 			case <-ctx.Done():
-				results[i] = Observation{ID: pool, Error: "collection deadline", ErrorKind: ErrKindTimeout}
+				results[i] = failed(pool, ErrKindTimeout, "collection deadline")
 				return
 			}
 			results[i] = c.one(ctx, pool, entries[pool])
@@ -209,7 +209,9 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		return o
 	}
 	if p.Class == "exclude" {
-		return Observation{ID: pool, Error: "pool excluded", ErrorKind: ErrKindExcluded, PoolClass: p.Class}
+		o := failed(pool, ErrKindExcluded, "pool excluded")
+		o.PoolClass = p.Class
+		return o
 	}
 	// A profile override may enable one profile on an unsubscribed pool.
 	enabled := c.Config.Subscribed("", pool)
@@ -225,7 +227,9 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 		}
 	}
 	if !enabled {
-		return Observation{ID: pool, Error: "pool unsubscribed", ErrorKind: ErrKindUnsubscribed, PoolClass: p.Class}
+		o := failed(pool, ErrKindUnsubscribed, "pool unsubscribed")
+		o.PoolClass = p.Class
+		return o
 	}
 	if source := c.sharedSource(); source != nil {
 		return c.sharedOne(ctx, source, pool, entry, now)

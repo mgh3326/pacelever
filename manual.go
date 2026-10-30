@@ -144,7 +144,7 @@ func prepareManual(m ManualObservation, ttl time.Duration, now time.Time) (Manua
 	m.EnteredAt = now.UTC().Format(time.RFC3339Nano)
 	m.ExpiresAt = expires.UTC().Format(time.RFC3339Nano)
 	m.Event = "set"
-	m.Source = "operator"
+	m.Source = SourceOperator
 	m.SourceVerification = "unverified"
 	m.SourceLabel = "self-reported manual observation"
 	b := make([]byte, 12)

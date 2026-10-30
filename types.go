@@ -57,6 +57,26 @@ func windowBucket(scope Scope, window string, used *float64, reset string) Bucke
 	return Bucket{Label: window, Window: window, UsedPct: used, ResetsAt: reset, Scope: scope, Horizon: horizon(window)}
 }
 
+// Fixed failure messages shared by providers. A message is a safe sentence:
+// never a response body, URL or credential.
+const (
+	msgNoCredentials     = "credentials unavailable"
+	msgRequestFailed     = "usage request failed"
+	msgInvalidJSON       = "invalid usage JSON"
+	msgNoWindows         = "usage response has no recognized windows"
+	msgPanelUnrecognized = "usage panel incomplete or unrecognized"
+)
+
+// failed is an observation of pool id that measured nothing.
+func failed(id, kind, message string) Observation {
+	o := Observation{ID: id}
+	o.fail(kind, message)
+	return o
+}
+
+// fail records a measurement failure of the given ErrKind on o.
+func (o *Observation) fail(kind, message string) { o.Error, o.ErrorKind = message, kind }
+
 type Observation struct {
 	Degraded       bool                `json:"degraded,omitempty"`
 	FreeBucket     *FreeBucketState    `json:"free_bucket,omitempty"`
@@ -160,6 +180,11 @@ func ClockNow(now func() time.Time) time.Time {
 		return now()
 	}
 	return time.Now().UTC()
+}
+
+// clockFunc is ClockNow as a never-nil clock, for code that passes one on.
+func clockFunc(now func() time.Time) func() time.Time {
+	return func() time.Time { return ClockNow(now) }
 }
 func validPct(p *float64) bool {
 	return p != nil && !math.IsNaN(*p) && !math.IsInf(*p, 0) && *p >= 0 && *p <= 100
@@ -283,7 +308,7 @@ func DisplayObservation(o Observation, cfg Config, manual ManualStore, now time.
 	out.Error = ""
 	out.Warning = ""
 	out.Stale = false
-	out.Source = "operator"
+	out.Source = SourceOperator
 	out.Buckets = nil
 	for _, m := range valid {
 		out.Buckets = append(out.Buckets, accountBucket(m.Window, m.UsedPct, m.ResetsAt))

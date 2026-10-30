@@ -35,7 +35,7 @@ func ResolveBinary(pool string, cfg Config) string {
 	if pool == "kiro" {
 		name = "kiro-cli"
 	}
-	explicit := firstEnv("PACELEVER_"+strings.ToUpper(pool)+"_BIN", "SCOPEFUEL_"+strings.ToUpper(pool)+"_BIN")
+	explicit := FirstEnv("PACELEVER_"+strings.ToUpper(pool)+"_BIN", "SCOPEFUEL_"+strings.ToUpper(pool)+"_BIN")
 	if explicit == "" {
 		explicit = cfg.Pools[pool].Bin
 	}
@@ -60,7 +60,7 @@ func (p PTYProvider) Fetch(ctx context.Context) Observation {
 			return o
 		}
 	}
-	result := Observation{ID: p.ID, Source: "cli:/usage"}
+	result := Observation{ID: p.ID, Source: SourceCLI}
 	timeout := p.Timeout
 	if timeout <= 0 {
 		timeout = 35 * time.Second
@@ -70,8 +70,7 @@ func (p PTYProvider) Fetch(ctx context.Context) Observation {
 	e := WithFileLock(filepath.Join(CacheDir(), "probe-"+p.ID+".lock"), true, func() error {
 		text, e := p.screen(ctx)
 		if e != nil {
-			result.Error = e.Error()
-			result.ErrorKind = ErrKindProbe
+			result.fail(ErrKindProbe, e.Error())
 		} else {
 			result = ParseScreen(p.ID, text, ClockNow(p.Now))
 		}
@@ -93,11 +92,10 @@ func (p PTYProvider) Fetch(ctx context.Context) Observation {
 		return nil
 	})
 	if e == ErrBusy {
-		return Observation{ID: p.ID, Error: "probe already in progress", ErrorKind: ErrKindProbeInProgress}
+		return failed(p.ID, ErrKindProbeInProgress, "probe already in progress")
 	}
 	if e != nil {
-		result.Error = "probe lock unavailable"
-		result.ErrorKind = ErrKindProbe
+		result.fail(ErrKindProbe, "probe lock unavailable")
 	}
 	return result
 }

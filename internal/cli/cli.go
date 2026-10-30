@@ -34,7 +34,7 @@ func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader
 	a, e := parse(argv)
 	if e != nil {
 		fmt.Fprintln(errOut, e)
-		return 2
+		return pl.Invalid
 	}
 	if a.flags["help"] {
 		fmt.Fprint(out, help)
@@ -48,7 +48,7 @@ func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader
 	cfg, e := pl.LoadConfig()
 	if e != nil {
 		fmt.Fprintln(errOut, e)
-		return 2
+		return pl.Invalid
 	}
 	app.Config = cfg
 	for _, w := range cfg.Warnings {
@@ -70,7 +70,7 @@ func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader
 		v, e := a.float("cache-ttl", 0)
 		if e != nil || v < 0 || v > 1e7 {
 			fmt.Fprintln(errOut, "invalid --cache-ttl")
-			return 2
+			return pl.Invalid
 		}
 		app.Collector.TTL = time.Duration(v * float64(time.Second))
 		if v == 0 {
@@ -81,7 +81,7 @@ func Run(ctx context.Context, argv []string, out, errOut io.Writer, in io.Reader
 	if e != nil {
 		fmt.Fprintln(errOut, "error:", e)
 		if code == 0 {
-			code = 2
+			code = pl.Invalid
 		}
 	}
 	return code
@@ -101,15 +101,7 @@ func (a *App) catalog(ctx context.Context) pl.Catalog {
 	return c
 }
 func request(a args) pl.Request {
-	return pl.Request{TaskID: a.get("task"), RequiredGrade: a.get("grade"), Profile: a.get("profile"), Effort: a.get("effort"), Role: a.get("role"), Purpose: a.get("purpose"), OperatorRequest: a.get("operator-request"), RequestedBy: a.get("requested-by"), PaceOverride: a.get("pace-override"), E6Arm: firstEnv("PACELEVER_E6_ARM", "SCOPEFUEL_E6_ARM"), Area: a.get("area")}
-}
-func firstEnv(keys ...string) string {
-	for _, k := range keys {
-		if v := os.Getenv(k); v != "" {
-			return v
-		}
-	}
-	return ""
+	return pl.Request{TaskID: a.get("task"), RequiredGrade: a.get("grade"), Profile: a.get("profile"), Effort: a.get("effort"), Role: a.get("role"), Purpose: a.get("purpose"), OperatorRequest: a.get("operator-request"), RequestedBy: a.get("requested-by"), PaceOverride: a.get("pace-override"), E6Arm: pl.FirstEnv("PACELEVER_E6_ARM", "SCOPEFUEL_E6_ARM"), Area: a.get("area")}
 }
 func (a *App) localManual() (pl.ManualStore, error) {
 	if a.Config.Quota.URL != "" {
@@ -152,7 +144,7 @@ func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inpu
 			local, e := pl.LocalInflight(ctx, o.ID, now)
 			read := a.Bench.Inflight(ctx, o.ID, fp, local, e == nil)
 			in.Inflight[o.ID] = read.N
-			if e == nil && (o.AccountFPKind == "account" || o.PublishFPKind == "account") {
+			if e == nil && (o.AccountFPKind == pl.FPKindAccount || o.PublishFPKind == pl.FPKindAccount) {
 				_ = a.Bench.PublishInflight(ctx, o.ID, fp, local)
 			}
 		}
@@ -166,7 +158,7 @@ func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inpu
 				for i, o := range in.Observations {
 					if o.ID == r.Pool && o.PublishFP != fp && o.AccountFP != fp {
 						remote := a.Bench.QuotaFallback(ctx, o, fp)
-						if remote.Source == "remote" {
+						if remote.Source == pl.SourceRemote {
 							in.Observations[i] = remote
 						}
 					}
@@ -199,10 +191,10 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 		defer cancel()
 		o, e := a.Collector.Refresh(ctx, pool)
 		if e != nil {
-			return 2, e
+			return pl.Invalid, e
 		}
 		if o.Error != "" {
-			return 4, fmt.Errorf("%s", o.Error)
+			return pl.Unmeasurable, fmt.Errorf("%s", o.Error)
 		}
 		if a.Config.Quota.URL == "" {
 			_ = a.Bench.PublishQuota(ctx, o)
@@ -213,7 +205,7 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 		if v.at(1) == "commandcode-limit" {
 			pool = "commandcode"
 		} else if v.at(1) != "devin-free-limit" {
-			return 2, fmt.Errorf("unknown observation")
+			return pl.Invalid, fmt.Errorf("unknown observation")
 		}
 		r := pl.LimitRecord{ResetAt: v.get("reset"), ObservedAt: v.get("observed"), Rung: v.get("rung"), Source: v.get("source"), Unparsed: v.flags["unparsed"]}
 		now := a.now()
@@ -232,7 +224,7 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 		return 0, pl.ObserveLimit(pool, r, v.flags["clear"], v.get("account-key"), now)
 	case "inflight":
 		if v.at(1) != "show" || v.get("pool") == "" {
-			return 2, fmt.Errorf("inflight show --pool required")
+			return pl.Invalid, fmt.Errorf("inflight show --pool required")
 		}
 		pool := v.get("pool")
 		local, e := pl.LocalInflight(ctx, pool, a.now())
@@ -249,7 +241,7 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 		return a.models(ctx, v)
 	case "":
 	default:
-		return 2, fmt.Errorf("unknown command %s", v.at(0))
+		return pl.Invalid, fmt.Errorf("unknown command %s", v.at(0))
 	}
 	if v.flags["list-providers"] {
 		for _, p := range pl.ProviderIDs {
@@ -283,14 +275,14 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 				}
 			}
 			if !found {
-				return 2, fmt.Errorf("unknown provider %s", p)
+				return pl.Invalid, fmt.Errorf("unknown provider %s", p)
 			}
 		}
 	}
 	for {
 		in, e := a.inputs(ctx, c, pools)
 		if e != nil {
-			return 2, e
+			return pl.Invalid, e
 		}
 		if grade := v.get("recommend"); grade != "" {
 			found := false
@@ -300,12 +292,12 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 				}
 			}
 			if !found {
-				return 2, fmt.Errorf("unknown grade")
+				return pl.Invalid, fmt.Errorf("unknown grade")
 			}
 			if area := v.get("area"); area != "" {
 				exceptions, e := a.Bench.ReadAreaExceptions(ctx)
 				if e != nil {
-					return 2, e
+					return pl.Invalid, e
 				}
 				in.AreaExceptions = exceptions
 			}
@@ -323,11 +315,11 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 			return 0, nil
 		}
 		if v.get("area") != "" {
-			return 2, fmt.Errorf("--area requires --recommend")
+			return pl.Invalid, fmt.Errorf("--area requires --recommend")
 		}
 		if v.flags["json"] || v.flags["raw"] {
 			if e = a.json(statusPayload(in)); e != nil {
-				return 2, e
+				return pl.Invalid, e
 			}
 		} else {
 			present := map[string]bool{}
@@ -360,7 +352,7 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 		}
 		seconds, e := v.float("watch", 60)
 		if e != nil || seconds < 1 || seconds > 86400 {
-			return 2, fmt.Errorf("watch interval must be at least one second")
+			return pl.Invalid, fmt.Errorf("watch interval must be at least one second")
 		}
 		timer := time.NewTimer(time.Duration(seconds * float64(time.Second)))
 		select {
@@ -435,14 +427,18 @@ func statusPayload(in pl.Inputs) map[string]any {
 	return map[string]any{"schema": "scopefuel.v1", "generated_at": in.Now.Format(time.RFC3339Nano), "providers": rows}
 }
 
+// exitAlert is the status exit when --exit-code-on finds a degraded, warning or
+// critical provider. Every other exit uses the pl gate vocabulary.
+const exitAlert = 1
+
 func statusExit(in pl.Inputs, on string) int {
 	for _, o := range in.Observations {
 		if on == "degraded" && o.Error != "" {
-			return 1
+			return exitAlert
 		}
 		for _, b := range o.Buckets {
 			if b.UsedPct != nil && ((on == "crit" && *b.UsedPct >= 90) || (on == "warn" && *b.UsedPct >= 75)) {
-				return 1
+				return exitAlert
 			}
 		}
 	}
@@ -450,7 +446,7 @@ func statusExit(in pl.Inputs, on string) int {
 }
 func (a *App) gate(ctx context.Context, v args) (int, error) {
 	if e := v.required("profile"); e != nil {
-		return 2, e
+		return pl.Invalid, e
 	}
 	req := request(v)
 	key := v.get("account-key")
@@ -465,7 +461,7 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 	if key == "" {
 		manual, e = a.localManual()
 		if e != nil {
-			return 2, e
+			return pl.Invalid, e
 		}
 	}
 	in := pl.Inputs{Catalog: c, Config: a.Config, Manual: manual, Now: a.now()}
@@ -502,7 +498,7 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 		}
 		in, e = a.inputs(ctx, c, pools)
 		if e != nil {
-			return 2, e
+			return pl.Invalid, e
 		}
 		d = pl.Gate(in, req)
 	}
@@ -537,7 +533,7 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 	}
 	if path := v.get("gate-output"); path != "" {
 		if e = pl.WriteJSON(path, record); e != nil {
-			return 2, fmt.Errorf("cannot write --gate-output")
+			return pl.Invalid, fmt.Errorf("cannot write --gate-output")
 		}
 	}
 	if v.flags["json"] {
@@ -582,7 +578,7 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 		}
 		if d.Source != nil {
 			fmt.Fprintf(a.Out, " source=%s", *d.Source)
-			if *d.Source == "operator" {
+			if *d.Source == pl.SourceOperator {
 				fmt.Fprintf(a.Out, " source_verification=unverified source_claim=self_reported_unverified manual_observation_ids=%s", strings.Join(d.ManualObservationIDs, ","))
 			}
 		}
@@ -600,7 +596,7 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 func (a *App) herdr(ctx context.Context) (int, error) {
 	event, e := pl.ParseHerdrEvent(os.Getenv("HERDR_PLUGIN_EVENT_JSON"))
 	if e != nil {
-		return 2, e
+		return pl.Invalid, e
 	}
 	if event.PaneID == "" || event.Provider == "" {
 		return 0, nil
@@ -652,7 +648,7 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 	if err != nil {
-		return 2, err
+		return pl.Invalid, err
 	}
 	binary := os.Getenv("HERDR_BIN_PATH")
 	if binary == "" {

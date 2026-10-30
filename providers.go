@@ -39,7 +39,7 @@ type HTTPProvider struct {
 }
 
 func (p HTTPProvider) Fetch(ctx context.Context) Observation {
-	o := Observation{ID: p.ID, Source: "usage-api"}
+	o := Observation{ID: p.ID, Source: SourceUsageAPI}
 	client := p.Client
 	if client == nil {
 		client = &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -56,8 +56,7 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 	req.Header.Set("User-Agent", "pacelever")
 	resp, e := client.Do(req)
 	if e != nil {
-		o.Error = "usage request failed"
-		o.ErrorKind = ErrKindNetwork
+		o.fail(ErrKindNetwork, msgRequestFailed)
 		return o
 	}
 	defer resp.Body.Close()
@@ -66,8 +65,7 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 	}
 	var raw map[string]json.RawMessage
 	if e = json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&raw); e != nil {
-		o.Error = "invalid usage JSON"
-		o.ErrorKind = ErrKindParse
+		o.fail(ErrKindParse, msgInvalidJSON)
 		return o
 	}
 	switch p.ID {
@@ -79,8 +77,7 @@ func (p HTTPProvider) Fetch(ctx context.Context) Observation {
 		parseClinePass(&o, raw)
 	}
 	if len(o.Buckets) == 0 {
-		o.Error = "usage response has no recognized windows"
-		o.ErrorKind = ErrKindParse
+		o.fail(ErrKindParse, msgNoWindows)
 	}
 	return o
 }
@@ -111,9 +108,8 @@ func retryAfterSeconds(header string, now time.Time) float64 {
 // statusObservation is the single mapping from an HTTP status to a safe
 // observation. Response bodies and request URLs never enter the result.
 func statusObservation(id string, status int, header http.Header, now time.Time, authKind, authHint string, rateWait float64) Observation {
-	o := Observation{ID: id, Source: "usage-api"}
-	o.Error = fmt.Sprintf("usage HTTP %d", status)
-	o.ErrorKind = ErrKindHTTP
+	o := Observation{ID: id, Source: SourceUsageAPI}
+	o.fail(ErrKindHTTP, fmt.Sprintf("usage HTTP %d", status))
 	switch status {
 	case 401, 403:
 		o.ErrorKind = authKind
@@ -194,7 +190,7 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 // DefaultProvidersAt wires every provider to one clock; nil means the wall
 // clock in UTC.
 func DefaultProvidersAt(cfg Config, selectors map[string]string, now func() time.Time) map[string]Provider {
-	clock := func() time.Time { return ClockNow(now) }
+	clock := clockFunc(now)
 	home, _ := os.UserHomeDir()
 	result := map[string]Provider{}
 	result["claude"] = ProviderFunc(func(ctx context.Context) Observation {
@@ -211,10 +207,10 @@ func DefaultProvidersAt(cfg Config, selectors map[string]string, now func() time
 		}
 		token := str(oauth["accessToken"])
 		if token == "" {
-			return Observation{ID: "claude", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
+			return failed("claude", ErrKindCredentials, msgNoCredentials)
 		}
 		if expires, ok := finiteNumber(oauth["expiresAt"]); ok && expires/1000 < float64(clock().Unix()) {
-			return Observation{ID: "claude", Error: "token expired", ErrorKind: ErrKindTokenExpired}
+			return failed("claude", ErrKindTokenExpired, "token expired")
 		}
 		provider := ClaudeProvider{
 			API: HTTPProvider{ID: "claude", URL: "https://api.anthropic.com/api/oauth/usage", Headers: map[string]string{"Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20"}, RateLimitWaitS: 300, Now: clock},
@@ -228,7 +224,7 @@ func DefaultProvidersAt(cfg Config, selectors map[string]string, now func() time
 	result["clinepass"] = ProviderFunc(func(ctx context.Context) Observation {
 		token := clineToken(home)
 		if token == "" {
-			return Observation{ID: "clinepass", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
+			return failed("clinepass", ErrKindCredentials, msgNoCredentials)
 		}
 		return (HTTPProvider{ID: "clinepass", URL: "https://api.cline.bot/api/v1/users/me/plan/usage-limits", Headers: map[string]string{"Authorization": "Bearer " + token}, Now: clock}).Fetch(ctx)
 	})
@@ -238,13 +234,10 @@ func DefaultProvidersAt(cfg Config, selectors map[string]string, now func() time
 	result["grok"] = ProviderFunc(func(ctx context.Context) Observation {
 		record, ok := selectGrokRecord(grokRecords(home, selectors), cfg.Quota.Accounts["grok"], clock())
 		if !ok {
-			return Observation{ID: "grok", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
+			return failed("grok", ErrKindCredentials, msgNoCredentials)
 		}
 		o := fetchGrokRecord(ctx, record, nil, clock)
-		if record.Fingerprint != "" {
-			o.PublishFP = record.Fingerprint
-			o.PublishFPKind = "account"
-		}
+		o.publishAccount(record.Fingerprint)
 		return o
 	})
 	agy := newAgyProvider(home, cfg, nil)

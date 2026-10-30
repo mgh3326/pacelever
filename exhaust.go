@@ -21,7 +21,7 @@ type exhaustEpisode struct {
 // ExhaustionNotice never changes admission. An explicit operator-switch policy
 // enables a deduplicated notice; other modes perform no external action.
 func ExhaustionNotice(ctx context.Context, cfg Config, o Observation, scope string, now time.Time, sink func(context.Context, string, string) bool) string {
-	switch normalize(firstEnv("PACELEVER_NOTIFY")) {
+	switch normalize(FirstEnv("PACELEVER_NOTIFY")) {
 	case "0", "off", "false":
 		return ""
 	}
@@ -103,7 +103,7 @@ func ExhaustionNotice(ctx context.Context, cfg Config, o Observation, scope stri
 	return notice
 }
 func EmitExhaustion(ctx context.Context, text, eventID string) bool {
-	binary := firstEnv("PANEWIRE_BIN")
+	binary := FirstEnv("PANEWIRE_BIN")
 	if binary == "" {
 		binary = "panewire"
 	}

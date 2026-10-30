@@ -15,8 +15,9 @@ compatibility contract: a refactor must leave them unchanged.
   `devin_account.go`, `agy.go`, `agy_local.go`; PTY probes in `probe.go` and
   `screens.go`. A new provider gets its own file and is registered in
   `DefaultProvidersAt`.
-- `values.go`: decoding of loose JSON values. `kinds.go`: the `ErrorKind` and
-  `Scope.Kind` vocabulary.
+- `values.go`: decoding of loose JSON values. `kinds.go`: the `ErrorKind`,
+  `Scope.Kind`, `Source`, fingerprint-kind and bench-source vocabulary.
+  `account.go`: provider account identity.
 - `internal/cli`: flags, config, collection, persistence and rendering.
 
 ## Rules
@@ -32,8 +33,20 @@ compatibility contract: a refactor must leave them unchanged.
   `looseNumber` (number or numeric string), `ParseFinite` (a string),
   `headerFloat`, `anyFloat` and `resetAtValue`. They all refuse NaN and ±Inf.
   Do not add a provider-specific copy.
-- **Kinds.** Use the `ErrKind*` and `Scope*` constants, never a literal. A new
-  error kind is added to `kinds.go` with a one-line meaning.
+- **Kinds.** Use the `ErrKind*`, `Scope*`, `Source*`, `FPKindAccount` and
+  `Bench*` constants, never a literal. A new value is added to `kinds.go` with
+  a one-line meaning.
+- **Failures.** Build a failed observation with `failed(id, kind, message)` or
+  `o.fail(kind, message)`; reuse the `msg*` constants for shared sentences.
+- **Identity.** Name an account with `accountFP(pool, value)` and attribute an
+  observation with `o.publishAccount(fp)`. Resolve logins through
+  `account.go` (`codexHome`, `codexTokens`, `claudeAccountFP`), so the key a
+  provider publishes is the key the shared store and gate expect.
+- **Environment.** Read options with `FirstEnv(pacelever name, legacy
+  alias...)`; it trims and skips blank values.
+- **Exit codes.** The CLI returns `pl.Admitted`/`0`, `pl.Invalid`,
+  `pl.Blocked`, `pl.Unmeasurable`, `pl.RoleDenied`, `pl.Unsubscribed` or
+  `exitAlert`, never a bare non-zero number.
 - **Buckets.** Build with `accountBucket`, `modelBucket` or `windowBucket`, so
   the label, scope and horizon follow one rule. Use a literal only when the
   label differs from the window or the bucket has no horizon (credit buckets).

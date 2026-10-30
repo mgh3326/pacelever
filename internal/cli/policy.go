@@ -25,7 +25,7 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 			req.Profile = v.at(2)
 		}
 		if req.Profile == "" {
-			return 2, fmt.Errorf("profile required")
+			return pl.Invalid, fmt.Errorf("profile required")
 		}
 		catalog := a.catalog(ctx)
 		d, e := pl.ResolveLaunch(catalog, a.Config, req)
@@ -36,13 +36,13 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 				var inputErr error
 				inputs, inputErr = a.inputs(ctx, catalog, []string{d.Pool})
 				if inputErr != nil {
-					return 2, inputErr
+					return pl.Invalid, inputErr
 				}
 			}
 			d, e = pl.ResolveLaunchWithInputs(inputs, req)
 		}
 		if e != nil {
-			return 3, e
+			return pl.Blocked, e
 		}
 		if v.flags["json"] {
 			return 0, a.json(d)
@@ -68,7 +68,7 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 			}
 		}
 		if !known {
-			return 2, fmt.Errorf("unknown pool")
+			return pl.Invalid, fmt.Errorf("unknown pool")
 		}
 		e := pl.EditConfig(func(raw map[string]any) error {
 			entry := table(table(raw, "pools"), pool)
@@ -159,7 +159,7 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 	case "profile":
 		name, state := v.at(2), v.at(3)
 		if name == "" {
-			return 2, fmt.Errorf("profile name required")
+			return pl.Invalid, fmt.Errorf("profile name required")
 		}
 		e := pl.EditConfig(func(raw map[string]any) error {
 			entry := table(table(raw, "profiles"), name)
@@ -185,7 +185,7 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 			return 0, a.json(map[string]any{"altlane_pace_multiple": a.Config.PaceThreshold()})
 		}
 		if name != "altlane_pace_multiple" {
-			return 2, fmt.Errorf("unknown policy setting")
+			return pl.Invalid, fmt.Errorf("unknown policy setting")
 		}
 		if value == "" {
 			fmt.Fprintln(a.Out, a.Config.PaceThreshold())
@@ -205,7 +205,7 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 			return nil
 		})
 	}
-	return 2, fmt.Errorf("unknown policy command")
+	return pl.Invalid, fmt.Errorf("unknown policy command")
 }
 func (a *App) manual(ctx context.Context, v args) (int, error) {
 	pool := v.at(2)
@@ -216,7 +216,7 @@ func (a *App) manual(ctx context.Context, v args) (int, error) {
 	case "list":
 		s, e := a.Collector.ReadManual(ctx)
 		if e != nil {
-			return 2, e
+			return pl.Invalid, e
 		}
 		if pool == "" {
 			return 0, a.json(s)
@@ -224,17 +224,17 @@ func (a *App) manual(ctx context.Context, v args) (int, error) {
 		return 0, a.json(s.Valid(pool, a.now()))
 	case "clear":
 		if pool == "" {
-			return 2, fmt.Errorf("pool required")
+			return pl.Invalid, fmt.Errorf("pool required")
 		}
 		return 0, a.Collector.ClearManual(ctx, pool)
 	case "set":
 		creditForm := firstValue(v.get("remaining"), v.get("total"), v.get("expires-on"), v.get("credit-balance"), v.get("credit-total"), v.get("expires")) != ""
 		if !creditForm {
 			if e := v.required("measured-at", "reason"); e != nil {
-				return 2, e
+				return pl.Invalid, e
 			}
 		} else if pool == "" {
-			return 2, fmt.Errorf("pool required")
+			return pl.Invalid, fmt.Errorf("pool required")
 		}
 		measured, reason := v.get("measured-at"), v.get("reason")
 		if creditForm {
@@ -249,7 +249,7 @@ func (a *App) manual(ctx context.Context, v args) (int, error) {
 		if v.get("used") != "" {
 			used, e := v.float("used", 0)
 			if e != nil {
-				return 2, e
+				return pl.Invalid, e
 			}
 			m.UsedPct = pl.Pct(used)
 		}
@@ -267,11 +267,11 @@ func (a *App) manual(ctx context.Context, v args) (int, error) {
 		if balance != "" || total != "" || expires != "" {
 			remaining, e := v.float(balanceFlag, -1)
 			if e != nil {
-				return 2, e
+				return pl.Invalid, e
 			}
 			totalUSD, e := v.float(totalFlag, 0)
 			if e != nil {
-				return 2, e
+				return pl.Invalid, e
 			}
 			m.Credit = &pl.Credit{RemainingUSD: remaining, TotalUSD: totalUSD, ExpiresOn: expires}
 		}
@@ -280,30 +280,30 @@ func (a *App) manual(ctx context.Context, v args) (int, error) {
 			var e error
 			ttl, e = pl.Duration(v.get("ttl"))
 			if e != nil {
-				return 2, e
+				return pl.Invalid, e
 			}
 		}
 		if v.get("resets-in") != "" {
 			if m.ResetsAt != "" {
-				return 2, fmt.Errorf("reset options are mutually exclusive")
+				return pl.Invalid, fmt.Errorf("reset options are mutually exclusive")
 			}
 			duration, e := pl.Duration(v.get("resets-in"))
 			if e != nil {
-				return 2, e
+				return pl.Invalid, e
 			}
 			at, e := pl.ParseTime(m.MeasuredAt)
 			if e != nil {
-				return 2, e
+				return pl.Invalid, e
 			}
 			m.ResetsAt = at.Add(duration).Format(time.RFC3339Nano)
 		}
 		r, e := a.Collector.AddManual(ctx, m, ttl, a.now())
 		if e != nil {
-			return 2, e
+			return pl.Invalid, e
 		}
 		return 0, a.json(r)
 	}
-	return 2, fmt.Errorf("unknown manual command")
+	return pl.Invalid, fmt.Errorf("unknown manual command")
 }
 
 func firstValue(values ...string) string {

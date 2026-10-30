@@ -98,11 +98,8 @@ func chooseOAuth(file, keychain map[string]any, now time.Time) map[string]any {
 func claudeAccountFingerprint(provider Provider, identityPath string, shareable bool) Provider {
 	return ProviderFunc(func(ctx context.Context) Observation {
 		o := provider.Fetch(ctx)
-		acct := object(readObject(identityPath)["oauthAccount"])
-		id := str(acct["accountUuid"])
-		if id != "" && shareable {
-			o.AccountFP = fingerprint("claude-account", id)
-			o.AccountFPKind = "account"
+		if fp := claudeAccountFP(identityPath); fp != "" && shareable {
+			o.AccountFP, o.AccountFPKind = fp, FPKindAccount
 		}
 		return o
 	})

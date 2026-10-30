@@ -44,7 +44,6 @@ type agySecrets interface {
 func newAgyProvider(home string, cfg Config, client HTTPDoer) agyProvider {
 	p := agyProvider{
 		client:     client,
-		now:        time.Now,
 		file:       func() string { return agyToken(home) },
 		localProcs: agyLocalProcesses,
 		localPorts: agyListenPorts,
@@ -74,10 +73,7 @@ func (p agyProvider) secretToken(ctx context.Context) string {
 }
 
 func (p agyProvider) Fetch(ctx context.Context) Observation {
-	now := p.now
-	if now == nil {
-		now = time.Now
-	}
+	now := clockFunc(p.now)
 	// The running app's own server answers without a stored credential, so
 	// it is strictly safer than the token path and goes first; any local
 	// failure falls back to today's cloud source unchanged.
@@ -92,7 +88,7 @@ func (p agyProvider) Fetch(ctx context.Context) Observation {
 		}
 	}
 	if token == "" {
-		return Observation{ID: "agy", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
+		return failed("agy", ErrKindCredentials, msgNoCredentials)
 	}
 	o := fetchAgy(ctx, token, p.client, now)
 	if o.ErrorKind != ErrKindAuthFailed {
@@ -231,7 +227,7 @@ func agyToken(home string) string {
 
 func fetchAgy(ctx context.Context, token string, client HTTPDoer, now func() time.Time) Observation {
 	if token == "" {
-		return Observation{ID: "agy", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
+		return failed("agy", ErrKindCredentials, msgNoCredentials)
 	}
 	headers := map[string]string{"Authorization": "Bearer " + token, "User-Agent": "antigravity", "Content-Type": "application/json"}
 	var last httpJSON
@@ -250,7 +246,7 @@ func fetchAgy(ctx context.Context, token string, client HTTPDoer, now func() tim
 		}
 	}
 	if gotStatus && last.Status == 200 {
-		return Observation{ID: "agy", Error: "invalid usage JSON", ErrorKind: ErrKindParse}
+		return failed("agy", ErrKindParse, msgInvalidJSON)
 	}
 	if gotStatus {
 		o := statusObservation("agy", last.Status, last.Header, now(), ErrKindAuthFailed, "antigravity authentication failed; run agy to refresh the login", 0)
@@ -261,7 +257,7 @@ func fetchAgy(ctx context.Context, token string, client HTTPDoer, now func() tim
 		}
 		return o
 	}
-	return Observation{ID: "agy", Error: "usage request failed", ErrorKind: ErrKindNetwork}
+	return failed("agy", ErrKindNetwork, msgRequestFailed)
 }
 
 // fetchAgyModels reads the per-model quota list. The summary groups omit a
@@ -290,7 +286,7 @@ func fetchAgyModels(ctx context.Context, headers map[string]string, client HTTPD
 }
 
 func parseAgy(raw map[string]any, extraModels map[string]any) Observation {
-	o := Observation{ID: "agy", Source: "usage-api"}
+	o := Observation{ID: "agy", Source: SourceUsageAPI}
 	root := raw
 	if response := object(raw["response"]); len(response) > 0 {
 		root = response
@@ -377,8 +373,7 @@ func parseAgy(raw map[string]any, extraModels map[string]any) Observation {
 		}
 	}
 	if len(o.Buckets) == 0 {
-		o.Error = "usage response has no recognized windows"
-		o.ErrorKind = ErrKindParse
+		o.fail(ErrKindParse, msgNoWindows)
 	}
 	return o
 }
