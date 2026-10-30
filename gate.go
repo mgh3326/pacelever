@@ -19,6 +19,10 @@ type Inputs struct {
 	// FreeLimit is the recorded SWE-2 free-limit exceed, if any. The gate
 	// refuses the free rungs until its reset time passes.
 	FreeLimit *LimitRecord
+	// AccountScoped marks a judgment of one named shared account. There is no
+	// local free-limit record to read, so a free rung needs the account's fresh
+	// free_bucket state.
+	AccountScoped bool
 }
 
 // FreeAvailable is the gate wording for an admitted SWE-2 free rung.
@@ -180,6 +184,20 @@ func gate(in Inputs, req Request) Decision {
 					until = reset.Format(time.RFC3339)
 				}
 				return failure(d, Blocked, "free limit exceeded until "+until)
+			}
+		}
+		if in.AccountScoped {
+			fb := obs.FreeBucket
+			if fb == nil || fb.State == FreeBucketUnknown {
+				return failure(d, Unmeasurable, "shared free bucket state unavailable")
+			}
+			if fb.State == FreeBucketExhausted {
+				if fb.ResetsAt == nil {
+					return failure(d, Unmeasurable, "shared free bucket exhausted without a reset time")
+				}
+				if fb.ResetsAt.After(now) {
+					return failure(d, Blocked, "free limit exceeded until "+fb.ResetsAt.UTC().Format(time.RFC3339))
+				}
 			}
 		}
 		d.OK = true

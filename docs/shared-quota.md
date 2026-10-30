@@ -2,16 +2,29 @@
 
 `pacelever gate -m sonnet --account-key claude:0123456789abcdef --json` judges
 the named account using the same gate rules as a local launch. The key must
-match the profile's pool. This path reads only that account's fresh automatic
-shared observation; it never probes, publishes, or substitutes the invoking
-host's cache, login, manual observations or local limit records. Missing,
-stale, malformed or unreadable shared evidence exits 4. Account-only manual
-evidence is insufficient for this read-only placement preflight. Normal role,
-policy, window and pool-class checks still apply. JSON and `--gate-output`
-receipts include `account_key`; admitted text headers include it as well.
-The placed host must still run its local gate before starting work, including
-any locally recorded provider limits. Omitting `--account-key` keeps the local
-gate path.
+match the profile's pool. This path judges only that account's fresh automatic
+shared observation; it never substitutes the invoking host's cache, manual
+observations or local limit records. Missing, stale, malformed or unreadable
+shared evidence exits 4. Account-only manual evidence is insufficient for this
+placement preflight. Normal role, policy, window and pool-class checks still apply.
+JSON and `--gate-output` receipts include `account_key`; admitted text headers
+include it as well. The placed host must still run its local gate before starting
+work, including any locally recorded provider limits. Omitting `--account-key`
+keeps the local gate path.
+
+When the shared reading is stale or missing and this host holds the same account
+(its derived key equals the requested key) and lists it in `measurable_accounts`,
+the gate measures once, publishes under the normal lease and judges the fresh
+value. Any other host keeps the read-only behavior and exits 4 with the reason
+(`this host does not hold the account`, or `this host may not measure the
+account`); a failed refresh exits 4 with `local refresh failed (<kind>)`. A fresh
+reading is never re-measured, and a malformed one (invalid, future-dated or
+non-automatic) exits 4 without a refresh.
+
+A free SWE-2 profile (`devin-swe2`, `devin-swe2-medium`, `devin-swe2-max`) on a
+named account is judged on the shared `free_bucket`: `available` admits,
+`exhausted` before its `resets_at` exits 3, and `unknown` or an absent field
+exits 4. Paid Devin rungs keep their percentage buckets.
 
 Deploy handoffkeep's quota API and additive startup migration first. Then enable
 this opt-in configuration in each host's private pacelever config:
