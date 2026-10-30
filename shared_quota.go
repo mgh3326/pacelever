@@ -166,12 +166,28 @@ func sameOrigin(a, b string) bool {
 	return oa != "" && oa == origin(b)
 }
 
+// accountKey is the shared account key for pool and whether this host may
+// measure it. Pools whose identity is derivable from local credentials
+// (claude, codex, devin) key on the derived fingerprint: a configured
+// fingerprint or the measurable_accounts allowlist can neither rename nor
+// block measurement, presence or publish for the account this host actually
+// holds. Without a resolvable login the configured fingerprint still names
+// the account for reads, but the host stays read-only. Every other pool has
+// no local derivation: its key comes from quota.accounts and may probe only
+// when listed in measurable_accounts.
 func (c Collector) accountKey(pool string) (string, bool) {
 	local := localAccountFP(pool, c.Selectors)
-	fp := c.Config.Quota.Accounts[pool]
-	if fp == "" {
-		fp = local
+	if pool == "claude" || pool == "codex" || pool == "devin" {
+		if accountFPRE.MatchString(local) {
+			return pool + ":" + local, true
+		}
+		local = c.Config.Quota.Accounts[pool]
+		if !accountFPRE.MatchString(local) {
+			return "", false
+		}
+		return pool + ":" + local, false
 	}
+	fp := c.Config.Quota.Accounts[pool]
 	if !accountFPRE.MatchString(fp) {
 		return "", false
 	}
@@ -181,9 +197,6 @@ func (c Collector) accountKey(pool string) (string, bool) {
 		if v == key {
 			allowed = true
 		}
-	}
-	if (pool == "claude" || pool == "codex" || pool == "devin") && local != fp {
-		allowed = false
 	}
 	return key, allowed
 }
@@ -502,7 +515,7 @@ func (c Collector) RefreshAccount(ctx context.Context, key string) (Observation,
 	case own != key:
 		return Observation{}, deny(Unmeasurable, msgAccountStale+"; this host does not hold the account")
 	case !allowed:
-		return Observation{}, deny(Unmeasurable, msgAccountStale+"; this host may not measure the account (measurable_accounts)")
+		return Observation{}, deny(Unmeasurable, msgAccountStale+"; this host may not measure the account")
 	}
 	observed, err := c.Collect(ctx, []string{pool})
 	if err != nil || len(observed) != 1 {

@@ -1282,7 +1282,9 @@
     "pi-sonnet55": "high",
     "pi-opus55": "high",
     "cmd-dsflash41": "high",
-    "codex-terra61": "max"
+    "codex-terra61": "max",
+    "fable": "high",
+    "codex-terra-max": "max"
   },
   "aliases": {
     "codex-max": "codex-sol"
