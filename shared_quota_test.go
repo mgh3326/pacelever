@@ -551,10 +551,11 @@ func TestSharedQuotaIdentityBeforeMeasurement(t *testing.T) {
 	if key != "codex:"+fp || !allowed {
 		t.Fatalf("%s %v", key, allowed)
 	}
+	// Derived pools ignore a configured fingerprint that disagrees with the login.
 	c.Config.Quota.Accounts = map[string]string{"codex": "0123456789abcdef"}
 	key, allowed = c.accountKey("codex")
-	if allowed {
-		t.Fatal("different login allowed to measure configured account")
+	if key != "codex:"+fp || !allowed {
+		t.Fatalf("configured mismatch changed derived key %s, allowed=%v", key, allowed)
 	}
 	if strings.Contains(key, account) {
 		t.Fatal("raw identity leaked")

@@ -166,26 +166,39 @@ func sameOrigin(a, b string) bool {
 	return oa != "" && oa == origin(b)
 }
 
+// derivedAccountPool reports whether a pool's account identity is read from the
+// local login. Such a pool keys on that login and never on configuration, so a
+// configured fingerprint that disagrees with the login cannot block measurement,
+// presence or publish.
+func derivedAccountPool(pool string) bool {
+	return pool == "claude" || pool == "codex" || pool == "devin"
+}
+
+// accountKey names the account a pool measures on this host and whether this
+// host may measure it. Derived pools use the local login and are always allowed
+// to measure it. Other pools use the configured fingerprint, falling back to the
+// local one, and need an explicit measurable_accounts entry.
 func (c Collector) accountKey(pool string) (string, bool) {
-	local := localAccountFP(pool, c.Selectors)
-	fp := c.Config.Quota.Accounts[pool]
-	if fp == "" {
-		fp = local
+	fp := localAccountFP(pool, c.Selectors)
+	if derivedAccountPool(pool) {
+		if !accountFPRE.MatchString(fp) {
+			return "", false
+		}
+		return pool + ":" + fp, true
+	}
+	if configured := c.Config.Quota.Accounts[pool]; configured != "" {
+		fp = configured
 	}
 	if !accountFPRE.MatchString(fp) {
 		return "", false
 	}
 	key := pool + ":" + fp
-	allowed := false
 	for _, v := range c.Config.Quota.MeasurableAccounts {
 		if v == key {
-			allowed = true
+			return key, true
 		}
 	}
-	if (pool == "claude" || pool == "codex" || pool == "devin") && local != fp {
-		allowed = false
-	}
-	return key, allowed
+	return key, false
 }
 
 // presenceHostID is stable per host and never the raw hostname when an explicit
@@ -284,7 +297,7 @@ func (c Collector) presenceUndo(host, key string, ts int64) {
 
 // maybePresence publishes presence for an observation served from the shared
 // store. allowed is the accountKey verdict, so a host never publishes for an
-// account whose local CLI identity does not resolve to the same key.
+// account it may not measure.
 func (c Collector) maybePresence(source ObservationSource, key string, allowed bool, o Observation) {
 	if !allowed || o.Stale || o.Degraded || o.Source != SourceHandoffkeep {
 		return
