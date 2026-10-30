@@ -163,8 +163,14 @@ func TestBenchSourceMatchesError(t *testing.T) {
 	if e == nil || source != BenchUnavailable || rows != nil {
 		t.Fatalf("no backend: %v %q %+v", e, source, rows)
 	}
+	if ex, e := (BenchClient{}).ReadAreaExceptions(context.Background()); e != nil || ex != nil {
+		t.Fatalf("local-only area exceptions: %v %+v", e, ex)
+	}
 	var cfg Config
 	cfg.Bench.Backend = "handoffkeep"
+	if _, e = (BenchClient{Config: cfg}).ReadAreaExceptions(context.Background()); e == nil {
+		t.Fatal("unreachable handoffkeep area exceptions read as empty")
+	}
 	_, source, e = (BenchClient{Config: cfg}).ReadReps(context.Background(), "")
 	if e == nil || source != BenchUnavailable {
 		t.Fatalf("unreachable handoffkeep: %v %q", e, source)

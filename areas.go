@@ -162,6 +162,10 @@ func GradeAreas(reps []Rep, lookup TaskAreaLookup) []AreaCell {
 	return out
 }
 func (b BenchClient) ReadAreaExceptions(ctx context.Context) ([]AreaException, error) {
+	if b.localOnly("catalog") {
+		// Exceptions are server-side only; a local-only host has none.
+		return nil, nil
+	}
 	raw, _, e := b.ReadRows(ctx, "area-exceptions")
 	if e != nil {
 		if backend, ok := e.(*BackendError); ok && backend.Status == 404 {

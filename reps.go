@@ -141,7 +141,7 @@ func (b BenchClient) RetryRep(ctx context.Context, r Rep) (Rep, error) {
 }
 func (b BenchClient) ReadReps(ctx context.Context, profile string) ([]Rep, string, error) {
 	raw, source, e := b.ReadRows(ctx, "reps")
-	if e != nil && b.Config.Bench.Backend != "handoffkeep" && !b.remote("reps") {
+	if e != nil && b.localOnly("reps") {
 		// No remote was configured, so nothing was fetched and nothing failed:
 		// the local reps are the whole answer.
 		raw, source, e = nil, BenchLocal, nil

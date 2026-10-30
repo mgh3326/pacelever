@@ -77,6 +77,13 @@ func (b BenchClient) remote(use string) bool {
 	}
 	return b.allowed(use) == nil
 }
+
+// localOnly reports that no remote bench is configured for use, so nothing is
+// fetched and a read that has local data answers from it alone. A configured
+// handoffkeep backend that cannot be reached is not local-only.
+func (b BenchClient) localOnly(use string) bool {
+	return b.Config.Bench.Backend != "handoffkeep" && !b.remote(use)
+}
 func (b BenchClient) allowed(use string) error {
 	u, e := url.Parse(b.URL)
 	if e != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
