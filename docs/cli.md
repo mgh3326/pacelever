@@ -82,3 +82,5 @@ Rep outcomes can arrive through `--notes` JSON or optional first-class flags:
 Legacy round/completion flags remain required for records without outcome data.
 They may be omitted when real PR outcomes are supplied; quality is never invented
 from zero rounds. See [the outcome contract](experiments.md).
+
+<!-- review pane probe 2026-10-30 -->
