@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- Remove the retired tools' compatibility surface: `SCOPEFUEL_*` environment
+  aliases, the legacy cache paths and imported snapshots, the read-only SQLite
+  bench reader and `SCOPEFUEL_BENCH_DB`, the document quota
+  fallback/publication endpoints, remote inflight merging and the golden
+  capture script are gone. Two read-only graces stay for one release so a
+  running host keeps loading: `~/.config/scopefuel/config.toml` when it is the
+  host's only configuration, and `scopefuel.manual.v1` manual stores. The
+  `scopefuel.v1`/`scopefuel.gate.v1` wire schemas and the golden fixture
+  remain the recorded contract.
+- Shared account keys come from local credentials for claude/codex/devin:
+  the derived fingerprint is authoritative, needs no `measurable_accounts`
+  entry, and a `quota.accounts` mismatch cannot rename or veto it. Without a
+  local login those pools have no key; `quota.accounts` plus
+  `measurable_accounts` now gates only pools with no local derivation.
+- Presence publication is synchronous with a three-second bound: it completes
+  before the command returns, releases its claimed slot on failure and reports
+  the failure through the publish-failure warning instead of swallowing it;
+  shared lease-release failures are reported the same way.
+- Inflight tracking is local-only; unknown counts render `inflight=unknown(local)`.
+- The bundled catalog gives `fable` a default `high` effort.
 - `gate --account-key`: when the shared reading is stale and this host holds the
   same account and may measure it, measure, publish and judge on the fresh value
   instead of refusing; other hosts still exit 4 with the reason. A free SWE-2

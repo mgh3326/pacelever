@@ -45,15 +45,15 @@ func LoadManual() (ManualStore, error) {
 	p := filepath.Join(CacheDir(), "manual.json")
 	e := ReadJSON(p, &s)
 	if os.IsNotExist(e) {
-		e = ReadJSON(filepath.Join(filepath.Dir(legacyCachePath()), "manual.json"), &s)
-	}
-	if os.IsNotExist(e) {
-		return ManualStore{Schema: "scopefuel.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}, nil
+		return ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}, nil
 	}
 	if e != nil {
 		return s, e
 	}
-	if (s.Schema != "scopefuel.manual.v1" && s.Schema != "pacelever.manual.v1") || s.Latest == nil || s.History == nil {
+	// One-release grace: stores written while the schema was still named
+	// scopefuel.manual.v1 keep loading. Remove the alternate in the release
+	// after the 10-30 cleanup ships.
+	if (s.Schema != "pacelever.manual.v1" && s.Schema != "scopefuel.manual.v1") || s.Latest == nil || s.History == nil {
 		return s, fmt.Errorf("invalid manual observation store")
 	}
 	return s, nil
@@ -222,7 +222,7 @@ func RequiredWindows(pool, plan string, manual bool) []string {
 	return nil
 }
 
-// Preserve legacy audit fields when copying history into the native store.
+// Preserve unrecognized audit fields when copying history into the store.
 func (m *ManualObservation) UnmarshalJSON(data []byte) error {
 	type plain ManualObservation
 	var decoded plain

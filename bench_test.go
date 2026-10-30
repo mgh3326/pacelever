@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -131,23 +130,6 @@ func TestRepWriteAheadRetry(t *testing.T) {
 	retried, e := b.RetryRep(context.Background(), r)
 	if e != nil || retried.ID != 42 || len(ids) != 2 || ids[0] != ids[1] {
 		t.Fatalf("retry changed identity: %+v %v", ids, e)
-	}
-}
-func TestLegacyBenchReader(t *testing.T) {
-	isolate(t)
-	t.Setenv("SCOPEFUEL_BENCH_DB", "testdata/legacy_bench.sqlite3")
-	before, _ := os.ReadFile("testdata/legacy_bench.sqlite3")
-	rows, e := legacyRows("scores", false)
-	if e != nil || len(rows) != 1 || str(rows[0]["model_id"]) != "example-model" {
-		t.Fatalf("scores: %+v %v", rows, e)
-	}
-	rows, e = legacyRows("reps", false)
-	if e != nil || len(rows) != 1 {
-		t.Fatalf("reps: %+v %v", rows, e)
-	}
-	after, _ := os.ReadFile("testdata/legacy_bench.sqlite3")
-	if string(before) != string(after) {
-		t.Fatal("legacy database modified")
 	}
 }
 func TestBundledCatalogMonotonic(t *testing.T) {

@@ -26,6 +26,15 @@ func TestExplorationDefaultsOffAndLabels(t *testing.T) {
 		t.Fatal("default policy explored")
 	}
 }
+func TestFableResolvesDefaultEffort(t *testing.T) {
+	// fable's catalog row has no effort rung; the bundled defaults supply the
+	// effort a spawning seat requires.
+	d, e := ResolveLaunch(BundledCatalog(), Config{}, Request{Profile: "fable", Role: "consult", OperatorRequest: "hk:task/2386"})
+	if e != nil || d.Effort != "high" || d.Label.Effort != "high" {
+		t.Fatalf("fable resolution %+v %v", d, e)
+	}
+}
+
 func TestExplorationLowerEffort(t *testing.T) {
 	in := explorationInput("claude", []CatalogRow{explorerRow("opus", "high", "opus-model", "claude", "A"), explorerRow("opus", "medium", "opus-model", "claude", "A")})
 	req := Request{Profile: "opus", Effort: "high", Role: "worker", RequiredGrade: "A", TaskID: "hk:task/1"}

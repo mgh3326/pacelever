@@ -71,11 +71,10 @@ server fills only profiles it does not mention. Retirement and gate changes for
 mentioned profiles are authoritative.
 
 The public snapshot contains model and launcher metadata, not operator config,
-credentials, quota values, host identities or evidence records. Legacy SQLite is
-opened read-only through a pure Go file reader. New bench caches, manual events,
-rep intents and observer state are atomic JSON files protected by kernel locks.
-The SQLite reader supports rollback-journal files, not WAL files; unsupported or
-corrupt evidence is reported as unavailable rather than guessed.
+credentials, quota values, host identities or evidence records. New bench caches,
+manual events, rep intents and observer state are atomic JSON files protected by
+kernel locks. Unsupported or corrupt evidence is reported as unavailable rather
+than guessed.
 
 Rep writes save an origin ID before PUT. Conflict and uncertain requests keep the
 same intent for explicit retry. Server IDs, origin IDs and historical local IDs
@@ -96,7 +95,7 @@ fingerprint, verifies the approved subset and effort monotonicity, and writes a
 catalog artifact. Degraded evidence requires a recorded reason. Publishing is a
 separate `bench push-catalog` operation.
 
-## Scopefuel parity
+## Reference parity
 
 | Feature | pacelever status |
 | --- | --- |
@@ -107,14 +106,15 @@ separate `bench push-catalog` operation.
 | Weekly pace promotion | Implemented for every paid pool; ranking only |
 | Nine retained providers | HTTP-first implementations; PTY only for Devin, Kimi and Kiro |
 | SWE-2 Free model scope | Exact-rung fresh observation; free first |
-| Manual set/list/clear, credit observations | Implemented; legacy JSON read-compatible |
+| Manual set/list/clear, credit observations | Implemented; audit fields preserved on read and write |
 | Bench catalog, push-catalog, bench grades | Implemented against `/v1/bench/*`; dry-run artifacts available |
-| Bench score display and legacy evidence | Read-compatible JSON cache and SQLite file reader |
+| Bench score display and evidence history | Read-compatible JSON cache |
 | Reps add/list/compare/pending | Implemented; durable intent, retry and namespaced IDs |
 | Refresh, including detached workers | Implemented with independent deadlines and locks |
 | Free-limit and Command Code limit observations | Implemented; account-scoped local state |
 | Herdr event bridge, brief/watch gauge | Implemented; nested event data, scoped cache, stable metadata token |
-| Inflight and quota sharing | Implemented; identity, age and duplicate guards |
+| Shared quota and presence | Implemented on `/v1/quota/*`; synchronous publishes, identity, age and duplicate guards |
+| Inflight reservation | Implemented; local job state only |
 | Grades propose/apply; area summaries | Implemented with evidence and monotonicity checks |
 | Recommend and area exceptions | Implemented within current grade placements |
 | Stale build warning; models verify | Implemented; advisory cached warning and serving-identity comparison |
@@ -122,15 +122,16 @@ separate `bench push-catalog` operation.
 | Launch experiment labels | Actual profile, effort, baseline/downshift and nullable experiment ID on every launch |
 | PR outcome reps and grade evidence | First-class optional fields; flat/nested notes JSON; legacy text receipts; per-rung/arm metrics |
 | Retired providers, provider plugin loaders, one-shot migrations | Deliberately omitted |
-| Quota-v2 experimental shadow CLI, historical benchmark ingestion/backfills | Outside this core; no legacy command aliases |
+| Document quota sharing, historical benchmark ingestion/backfills | Removed; the shared `/v1/quota/*` API is the only quota exchange |
 
 ## Parity fixtures
 
-`scripts/capture_goldens.py` executes the installed `scopefuel` command using a
-temporary config, data directory and synthetic fresh cache. It disables remote
-catalog selection, quota sharing and stale checks. No provider is invoked, no
-operator files are changed and no server writes occur. The generated fixture
-records 59 gate exits and 56 launch outcomes across profiles, rungs and seats.
+`testdata/scopefuel_golden.json` is a frozen fixture captured once from the
+installed reference CLI using a temporary config, data directory and synthetic
+fresh cache, with remote catalog selection, quota sharing and stale checks
+disabled. It records 59 gate exits and 56 launch outcomes across profiles, rungs
+and seats. The capture script retired with the reference CLI, so the fixture is
+contract data, not a repeatable procedure.
 The 39 successful reference JSONs are compared structurally after removing only
 the new, mandatory `label` field requested for experiments. Every existing field
 and its provenance must remain identical; separate assertions verify the label.
@@ -153,33 +154,19 @@ files.
 
 ## Migration
 
-1. Keep scopefuel installed and keep all existing callers unchanged. Build or
-   download a separately named pacelever binary. Do not install a replacement yet.
-2. Let pacelever read legacy config and observations. Confirm warnings name only
-   retired/unknown pool sections and check `bench catalog status` provenance.
-   New writes go to pacelever; the legacy files remain unchanged.
-3. Run shadow comparisons with notifications and quota publishing disabled:
+The migration is complete: pacelever is the only binary, and the retired
+tool's names, environment variables, cache/config paths and fallbacks are
+gone. Two read-only graces remain for one release so a running host keeps
+loading: `~/.config/scopefuel/config.toml` when it is a host's only
+configuration (it is never edited; the first policy edit writes a new
+pacelever file), and a `scopefuel.manual.v1` manual store. Both are removed
+in the release after this cleanup ships.
 
-   ```sh
-   PACELEVER_NOTIFY=0 PACELEVER_QUOTA_SHARE=0 PACELEVER_STALE_WARN=0 \
-     ./dist/pacelever gate -m sonnet --effort high --role worker \
-     --gate-output /tmp/pacelever-gate.json
-   scopefuel gate -m sonnet --effort high --role worker \
-     --gate-output /tmp/scopefuel-gate.json
-   ```
-
-   Capture each command's exit independently. Compare codes, pool, scope, selected
-   rung, cutoff, subscription, manual provenance and alternatives. Preserve code 5
-   separately from quota denial. Compare fresh observations close in time; usage
-   can change between the two reads. Expect the documented credit builder change.
-4. Witness authenticated provider probes on the intended platform, including a
-   Command Code caller with a short timeout. Check fresh and stale/manual cases,
-   free model scope, retired/unsubscribed pools and area routing. No production
-   catalog push is needed for shadow validation.
-5. After operator review, change one caller or let a Go spawner import the package.
-   Monitor verdict differences before changing the next caller. Retain scopefuel
-   and its original files for rollback. Installation and service changes are
-   separate work, not part of building this repository.
+Shadow comparison is recorded history: the golden fixture under `testdata/`
+pins the exit codes, pool, scope, selected rung, cutoff, subscription, manual
+provenance and alternatives the reference CLI produced, including code 5 as a
+verdict distinct from quota denial. Installation and service changes are
+separate work, not part of building this repository.
 
 ## Continuous downshift experiments
 

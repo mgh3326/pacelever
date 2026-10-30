@@ -186,7 +186,7 @@ func (in Inputs) CreditStatus(pool string) (*CreditStatus, bool) {
 
 // creditGate decides a credit-pool admission from the hand-entered balance. It
 // reports false when no dollar balance is recorded, leaving the percentage
-// path (a shared or legacy entry) in charge.
+// path (a shared or cached entry) in charge.
 func (in Inputs) creditGate(d Decision, now time.Time) (Decision, bool) {
 	st, ok := in.CreditStatus(d.ProviderID)
 	if !ok {
@@ -234,7 +234,7 @@ func (in Inputs) creditGate(d Decision, now time.Time) (Decision, bool) {
 	if len(policy.InflightReservePct) > 0 {
 		count := in.Inflight[d.ProviderID]
 		if count == nil {
-			d.Inflight = "inflight=unknown(local|remote)"
+			d.Inflight = "inflight=unknown(local)"
 		} else {
 			d.Inflight = fmt.Sprintf("inflight=%d", *count)
 			if reserve := policy.InflightReservePct["credit"]; reserve > 0 && st.UsedPct != nil && *st.UsedPct+float64(*count)*reserve >= cutoff {

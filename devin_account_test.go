@@ -62,16 +62,20 @@ func TestDevinAccountKeyRequiresMatchingLogin(t *testing.T) {
 	if key, allowed := c.accountKey("devin"); key != "devin:"+fp || !allowed {
 		t.Fatalf("derived key %q, allowed=%v", key, allowed)
 	}
+	// The derived key is authoritative: a configured fingerprint can neither
+	// rename nor veto it, so a mismatch never blocks measurement.
 	c.Config.Quota.Accounts = map[string]string{"devin": "0123456789abcdef"}
 	c.Config.Quota.MeasurableAccounts = []string{"devin:0123456789abcdef"}
-	if key, allowed := c.accountKey("devin"); key != "devin:0123456789abcdef" || allowed {
-		t.Fatal("mismatched login may only read the configured key")
+	if key, allowed := c.accountKey("devin"); key != "devin:"+fp || !allowed {
+		t.Fatalf("configured fingerprint vetoed derived login: %q, %v", key, allowed)
 	}
 	if err := os.Remove(filepath.Join(dataBase(), "devin", "credentials.toml")); err != nil {
 		t.Fatal(err)
 	}
-	if _, allowed := c.accountKey("devin"); allowed {
-		t.Fatal("configured key without login allowed to publish")
+	// Without the login the configured fingerprint is no substitute: the key
+	// is empty, not merely disallowed.
+	if key, allowed := c.accountKey("devin"); key != "" || allowed {
+		t.Fatalf("configured key without login: %q, %v", key, allowed)
 	}
 	c.Config.Quota.Accounts = nil
 	if key, _ := c.accountKey("devin"); key != "" {

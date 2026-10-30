@@ -13,7 +13,8 @@ work, including any locally recorded provider limits. Omitting `--account-key`
 keeps the local gate path.
 
 When the shared reading is stale or missing and this host holds the same account
-(its derived key equals the requested key) and lists it in `measurable_accounts`,
+(its derived key equals the requested key for claude/codex/devin, or the
+configured key is listed in `measurable_accounts` for other pools),
 the gate measures once, publishes under the normal lease and judges the fresh
 value. Any other host keeps the read-only behavior and exits 4 with the reason
 (`this host does not hold the account`, or `this host may not measure the
@@ -73,10 +74,13 @@ confirm a local login. The XDG defaults are `~/.config` and `~/.local/share`.
 The API key is never a fingerprint input. A missing login, missing organization
 or unreadable file leaves Devin's identity unknown; a token alone is insufficient.
 No identity lookup makes a network request. Neither raw identity nor tokens are sent.
-An explicit `quota.accounts` mapping lets a host read an account without its CLI
-login. Only keys in `measurable_accounts` may probe; for Codex/Claude/Devin the
-local identity must also match. For other pools, configure the fingerprint
-explicitly and list it as measurable only where that account's CLI is logged in.
+For claude, codex and devin the derived key is authoritative: it needs no
+`measurable_accounts` entry, and a `quota.accounts` fingerprint for those pools
+cannot rename or veto it — a mismatch never blocks measurement, presence or
+publication. Without a local login a derived pool has no key at all; a configured
+fingerprint is never a substitute. For pools with no local derivation, set the
+fingerprint under `[quota.accounts]` to read the account, and list the key in
+`measurable_accounts` only where that account's CLI is logged in.
 The herdr event's CLI selectors also select the identity used for the key.
 
 ## Per-host setup checklist
@@ -88,15 +92,19 @@ shared observations does not need it.
 1. **An account key for every measured pool.** `claude`, `codex` and `devin` derive
    their fingerprint from the local CLI login; every other pool (`grok`,
    `commandcode`, `agy`, …) has no local derivation and gets its key
-   only from `[quota.accounts]`. Without an entry the account key is empty and
-   every read for that pool fails as `account_unknown`.
+   only from `[quota.accounts]`. A derived key is complete on its own —
+   `quota.accounts` entries for claude/codex/devin are ignored. Without a usable
+   key the account key is empty and every read for that pool fails as
+   `account_unknown`.
 2. **Plaintext opt-in for an `http://` hk endpoint.** HTTPS is the default;
    an `http://` `quota.url` also requires `allow_plaintext_quota_share = true`
    under `[bench]` (see `docs/config.md`). Without it every shared read fails
    as `shared_unavailable` even though hk answers.
-3. **Measurable and hk-granted keys.** Each `pool:fingerprint` key must appear
-   in `measurable_accounts` to be allowed to probe, and the matching account
-   must be granted on the hk side (`HANDOFFKEEP_QUOTA_<client>`). A key that
+3. **Measurable and hk-granted keys.** A `pool:fingerprint` key for a pool with
+   no local derivation must appear in `measurable_accounts` to be allowed to
+   probe; claude/codex/devin derive their key and permission from the local
+   login itself. In both cases the matching account must be granted on the hk
+   side (`HANDOFFKEEP_QUOTA_<client>`). A key that
    is measurable locally but not granted on hk is readable but can never
    publish, so it stays `shared_unavailable`/`shared_wait` until another
    granted host measures it.
@@ -119,17 +127,17 @@ measurable_accounts = [
 
 [quota.accounts]
 grok = "fedcba9876543210"            # required: grok has no local derivation
-# claude/codex/devin derive from the local CLI login; add them here only to pin a
-# specific account fingerprint.
+# claude/codex/devin derive from the local CLI login; entries for them are
+# ignored — the derived key always wins.
 ```
 
 Failure signatures:
 
 | Symptom | Cause |
 |---|---|
-| `account_unknown` | pool has no `quota.accounts` entry and no local claude/codex/devin derivation |
+| `account_unknown` | pool has no usable key: no local claude/codex/devin login, or no `quota.accounts` entry for a non-derived pool |
 | `shared_unavailable` on every read | `http://` url without `allow_plaintext_quota_share = true`, or hk unreachable/not granting |
-| reads but never probes | key missing from `measurable_accounts`, or not granted via `HANDOFFKEEP_QUOTA_<client>` |
+| reads but never probes | non-derived key missing from `measurable_accounts`, or not granted via `HANDOFFKEEP_QUOTA_<client>` |
 
 Every collection reads hk first, including `refresh` and `--no-cache`. A fresh
 shared observation bypasses local cache and probing. Stale/missing data causes
@@ -153,9 +161,9 @@ during an hk outage it is also degraded. A different account's cache is
 discarded. A `rate_limited` probe result honours `Retry-After` and otherwise
 backs off for five minutes; other provider failures do not suppress the next
 shared probe. Local cache TTL and non-rate-limit provider backoff never bypass
-the shared read. Shared mode disables the legacy document-based quota
-fallback/publication so it cannot turn a degraded local reading into a fresh
-one. Inflight tracking keeps its existing behavior.
+the shared read. The document-based quota fallback/publication path is removed:
+the `/v1/quota/*` API is the only quota exchange, and inflight tracking is
+local-only.
 
 `manual set`, `manual list`, and `manual clear` use the same account API in shared
 mode. Manual entries are independent per quota window; a write on one host is
@@ -242,7 +250,7 @@ An optional paid web source must select the same organization as the CLI login;
 a mismatch is refused as `account_mismatch` rather than published under its key.
 Consumers must not use `free_bucket` as evidence about paid credit availability.
 No account ID, credential, host ID, source job or local audit text appears in
-the observation. A matching, locally logged-in measurable host publishes
+the observation. A matching, locally logged-in host publishes
 presence through the existing separate endpoint after a successful shared read
 or publication.
 
@@ -251,8 +259,8 @@ or publication.
 After a successful shared measurement, the measuring host also publishes a
 presence record so placement can see which host last saw an account. A host
 that only reads fresh shared observations publishes presence too, provided its
-local identity resolves to the measured key (the same `measurable_accounts` and
-identity checks that gate probing); read-only hosts never publish:
+local identity resolves to the measured key (the same identity checks that gate
+probing); read-only hosts never publish:
 
 ```
 PUT /v1/quota/presence
@@ -268,8 +276,10 @@ configured value may contain only letters, digits, `.`, `_` and `-` (at most 64
 characters); anything else makes the configuration invalid. Publishes are
 rate-limited to at most one per `presence_every_s` seconds (default 600) per
 host and account, recorded in a `presence.json` next to the cache file.
-Publication is
-best-effort: a missing endpoint or an hk error never changes a quota verdict and never fails collection. hk must expose this endpoint
+Publication is synchronous: it completes, or fails inside a three-second
+timeout, before the command returns, and a failure is reported on stderr and
+releases the claimed slot so the next run retries. A publish failure never
+changes a quota verdict. hk must expose this endpoint
 for records to persist; pacelever does not create it.
 
 Omit `quota.url` to retain the existing local collection behavior. Tests use an

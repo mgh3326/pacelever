@@ -2,8 +2,8 @@
 
 **Measure AI quota, choose model profiles, and admit work at a sustainable pace.**
 
-pacelever is a Go CLI and library for quota-aware AI work. It replaces scopefuel's
-core while keeping the command contract that spawners and quota collectors use.
+pacelever is a Go CLI and library for quota-aware AI work, built around the
+command contract that spawners and quota collectors use.
 It supports Claude, Codex, Devin, Kimi, Grok, Kiro, ClinePass, Command Code and
 Antigravity, plus manual observations for credit balances and unavailable probes.
 
@@ -47,10 +47,13 @@ includes a `label` with profile, effort, `baseline|downshift`, and a nullable
 experiment ID. [Exploration and PR outcomes](docs/experiments.md) describes the
 policy, labels and outcome evidence.
 
-Existing `~/.config/scopefuel/config.toml`, JSON observations and read-only
-SQLite bench data are recognized automatically. New writes belong to pacelever.
-Unknown pool sections produce a warning. See [configuration](docs/config.md),
-[design and migration](DESIGN.md), and [the CLI reference](docs/cli.md).
+Every state file is pacelever's own. For one release, two host files written
+under the retired naming keep loading: a host whose only configuration is
+`~/.config/scopefuel/config.toml` still reads it (it is never edited; the first
+policy edit writes a new pacelever file), and a `scopefuel.manual.v1` manual
+store still parses. Unknown pool sections produce a warning.
+See [configuration](docs/config.md), [design](DESIGN.md), and
+[the CLI reference](docs/cli.md).
 
 The root package is importable without subprocesses:
 
@@ -76,11 +79,11 @@ arm64, plus `SHA256SUMS`. CI runs gofmt, vet, staticcheck, race tests, four cros
 probe tests. Development uses focused tests; `scripts/check.sh` is the final
 verification command. No external database server is needed.
 
-The compatibility suite records 59 installed-scopefuel gate cases and 56 launch
-cases, including 39 successful reference launch JSONs. Their existing fields remain
-identical; the new mandatory label is checked separately. Three credit builder-seat cases
-intentionally implement the newer seat rule. Regenerate only with the read-only
-fixture procedure in [DESIGN.md](DESIGN.md).
+The compatibility suite records 59 gate cases and 56 launch cases captured from
+the retired reference CLI, including 39 successful reference launch JSONs. Their
+existing fields remain identical; the new mandatory label is checked separately.
+Three credit builder-seat cases intentionally implement the newer seat rule. The
+frozen fixture and its capture history are described in [DESIGN.md](DESIGN.md).
 
 `.mergewake/policy.yaml` uses shadow mode (`enabled: false`). Landing, recovery,
 installation and service management are separate operator actions.

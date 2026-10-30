@@ -14,11 +14,11 @@ func isolate(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(base, "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(base, "cache"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(base, "data"))
-	for _, k := range []string{"PACELEVER_CONFIG", "PACELEVER_CACHE", "SCOPEFUEL_CACHE", "SCOPEFUEL_BENCH_DB"} {
+	for _, k := range []string{"PACELEVER_CONFIG", "PACELEVER_CACHE"} {
 		t.Setenv(k, "")
 	}
 }
-func TestConfigLegacy(t *testing.T) {
+func TestConfigFallbackGrace(t *testing.T) {
 	isolate(t)
 	legacy := filepath.Join(configBase(), "scopefuel", "config.toml")
 	b := []byte("[pools.retired]\nsubscribed = false\n[pools.claude]\nclass = 'preserve'\nuntil = 2027-01-01\nboost = 3\n[pools.codex]\nsubscribed = false\n[profiles.sonnet]\nsubscribed = true\n[bench]\nallow_plaintext_catalog = true\n[custom]\nretain = 'keep-me'\n")
@@ -87,9 +87,9 @@ func TestCreditMaxAgeConfig(t *testing.T) {
 	}
 }
 
-func TestLegacyManualAuditPreserved(t *testing.T) {
+func TestManualAuditFieldsPreserved(t *testing.T) {
 	isolate(t)
-	path := filepath.Join(filepath.Dir(legacyCachePath()), "manual.json")
+	path := filepath.Join(CacheDir(), "manual.json")
 	data := `{"schema":"scopefuel.manual.v1","latest":{"claude:5h":"old"},"history":[{"event":"set","manual_observation_id":"old","pool":"claude","window":"5h","used_pct":10,"measured_at":"2026-10-28T00:00:00Z","expires_at":"2026-10-28T01:00:00Z","account_ref":{"verification":"unverified","local_only":true},"execution_context":{"kind":"fixture"}}]}`
 	if e := AtomicWrite(path, []byte(data)); e != nil {
 		t.Fatal(e)

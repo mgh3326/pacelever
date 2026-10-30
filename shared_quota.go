@@ -166,12 +166,21 @@ func sameOrigin(a, b string) bool {
 	return oa != "" && oa == origin(b)
 }
 
+// accountKey resolves the shared account key this host uses for pool. Claude,
+// Codex and Devin keys are derived from the local CLI login only: a host that
+// holds the account's credentials may measure, publish presence for and read
+// it, and a quota.accounts entry cannot rename or veto the derived key.
+// measurable_accounts gates probing only for pools with no local derivation;
+// those pools get their key from quota.accounts alone.
 func (c Collector) accountKey(pool string) (string, bool) {
 	local := localAccountFP(pool, c.Selectors)
-	fp := c.Config.Quota.Accounts[pool]
-	if fp == "" {
-		fp = local
+	if local != "" {
+		return pool + ":" + local, true
 	}
+	if pool == "claude" || pool == "codex" || pool == "devin" {
+		return "", false
+	}
+	fp := c.Config.Quota.Accounts[pool]
 	if !accountFPRE.MatchString(fp) {
 		return "", false
 	}
@@ -181,9 +190,6 @@ func (c Collector) accountKey(pool string) (string, bool) {
 		if v == key {
 			allowed = true
 		}
-	}
-	if (pool == "claude" || pool == "codex" || pool == "devin") && local != fp {
-		allowed = false
 	}
 	return key, allowed
 }
@@ -204,27 +210,14 @@ func (q QuotaConfig) presenceHostID() string {
 	return "host-" + fingerprint("host", host)
 }
 
-// publishPresence records where an account was measured. It is asynchronous and
-// bounded, so it never adds latency to a collection or changes its verdict.
-// onDone, when set, reports whether the publish succeeded.
-func (c Collector) publishPresence(source ObservationSource, key string, at time.Time, onDone func(bool)) {
-	publisher, ok := source.(PresenceSource)
-	host := c.Config.Quota.presenceHostID()
-	if !ok || !accountKeyRE.MatchString(key) || host == "" {
-		if onDone != nil {
-			onDone(false)
-		}
-		return
-	}
-	record := PresenceRecord{HostID: host, AccountKey: key, LastSeen: at}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		err := publisher.PublishPresence(ctx, record)
-		if onDone != nil {
-			onDone(err == nil)
-		}
-	}()
+// publishPresence records where an account was measured. The call is bounded
+// by a three-second timeout and returns before the command finishes, so the
+// publish either completes or reports its failure synchronously; it never
+// changes a quota verdict.
+func (c Collector) publishPresence(ctx context.Context, publisher PresenceSource, host, key string, at time.Time) error {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	return publisher.PublishPresence(ctx, PresenceRecord{HostID: host, AccountKey: key, LastSeen: at})
 }
 func holderToken() (string, error) {
 	var b [16]byte
@@ -284,24 +277,29 @@ func (c Collector) presenceUndo(host, key string, ts int64) {
 
 // maybePresence publishes presence for an observation served from the shared
 // store. allowed is the accountKey verdict, so a host never publishes for an
-// account whose local CLI identity does not resolve to the same key.
-func (c Collector) maybePresence(source ObservationSource, key string, allowed bool, o Observation) {
+// account whose local CLI identity does not resolve to the same key. The
+// publish completes before collection returns; a failure releases the claimed
+// slot for the next run and is reported through the collector's
+// OnPublishFailure.
+func (c Collector) maybePresence(ctx context.Context, source ObservationSource, key string, allowed bool, o Observation) {
 	if !allowed || o.Stale || o.Degraded || o.Source != SourceHandoffkeep {
 		return
 	}
+	publisher, ok := source.(PresenceSource)
 	host := c.Config.Quota.presenceHostID()
-	if host == "" {
+	if !ok || !accountKeyRE.MatchString(key) || host == "" {
 		return
 	}
 	ts, due := c.presenceDue(host, key, c.quotaNow())
 	if !due {
 		return
 	}
-	c.publishPresence(source, key, c.quotaNow(), func(ok bool) {
-		if !ok {
-			c.presenceUndo(host, key, ts)
+	if err := c.publishPresence(ctx, publisher, host, key, c.quotaNow()); err != nil {
+		c.presenceUndo(host, key, ts)
+		if c.OnPublishFailure != nil {
+			c.OnPublishFailure("presence publish failed for " + key)
 		}
-	})
+	}
 }
 func (q QuotaConfig) freshTTL(pool string) time.Duration {
 	if ttl := q.PoolFreshTTLS[pool]; ttl > 0 {
@@ -542,10 +540,10 @@ func (c Collector) quotaNow() time.Time { return ClockNow(c.Now) }
 
 // ClaudeBar keeps a rate limiter per account: a 429 suppresses another fetch
 // for Retry-After (or a five-minute default), while the last good reading stays
-// available as stale evidence. A legacy scopefuel backoff does not transfer to
-// shared mode because it was not recorded against this account key.
+// available as stale evidence. The backoff applies only when the recorded
+// failure was measured against this account key.
 func sharedRateLimitBackoffActive(entry CacheEntry, pool, key string, now time.Time) bool {
-	if entry.legacy || entry.NegativeUntil <= float64(now.UnixMilli())/1000 || entry.LastError == nil || entry.LastError.ErrorKind != ErrKindRateLimited {
+	if entry.NegativeUntil <= float64(now.UnixMilli())/1000 || entry.LastError == nil || entry.LastError.ErrorKind != ErrKindRateLimited {
 		return false
 	}
 	fp, kind := identity(*entry.LastError)
@@ -586,7 +584,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	finish := func(o Observation) Observation {
 		o.PoolClass = c.Config.Pool(pool, now).Class
 		o.SharedManual = sharedManual(latest.Manual, pool)
-		c.maybePresence(source, key, allowed, o)
+		c.maybePresence(ctx, source, key, allowed, o)
 		return o
 	}
 	fresh := func() (Observation, bool) {
@@ -688,7 +686,9 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	released := false
 	defer func() {
 		if !released {
-			_ = releaseQuota(source, key, holder)
+			if err := releaseQuota(source, key, holder); err != nil && c.OnPublishFailure != nil {
+				c.OnPublishFailure("shared lease release failed for " + key)
+			}
 		}
 	}()
 	// Re-read after acquiring: another holder may have published between GET and POST.
@@ -880,7 +880,11 @@ func (c Collector) withQuotaLease(ctx context.Context, source ObservationSource,
 	if err != nil || !lease.Acquired || lease.Holder != holder {
 		return fmt.Errorf("shared account busy; retry manual entry")
 	}
-	defer releaseQuota(source, key, holder)
+	defer func() {
+		if err := releaseQuota(source, key, holder); err != nil && c.OnPublishFailure != nil {
+			c.OnPublishFailure("shared lease release failed for " + key)
+		}
+	}()
 	if fn(holder) != nil {
 		return fmt.Errorf("shared manual write failed")
 	}
