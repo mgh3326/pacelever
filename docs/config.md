@@ -1,8 +1,10 @@
 # Configuration
 
-pacelever reads `PACELEVER_CONFIG` when set. Otherwise it tries
-`$XDG_CONFIG_HOME/pacelever/config.toml`, then the corresponding scopefuel file;
-`XDG_CONFIG_HOME` defaults to `~/.config`. It never edits the legacy file.
+pacelever reads `PACELEVER_CONFIG` when set. Otherwise it reads
+`$XDG_CONFIG_HOME/pacelever/config.toml`; `XDG_CONFIG_HOME` defaults to
+`~/.config`. One-release grace: when the pacelever file does not exist and
+`PACELEVER_CONFIG` is unset, a host that still only carries the retired
+`~/.config/scopefuel/config.toml` loads it. The old file is never edited.
 The first policy edit copies all parsed keys into the pacelever file and changes
 only the requested values. Comments and formatting may be rewritten.
 
@@ -51,7 +53,9 @@ to 99% for spend or 90% for preserve. The weekly pace threshold never blocks a
 launch. `exclude` and `subscribed = false` skip automatic probes. A subscribed
 profile override can re-enable that profile on an unsubscribed pool.
 `fusion_billing_fp` optionally selects the billing account for a Fusion lead;
-its value is not printed by policy list.
+its value is not printed by policy list. A Fusion rung exits 4 unless the
+measured account is that fingerprint; with shared quota the lead's account is
+judged through `gate --account-key devin:<fp>`.
 
 Credit pools (`anthropic-api`) accept `credit_max_age_s`, defaulting to 259200
 (three days). A hand-entered balance older than that still admits with a
@@ -107,9 +111,8 @@ org_id = "org-example"          # with DEVIN_BEARER_TOKEN in the environment
 ```
 
 Kimi and Kiro still read the existing authenticated CLIs. Set
-`PACELEVER_<POOL>_BIN` to an explicit executable; the corresponding
-`SCOPEFUEL_<POOL>_BIN` remains supported. Kimi respects its existing location
-selector. The tool does not install CLIs or initiate login flows.
+`PACELEVER_<POOL>_BIN` to an explicit executable. Kimi respects its existing
+location selector. The tool does not install CLIs or initiate login flows.
 
 A provider `429` honours `Retry-After` (seconds or an HTTP date). Claude uses a
 300-second wait when the header is missing or zero and keeps a 900-second fresh
@@ -133,11 +136,13 @@ forwarded bearer token.
 ## State and manual evidence
 
 New state lives under `$XDG_CACHE_HOME/pacelever` (default `~/.cache/pacelever`).
-`PACELEVER_CACHE` selects a snapshot file. Existing `SCOPEFUEL_CACHE` or legacy
-snapshot/manual/limit files are read as a fallback. Native snapshot entries win.
-Historical bench data is read from `$XDG_DATA_HOME/scopefuel/bench.db`; the default
-is `~/.local/share/scopefuel/bench.db`. `SCOPEFUEL_BENCH_DB` can select a read-only
-copy. No database server, SQL service or CGO driver is required.
+`PACELEVER_CACHE` selects a snapshot file. For one release a manual store whose
+schema is still named `scopefuel.manual.v1`, or which still lives at
+`$XDG_CACHE_HOME/scopefuel/manual.json`, loads read-only; the next save lands in
+the pacelever file and never edits the old one. Devin free-limit and Command
+Code limit records get the same read-only grace at the retired cache path.
+Every other file must be pacelever's own. No database server, SQL service or
+CGO driver is required.
 
 New files use mode 0600, atomic rename and stable kernel-lock inodes. A killed
 owner releases its lock. Provider errors retain the last successful snapshot and
@@ -198,10 +203,8 @@ It admits while the balance is positive and unexpired and below that cutoff;
 admission. A stale entry still admits, with a warning, so the operator can
 update it by hand.
 
-`PACELEVER_QUOTA_SHARE=0` disables peer snapshot exchange. `PACELEVER_NOTIFY=0`
-disables exhaustion notices. `PACELEVER_STALE_WARN=0` disables stale-build checks.
-The legacy quota-share and stale-warning switches remain supported. Use these
-controls while comparing shadow verdicts. `operator-switch` is an explicit
+`PACELEVER_NOTIFY=0` disables exhaustion notices. `PACELEVER_STALE_WARN=0`
+disables stale-build checks. `operator-switch` is an explicit
 notification policy; it changes neither the quota verdict nor the login account.
 
 ## Exploration policy

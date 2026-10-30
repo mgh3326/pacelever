@@ -93,6 +93,11 @@ func devinKey(org string) string {
 func gateAccount(t *testing.T, hk *memoryHK, measurable []string, profile, key string) (int, map[string]any, error) {
 	t.Helper()
 	cfg := pl.Config{Quota: pl.QuotaConfig{MeasurableAccounts: measurable, WaitS: .001}}
+	pool, _, _ := strings.Cut(key, ":")
+	if pool != "devin" {
+		_, fp, _ := strings.Cut(key, ":")
+		cfg.Quota.Accounts = map[string]string{pool: fp}
+	}
 	var out, errOut bytes.Buffer
 	app := App{Config: cfg, Out: &out, Err: &errOut, Collector: pl.Collector{Config: cfg, Shared: hk, CachePath: filepath.Join(t.TempDir(), "cache.json")}}
 	v, err := parse([]string{"gate", "-m", profile, "--account-key", key, "--json"})
@@ -152,18 +157,23 @@ func TestGateAccountStaleOtherAccountStillRefused(t *testing.T) {
 
 func TestGateAccountStaleRefusedWhenHostCannotMeasure(t *testing.T) {
 	key := devinHost(t, refreshOrg)
+	// A devin login always derives its key, so "may not measure" only exists
+	// for pools with no local derivation: grok without measurable_accounts.
+	grokKey := "grok:0123456789abcdef"
 	for _, tc := range []struct {
 		name       string
+		profile    string
+		key        string
 		measurable []string
 		failWrite  bool
 		want       string
 	}{
-		{"not measurable here", nil, false, "may not measure"},
-		{"publish refused", []string{key}, true, "local refresh failed (shared_publish_failed)"},
+		{"not measurable here", "grok", grokKey, nil, false, "may not measure"},
+		{"publish refused", "devin-swe2-medium", key, []string{key}, true, "local refresh failed (shared_publish_failed)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hk := &memoryHK{failWrite: tc.failWrite}
-			code, record, err := gateAccount(t, hk, tc.measurable, "devin-swe2-medium", key)
+			code, record, err := gateAccount(t, hk, tc.measurable, tc.profile, tc.key)
 			if err == nil || code != pl.Unmeasurable || record["ok"] == true || !strings.Contains(err.Error(), tc.want) || hk.published != 0 {
 				t.Fatalf("code=%d err=%v record=%v published=%d", code, err, record, hk.published)
 			}

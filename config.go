@@ -80,7 +80,7 @@ func envPath(key, fallback string) string {
 }
 
 // FirstEnv is the first non-blank variable among keys, trimmed. Callers list
-// the pacelever name before its legacy scopefuel or handoffkeep alias.
+// the pacelever name before an older alias.
 func FirstEnv(keys ...string) string {
 	for _, k := range keys {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
@@ -107,15 +107,12 @@ func CachePath() string {
 	}
 	return filepath.Join(CacheDir(), "snapshots.json")
 }
-func legacyCachePath() string {
-	if p := os.Getenv("SCOPEFUEL_CACHE"); p != "" {
-		return p
-	}
-	return filepath.Join(cacheBase(), "scopefuel", "snapshots.json")
-}
 func LoadConfig() (Config, error) {
 	path := ConfigPath()
 	b, e := os.ReadFile(path)
+	// One-release grace: a host that still only carries the retired
+	// ~/.config/scopefuel/config.toml keeps loading it. Remove this fallback
+	// in the release after the 10-30 cleanup ships.
 	if os.IsNotExist(e) && os.Getenv("PACELEVER_CONFIG") == "" {
 		path = filepath.Join(configBase(), "scopefuel", "config.toml")
 		b, e = os.ReadFile(path)
@@ -236,8 +233,9 @@ func (c Config) CreditMaxAge(pool string) time.Duration {
 	return 72 * time.Hour
 }
 
-// EditConfig preserves all unrecognized sections and keys. Legacy input is copied
-// into the pacelever config; the scopefuel file is never changed.
+// EditConfig preserves all unrecognized sections and keys. Everything is
+// written to the pacelever config; the deprecated fallback file is never
+// changed.
 func EditConfig(edit func(map[string]any) error) error {
 	return WithFileLock(ConfigPath()+".lock", false, func() error {
 		c, e := LoadConfig()

@@ -26,11 +26,10 @@ const (
 	ErrKindTokenExpired    = "token_expired"     // the saved login is past its expiry
 
 	// Collector and pool state.
-	ErrKindBackoff       = "backoff"        // a negative cache entry without a recorded kind
-	ErrKindCache         = "cache_error"    // the observation could not be persisted
-	ErrKindExcluded      = "excluded"       // pool class is exclude
-	ErrKindLegacyFailure = "legacy_failure" // imported scopefuel failure
-	ErrKindUnsubscribed  = "unsubscribed"   // pool is not subscribed
+	ErrKindBackoff      = "backoff"      // a negative cache entry without a recorded kind
+	ErrKindCache        = "cache_error"  // the observation could not be persisted
+	ErrKindExcluded     = "excluded"     // pool class is exclude
+	ErrKindUnsubscribed = "unsubscribed" // pool is not subscribed
 
 	// Shared quota.
 	ErrKindAccountMismatch     = "account_mismatch"
@@ -50,7 +49,6 @@ const (
 	SourceUsageAPI    = "usage-api"   // a provider HTTP usage endpoint
 	SourceUsageRPC    = "usage-rpc"   // the Codex app-server JSON-RPC
 	SourceCLI         = "cli:/usage"  // a CLI usage screen or command
-	SourceRemote      = "remote"      // a peer snapshot from the bench server
 	SourceHandoffkeep = "handoffkeep" // the shared quota store
 )
 
@@ -63,7 +61,7 @@ const FPKindAccount = "account"
 
 // Bench row and catalog sources, as reported by ReadRows and CatalogInfo.
 const (
-	BenchLocal       = "local"       // legacy SQLite evidence on this host
+	BenchLocal       = "local"       // host-local evidence only, no server
 	BenchServer      = "server"      // fetched from the bench server now
 	BenchCache       = "cache"       // a fresh cache of the server
 	BenchCacheStale  = "cache-stale" // a cache older than the stale limit

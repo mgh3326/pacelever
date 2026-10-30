@@ -1,49 +1,17 @@
 package pacelever
 
 import (
-	"context"
-	"encoding/json"
-	"net/http"
 	"testing"
 	"time"
 )
 
-func TestQuotaShareIdentityAndTTL(t *testing.T) {
-	var payload QuotaSnapshot
-	b := fakeBench(t, func(*http.Request) (*http.Response, error) {
-		body, _ := json.Marshal(payload)
-		envelope, _ := json.Marshal(map[string]any{"document": map[string]any{"body": string(body)}})
-		return response(200, string(envelope)), nil
-	})
-	payload = QuotaSnapshot{Schema: "scopefuel.quota-share.v1", Pool: "claude", AccountFP: "example-fingerprint", MeasuredAt: testNow.Add(-time.Minute).Format(time.RFC3339), Buckets: observation("claude", 10).Buckets}
-	original := Observation{ID: "claude", Error: "unavailable", AccountFP: "example-fingerprint", AccountFPKind: "account"}
-	got := b.QuotaFallback(context.Background(), original, "")
-	if got.Source != "remote" {
-		t.Fatal("valid peer not used")
-	}
-	payload.AccountFP = "different"
-	if got = b.QuotaFallback(context.Background(), original, ""); got.Source == "remote" {
-		t.Fatal("wrong account used")
-	}
-	payload.AccountFP = original.AccountFP
-	payload.MeasuredAt = testNow.Add(-16 * time.Minute).Format(time.RFC3339)
-	if got = b.QuotaFallback(context.Background(), original, ""); got.Source == "remote" {
-		t.Fatal("expired peer used")
-	}
-}
 func TestInflightDedupAndAge(t *testing.T) {
-	local := []InflightJob{{"job-a", testNow.Add(-time.Hour).Format(time.RFC3339)}, {"old-job", testNow.Add(-9 * time.Hour).Format(time.RFC3339)}}
-	remote := InflightSnapshot{Schema: "scopefuel.quota-inflight.v1", Pool: "codex", AccountFP: "example-fingerprint", Host: "fixture-peer", PublishedAt: testNow.Add(-24 * time.Hour).Format(time.RFC3339), Jobs: []InflightJob{{"job-a", testNow.Add(-time.Hour).Format(time.RFC3339)}, {"job-b", testNow.Add(-2 * time.Hour).Format(time.RFC3339)}}}
-	b := fakeBench(t, func(*http.Request) (*http.Response, error) {
-		body, _ := json.Marshal(remote)
-		raw, _ := json.Marshal(map[string]any{"documents": []any{map[string]any{"key": "quota/codex/example-fingerprint/inflight/fixture-peer", "body": string(body)}}})
-		return response(200, string(raw)), nil
-	})
-	read := b.Inflight(context.Background(), "codex", "example-fingerprint", local, true)
-	if read.N == nil || *read.N != 2 {
+	local := []InflightJob{{"job-a", testNow.Add(-time.Hour).Format(time.RFC3339)}, {"job-a", testNow.Add(-2 * time.Hour).Format(time.RFC3339)}, {"old-job", testNow.Add(-9 * time.Hour).Format(time.RFC3339)}}
+	read := Inflight(local, true, testNow)
+	if read.N == nil || *read.N != 1 || len(read.Jobs) != 1 {
 		t.Fatalf("count %+v", read)
 	}
-	read = b.Inflight(context.Background(), "codex", "example-fingerprint", nil, false)
+	read = Inflight(nil, false, testNow)
 	if read.N != nil {
 		t.Fatal("unknown local count converted to zero")
 	}
@@ -54,7 +22,7 @@ func TestInflightReserve(t *testing.T) {
 		t.Fatalf("reserve did not block: %s", d.Reason)
 	}
 	in.Inflight = nil
-	if d := Gate(in, Request{Profile: "sonnet"}); d.ExitCode != 0 || d.Inflight != "inflight=unknown(local|remote)" {
+	if d := Gate(in, Request{Profile: "sonnet"}); d.ExitCode != 0 || d.Inflight != "inflight=unknown(local)" {
 		t.Fatalf("unknown count changed admission %+v", d)
 	}
 }
