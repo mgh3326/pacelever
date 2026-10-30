@@ -135,7 +135,7 @@ func TestRepWriteAheadRetry(t *testing.T) {
 }
 func TestLegacyBenchReader(t *testing.T) {
 	isolate(t)
-	t.Setenv("SCOPEFUEL_BENCH_DB", "testdata/legacy_bench.sqlite3")
+	t.Setenv("PACELEVER_BENCH_DB", "testdata/legacy_bench.sqlite3")
 	before, _ := os.ReadFile("testdata/legacy_bench.sqlite3")
 	rows, e := legacyRows("scores", false)
 	if e != nil || len(rows) != 1 || str(rows[0]["model_id"]) != "example-model" {

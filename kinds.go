@@ -29,7 +29,7 @@ const (
 	ErrKindBackoff       = "backoff"        // a negative cache entry without a recorded kind
 	ErrKindCache         = "cache_error"    // the observation could not be persisted
 	ErrKindExcluded      = "excluded"       // pool class is exclude
-	ErrKindLegacyFailure = "legacy_failure" // imported scopefuel failure
+	ErrKindLegacyFailure = "legacy_failure" // imported legacy failure
 	ErrKindUnsubscribed  = "unsubscribed"   // pool is not subscribed
 
 	// Shared quota.

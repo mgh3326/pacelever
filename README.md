@@ -2,8 +2,8 @@
 
 **Measure AI quota, choose model profiles, and admit work at a sustainable pace.**
 
-pacelever is a Go CLI and library for quota-aware AI work. It replaces scopefuel's
-core while keeping the command contract that spawners and quota collectors use.
+pacelever is a Go CLI and library for quota-aware AI work. It keeps the command
+contract that spawners and quota collectors use.
 It supports Claude, Codex, Devin, Kimi, Grok, Kiro, ClinePass, Command Code and
 Antigravity, plus manual observations for credit balances and unavailable probes.
 
@@ -47,8 +47,9 @@ includes a `label` with profile, effort, `baseline|downshift`, and a nullable
 experiment ID. [Exploration and PR outcomes](docs/experiments.md) describes the
 policy, labels and outcome evidence.
 
-Existing `~/.config/scopefuel/config.toml`, JSON observations and read-only
-SQLite bench data are recognized automatically. New writes belong to pacelever.
+For one release, pacelever still reads the default config file, snapshot file and
+SQLite bench data of the retired build from their former `scopefuel` directories.
+Nothing writes them, and new writes belong to pacelever.
 Unknown pool sections produce a warning. See [configuration](docs/config.md),
 [design and migration](DESIGN.md), and [the CLI reference](docs/cli.md).
 
@@ -76,11 +77,11 @@ arm64, plus `SHA256SUMS`. CI runs gofmt, vet, staticcheck, race tests, four cros
 probe tests. Development uses focused tests; `scripts/check.sh` is the final
 verification command. No external database server is needed.
 
-The compatibility suite records 59 installed-scopefuel gate cases and 56 launch
+The frozen reference fixture in `testdata/` records 59 gate cases and 56 launch
 cases, including 39 successful reference launch JSONs. Their existing fields remain
 identical; the new mandatory label is checked separately. Three credit builder-seat cases
-intentionally implement the newer seat rule. Regenerate only with the read-only
-fixture procedure in [DESIGN.md](DESIGN.md).
+intentionally implement the newer seat rule. The fixture is frozen: changing it is a
+contract change, described in [DESIGN.md](DESIGN.md).
 
 `.mergewake/policy.yaml` uses shadow mode (`enabled: false`). Landing, recovery,
 installation and service management are separate operator actions.
