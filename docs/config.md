@@ -1,8 +1,11 @@
 # Configuration
 
 pacelever reads `PACELEVER_CONFIG` when set. Otherwise it tries
-`$XDG_CONFIG_HOME/pacelever/config.toml`, then the corresponding scopefuel file;
-`XDG_CONFIG_HOME` defaults to `~/.config`. It never edits the legacy file.
+`$XDG_CONFIG_HOME/pacelever/config.toml`; `XDG_CONFIG_HOME` defaults to
+`~/.config`. For one release, a host with no pacelever file still loads a config
+left in the retired predecessor's directory (`$XDG_CONFIG_HOME/scopefuel/config.toml`);
+move it to the pacelever path, because the fallback is removed next release.
+The old file is never edited.
 The first policy edit copies all parsed keys into the pacelever file and changes
 only the requested values. Comments and formatting may be rewritten.
 
@@ -108,8 +111,7 @@ org_id = "org-example"          # with DEVIN_BEARER_TOKEN in the environment
 ```
 
 Kimi and Kiro still read the existing authenticated CLIs. Set
-`PACELEVER_<POOL>_BIN` to an explicit executable; the corresponding
-`SCOPEFUEL_<POOL>_BIN` remains supported. Kimi respects its existing location
+`PACELEVER_<POOL>_BIN` to an explicit executable. Kimi respects its existing location
 selector. The tool does not install CLIs or initiate login flows.
 
 A provider `429` honours `Retry-After` (seconds or an HTTP date). Claude uses a
@@ -134,11 +136,9 @@ forwarded bearer token.
 ## State and manual evidence
 
 New state lives under `$XDG_CACHE_HOME/pacelever` (default `~/.cache/pacelever`).
-`PACELEVER_CACHE` selects a snapshot file. Existing `SCOPEFUEL_CACHE` or legacy
-snapshot/manual/limit files are read as a fallback. Native snapshot entries win.
-Historical bench data is read from `$XDG_DATA_HOME/scopefuel/bench.db`; the default
-is `~/.local/share/scopefuel/bench.db`. `SCOPEFUEL_BENCH_DB` can select a read-only
-copy. No database server, SQL service or CGO driver is required.
+`PACELEVER_CACHE` selects a snapshot file. Historical bench data is read from
+`$XDG_DATA_HOME/pacelever/bench.db`; the default is `~/.local/share/pacelever/bench.db`.
+`PACELEVER_BENCH_DB` can select a read-only copy. No database server, SQL service or CGO driver is required.
 
 New files use mode 0600, atomic rename and stable kernel-lock inodes. A killed
 owner releases its lock. Provider errors retain the last successful snapshot and
@@ -201,8 +201,7 @@ update it by hand.
 
 `PACELEVER_QUOTA_SHARE=0` disables peer inflight exchange. `PACELEVER_NOTIFY=0`
 disables exhaustion notices. `PACELEVER_STALE_WARN=0` disables stale-build checks.
-The legacy quota-share and stale-warning switches remain supported. Use these
-controls while comparing shadow verdicts. `operator-switch` is an explicit
+`operator-switch` is an explicit
 notification policy; it changes neither the quota verdict nor the login account.
 
 ## Exploration policy

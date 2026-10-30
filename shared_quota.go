@@ -611,10 +611,9 @@ func (c Collector) quotaNow() time.Time { return ClockNow(c.Now) }
 
 // ClaudeBar keeps a rate limiter per account: a 429 suppresses another fetch
 // for Retry-After (or a five-minute default), while the last good reading stays
-// available as stale evidence. A legacy scopefuel backoff does not transfer to
-// shared mode because it was not recorded against this account key.
+// available as stale evidence.
 func sharedRateLimitBackoffActive(entry CacheEntry, pool, key string, now time.Time) bool {
-	if entry.legacy || entry.NegativeUntil <= float64(now.UnixMilli())/1000 || entry.LastError == nil || entry.LastError.ErrorKind != ErrKindRateLimited {
+	if entry.NegativeUntil <= float64(now.UnixMilli())/1000 || entry.LastError == nil || entry.LastError.ErrorKind != ErrKindRateLimited {
 		return false
 	}
 	fp, kind := identity(*entry.LastError)
@@ -894,7 +893,7 @@ func (c Collector) ManualInputs(observations []Observation, local ManualStore) M
 	if c.sharedSource() == nil {
 		return local
 	}
-	out := ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}
+	out := ManualStore{Schema: manualSchema, History: []ManualObservation{}, Latest: map[string]string{}}
 	for _, o := range observations {
 		if o.Degraded {
 			continue
@@ -962,7 +961,7 @@ func (c Collector) ReadManual(ctx context.Context) (ManualStore, error) {
 	if source == nil {
 		return LoadManual()
 	}
-	out := ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}
+	out := ManualStore{Schema: manualSchema, History: []ManualObservation{}, Latest: map[string]string{}}
 	for _, pool := range append(append([]string{}, ProviderIDs...), "anthropic-api") {
 		key, _ := c.accountKey(pool)
 		if key == "" {

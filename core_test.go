@@ -187,7 +187,7 @@ func TestActiveFreeLimitReadsDamagedRecordsFromDisk(t *testing.T) {
 	isolate(t)
 	observed := testNow.Add(-5 * time.Minute).Format(time.RFC3339)
 	for _, r := range []LimitRecord{{ObservedAt: observed}, {}} {
-		s := limitStore{Schema: "scopefuel.devin-free-limit.v1", Records: map[string]LimitRecord{limitIdentity("devin"): r}}
+		s := limitStore{Schema: "pacelever.devin-free-limit.v1", Records: map[string]LimitRecord{limitIdentity("devin"): r}}
 		if e := WriteJSON(limitPath("devin"), s); e != nil {
 			t.Fatal(e)
 		}

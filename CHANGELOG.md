@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Removed every trace of the retired `scopefuel` and `wrk` tools without
+  compatibility shims: the `SCOPEFUEL_*` environment variables
+  (`SCOPEFUEL_CACHE`, `_BENCH_DB`, `_E6_ARM`, `_QUOTA_SHARE`, `_STALE_WARN`,
+  `_OPENCODE_AUTH`, `_<POOL>_BIN`), the old cache, manual and limit file
+  fallbacks, the string-form `last_error` import and its `legacy_failure` kind.
+  Renamed: bench database `scopefuel/bench.db` -> `pacelever/bench.db`
+  (`PACELEVER_BENCH_DB`; move an existing file), inflight document schema and
+  session, the `*-limit` file schemas, and the herdr gauge source/token
+  (`pacelever.gauge`, `pacelever_quota`). Kept on purpose: the `scopefuel.v1`
+  and `scopefuel.gate.v1` wire schema ids that spawners validate.
+- One-release exceptions for running hosts: a config found only in the retired
+  config directory still loads, and a manual store with the retired schema id is
+  upgraded on its next write. Both go next release.
 - Removed the legacy document quota publication and fallback (`PublishQuota`,
   `QuotaFallback`, the `scopefuel.quota-share.v1` document and the
   `/v1/documents/quota/<pool>/<fp>/latest` path); nothing read it. A Fusion lead

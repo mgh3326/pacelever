@@ -32,8 +32,11 @@ never by primary/secondary position.
 
 Gate exits remain 0 admitted, 3 quota/policy, 4 unmeasurable, 5 role-denied and
 6 unsubscribed; malformed input or output failures use 2. The CLI preserves the
-admission first-line format and `scopefuel.gate.v1` audit schema. JSON quota
-summaries keep `scopefuel.v1`, including provider status/source and scoped buckets.
+admission first-line format and the `scopefuel.gate.v1` audit schema id. JSON quota
+summaries keep the `scopefuel.v1` schema id, including provider status/source and
+scoped buckets. These two ids are wire identifiers that spawners and quota
+collectors validate; they are the only places the retired predecessor's name
+survives, and renaming them needs a coordinated change in every consumer.
 Launch JSON keeps the original fields, including catalog provenance, billing,
 provider family and the nullable E6 marker. Launch refusals use exit 3. The operator-requested `label` is an additive field on
 every successful launch; it identifies actual profile/effort and experiment arm.
@@ -71,7 +74,7 @@ server fills only profiles it does not mention. Retirement and gate changes for
 mentioned profiles are authoritative.
 
 The public snapshot contains model and launcher metadata, not operator config,
-credentials, quota values, host identities or evidence records. Legacy SQLite is
+credentials, quota values, host identities or evidence records. Historical SQLite is
 opened read-only through a pure Go file reader. New bench caches, manual events,
 rep intents and observer state are atomic JSON files protected by kernel locks.
 The SQLite reader supports rollback-journal files, not WAL files; unsupported or
@@ -96,7 +99,7 @@ fingerprint, verifies the approved subset and effort monotonicity, and writes a
 catalog artifact. Degraded evidence requires a recorded reason. Publishing is a
 separate `bench push-catalog` operation.
 
-## Scopefuel parity
+## Contract coverage
 
 | Feature | pacelever status |
 | --- | --- |
@@ -107,9 +110,9 @@ separate `bench push-catalog` operation.
 | Weekly pace promotion | Implemented for every paid pool; ranking only |
 | Nine retained providers | HTTP-first implementations; PTY only for Devin, Kimi and Kiro |
 | SWE-2 Free model scope | Exact-rung fresh observation; free first |
-| Manual set/list/clear, credit observations | Implemented; legacy JSON read-compatible |
+| Manual set/list/clear, credit observations | Implemented; a store with the retired schema id loads for one release |
 | Bench catalog, push-catalog, bench grades | Implemented against `/v1/bench/*`; dry-run artifacts available |
-| Bench score display and legacy evidence | Read-compatible JSON cache and SQLite file reader |
+| Bench score display and historical evidence | SQLite file reader at `PACELEVER_BENCH_DB` or `pacelever/bench.db` |
 | Reps add/list/compare/pending | Implemented; durable intent, retry and namespaced IDs |
 | Refresh, including detached workers | Implemented with independent deadlines and locks |
 | Free-limit and Command Code limit observations | Implemented; account-scoped local state |
@@ -122,25 +125,25 @@ separate `bench push-catalog` operation.
 | Launch experiment labels | Actual profile, effort, baseline/downshift and nullable experiment ID on every launch |
 | PR outcome reps and grade evidence | First-class optional fields; flat/nested notes JSON; legacy text receipts; per-rung/arm metrics |
 | Retired providers, provider plugin loaders, one-shot migrations | Deliberately omitted |
-| Quota-v2 experimental shadow CLI, historical benchmark ingestion/backfills | Outside this core; no legacy command aliases |
+| Quota-v2 experimental shadow CLI, historical benchmark ingestion/backfills | Outside this core; no command aliases |
 
-## Parity fixtures
+## Compatibility fixtures
 
-`scripts/capture_goldens.py` executes the installed `scopefuel` command using a
-temporary config, data directory and synthetic fresh cache. It disables remote
-catalog selection, quota sharing and stale checks. No provider is invoked, no
-operator files are changed and no server writes occur. The generated fixture
-records 59 gate exits and 56 launch outcomes across profiles, rungs and seats.
-The 39 successful reference JSONs are compared structurally after removing only
-the new, mandatory `label` field requested for experiments. Every existing field
-and its provenance must remain identical; separate assertions verify the label.
-Raw JSON intentionally contains that additive extension.
+`testdata/compat_golden.json` is a frozen record of 59 gate exits and 56 launch
+outcomes across profiles, rungs and seats, captured once from the reference
+command that pacelever replaced. That command is retired and the capture
+procedure is not kept; the fixture is edited only to follow a deliberate
+contract change. The 39 successful reference JSONs are compared structurally
+after removing only the new, mandatory `label` field requested for experiments.
+Every existing field and its provenance must remain identical; separate
+assertions verify the label. Raw JSON intentionally contains that additive
+extension.
 
-Three credit builder cases deliberately differ from the older installed build.
+Three credit builder cases deliberately differ from the reference build.
 They now resolve launch JSON successfully and reach ordinary quota evaluation:
 Command Code admits on its fixture observation, while the two API-credit cases
 remain unmeasurable without a manual balance. All other matrix outcomes match.
-Exploration-off keeps every other legacy field and gate verdict unchanged.
+Exploration-off keeps every other field and gate verdict unchanged.
 These are contract tests over a representative matrix, not a proof that every
 historical human-readable sentence or ranking score is identical.
 
@@ -151,35 +154,21 @@ with short-lived helpers only, verifying deadlines, killed-owner lock release
 and parent-death cleanup. Backend tests use an injected HTTP client and local
 files.
 
-## Migration
+## One-release exceptions
 
-1. Keep scopefuel installed and keep all existing callers unchanged. Build or
-   download a separately named pacelever binary. Do not install a replacement yet.
-2. Let pacelever read legacy config and observations. Confirm warnings name only
-   retired/unknown pool sections and check `bench catalog status` provenance.
-   New writes go to pacelever; the legacy files remain unchanged.
-3. Run shadow comparisons with notifications and quota publishing disabled:
+pacelever carries no compatibility shims for its retired predecessor, with two
+exceptions that let a running host keep working until its files are moved. Both
+are removed in the next release:
 
-   ```sh
-   PACELEVER_NOTIFY=0 PACELEVER_QUOTA_SHARE=0 PACELEVER_STALE_WARN=0 \
-     ./dist/pacelever gate -m sonnet --effort high --role worker \
-     --gate-output /tmp/pacelever-gate.json
-   scopefuel gate -m sonnet --effort high --role worker \
-     --gate-output /tmp/scopefuel-gate.json
-   ```
+1. A config found only in the retired config directory still loads (a config at
+   `pacelever/config.toml` always wins). Edits are written to the pacelever
+   path; the old file is never changed.
+2. A manual observation store carrying the retired schema id loads, and the next
+   write stamps `pacelever.manual.v1`.
 
-   Capture each command's exit independently. Compare codes, pool, scope, selected
-   rung, cutoff, subscription, manual provenance and alternatives. Preserve code 5
-   separately from quota denial. Compare fresh observations close in time; usage
-   can change between the two reads. Expect the documented credit builder change.
-4. Witness authenticated provider probes on the intended platform, including a
-   Command Code caller with a short timeout. Check fresh and stale/manual cases,
-   free model scope, retired/unsubscribed pools and area routing. No production
-   catalog push is needed for shadow validation.
-5. After operator review, change one caller or let a Go spawner import the package.
-   Monitor verdict differences before changing the next caller. Retain scopefuel
-   and its original files for rollback. Installation and service changes are
-   separate work, not part of building this repository.
+The retired environment variables, cache and limit directories are no longer
+read. The historical bench database is read from `PACELEVER_BENCH_DB` or
+`$XDG_DATA_HOME/pacelever/bench.db`; move an existing file there.
 
 ## Continuous downshift experiments
 

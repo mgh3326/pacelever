@@ -26,7 +26,7 @@ func safeHost(host string) string {
 	return host
 }
 func quotaEnabled() bool {
-	v := normalize(FirstEnv("PACELEVER_QUOTA_SHARE", "SCOPEFUEL_QUOTA_SHARE"))
+	v := normalize(FirstEnv("PACELEVER_QUOTA_SHARE"))
 	return v != "0" && v != "off" && v != "false"
 }
 func identity(o Observation) (string, string) {
@@ -35,6 +35,10 @@ func identity(o Observation) (string, string) {
 	}
 	return o.AccountFP, o.AccountFPKind
 }
+
+// inflightSchema is the schema id of a published inflight document; readers and
+// writers must agree on it.
+const inflightSchema = "pacelever.quota-inflight.v1"
 
 type InflightJob struct {
 	JobID     string `json:"job_id"`
@@ -133,7 +137,7 @@ func (b BenchClient) Inflight(ctx context.Context, pool, fp string, local []Infl
 	result.RemoteKnown = true
 	for _, doc := range payload.Documents {
 		var v InflightSnapshot
-		if !strings.HasPrefix(doc.Key, prefix) || json.Unmarshal([]byte(doc.Body), &v) != nil || v.Schema != "scopefuel.quota-inflight.v1" || v.Pool != pool || v.AccountFP != fp || v.Host == host {
+		if !strings.HasPrefix(doc.Key, prefix) || json.Unmarshal([]byte(doc.Body), &v) != nil || v.Schema != inflightSchema || v.Pool != pool || v.AccountFP != fp || v.Host == host {
 			continue
 		}
 		at, e := ParseTime(v.PublishedAt)
@@ -158,13 +162,13 @@ func (b BenchClient) PublishInflight(ctx context.Context, pool, fp string, jobs 
 	}
 	host, _ := os.Hostname()
 	host = safeHost(host)
-	v := InflightSnapshot{Schema: "scopefuel.quota-inflight.v1", Pool: pool, AccountFP: fp, Host: host, PublishedAt: b.now().Format(time.RFC3339Nano), Jobs: jobs}
+	v := InflightSnapshot{Schema: inflightSchema, Pool: pool, AccountFP: fp, Host: host, PublishedAt: b.now().Format(time.RFC3339Nano), Jobs: jobs}
 	if v.Jobs == nil {
 		v.Jobs = []InflightJob{}
 	}
 	body, _ := json.Marshal(v)
 	key := "quota/" + pool + "/" + fp + "/inflight/" + host
-	return b.Send(ctx, "PUT", "/v1/documents/"+url.PathEscape(key), "quota_share", map[string]any{"key": key, "kind": "note", "session": "scopefuel-quota-share", "job": "", "body": string(body)}, nil)
+	return b.Send(ctx, "PUT", "/v1/documents/"+url.PathEscape(key), "quota_share", map[string]any{"key": key, "kind": "note", "session": "pacelever-quota-share", "job": "", "body": string(body)}, nil)
 }
 
 // UnknownResetHold is how long a limit observation with no readable reset time
@@ -221,9 +225,7 @@ func limitPath(pool string) string {
 }
 func readLimits(pool string) limitStore {
 	var s limitStore
-	if e := ReadJSON(limitPath(pool), &s); os.IsNotExist(e) {
-		_ = ReadJSON(filepath.Join(filepath.Dir(legacyCachePath()), filepath.Base(limitPath(pool))), &s)
-	}
+	_ = ReadJSON(limitPath(pool), &s)
 	if s.Records == nil {
 		s.Records = map[string]LimitRecord{}
 	}
@@ -251,9 +253,9 @@ func ObserveLimit(pool string, r LimitRecord, clear bool, accountKey string, now
 	}
 	return WithFileLock(limitPath(pool)+".lock", false, func() error {
 		s := readLimits(pool)
-		s.Schema = "scopefuel.devin-free-limit.v1"
+		s.Schema = "pacelever.devin-free-limit.v1"
 		if pool == "commandcode" {
-			s.Schema = "scopefuel.commandcode-limit.v1"
+			s.Schema = "pacelever.commandcode-limit.v1"
 		}
 		if clear {
 			delete(s.Records, accountKey)

@@ -1,7 +1,7 @@
 # pacelever conventions
 
 Read README.md and DESIGN.md first. The gate exit codes, `scopefuel.v1` /
-`scopefuel.gate.v1` JSON and the golden fixtures in `testdata/` are a
+`scopefuel.gate.v1` JSON schema ids and the golden fixtures in `testdata/` are a
 compatibility contract: a refactor must leave them unchanged.
 
 ## Layout
@@ -42,8 +42,7 @@ compatibility contract: a refactor must leave them unchanged.
   observation with `o.publishAccount(fp)`. Resolve logins through
   `account.go` (`codexHome`, `codexTokens`, `claudeAccountFP`), so the key a
   provider publishes is the key the shared store and gate expect.
-- **Environment.** Read options with `FirstEnv(pacelever name, legacy
-  alias...)`; it trims and skips blank values.
+- **Environment.** Read options with `FirstEnv(pacelever name, alias...)`; it trims and skips blank values.
 - **Exit codes.** The CLI returns `pl.Admitted`/`0`, `pl.Invalid`,
   `pl.Blocked`, `pl.Unmeasurable`, `pl.RoleDenied`, `pl.Unsubscribed` or
   `exitAlert`, never a bare non-zero number.

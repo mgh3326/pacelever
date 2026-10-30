@@ -387,10 +387,10 @@ func ValidateMonotonic(rows []CatalogRow) error {
 	return nil
 }
 func legacyDBPath() string {
-	if p := os.Getenv("SCOPEFUEL_BENCH_DB"); p != "" {
+	if p := os.Getenv("PACELEVER_BENCH_DB"); p != "" {
 		return p
 	}
-	return filepath.Join(dataBase(), "scopefuel", "bench.db")
+	return filepath.Join(dataBase(), "pacelever", "bench.db")
 }
 func legacyRows(scope string, remote bool) ([]map[string]any, error) {
 	path := legacyDBPath()
