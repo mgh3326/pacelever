@@ -42,7 +42,13 @@ type ManualStore struct {
 
 func LoadManual() (ManualStore, error) {
 	var s ManualStore
-	e := ReadJSON(filepath.Join(CacheDir(), "manual.json"), &s)
+	p := filepath.Join(CacheDir(), "manual.json")
+	e := ReadJSON(p, &s)
+	if os.IsNotExist(e) {
+		// A running host's existing manual store keeps loading for one
+		// release (operator decision 10-30).
+		e = ReadJSON(filepath.Join(cacheBase(), "scopefuel", "manual.json"), &s)
+	}
 	if os.IsNotExist(e) {
 		return ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}, nil
 	}

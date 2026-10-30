@@ -35,7 +35,7 @@ func ResolveBinary(pool string, cfg Config) string {
 	if pool == "kiro" {
 		name = "kiro-cli"
 	}
-	explicit := os.Getenv("PACELEVER_" + strings.ToUpper(pool) + "_BIN")
+	explicit := FirstEnv("PACELEVER_" + strings.ToUpper(pool) + "_BIN")
 	if explicit == "" {
 		explicit = cfg.Pools[pool].Bin
 	}

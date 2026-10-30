@@ -110,6 +110,13 @@ func CachePath() string {
 func LoadConfig() (Config, error) {
 	path := ConfigPath()
 	b, e := os.ReadFile(path)
+	// A running host whose config still lives at the retired tool's path keeps
+	// loading for one release (operator decision 10-30); new writes go to the
+	// pacelever file only.
+	if os.IsNotExist(e) && os.Getenv("PACELEVER_CONFIG") == "" {
+		path = filepath.Join(configBase(), "scopefuel", "config.toml")
+		b, e = os.ReadFile(path)
+	}
 	c := Config{Pools: map[string]PoolPolicy{}, Profiles: map[string]ProfilePolicy{}, Settings: map[string]float64{}, Raw: map[string]any{}, Path: path}
 	if os.IsNotExist(e) {
 		return c, nil

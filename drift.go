@@ -60,7 +60,7 @@ func ProbeServedModel(ctx context.Context, slug string) (string, error) {
 	home, _ := os.UserHomeDir()
 	token := os.Getenv("CLINE_API_KEY")
 	if token == "" {
-		path := os.Getenv("PACELEVER_OPENCODE_AUTH")
+		path := FirstEnv("PACELEVER_OPENCODE_AUTH")
 		if path == "" {
 			path = filepath.Join(home, ".local/share/opencode/auth.json")
 		}
@@ -112,7 +112,7 @@ func StaleBuildWarning(ctx context.Context, commit string, client HTTPDoer) stri
 	if commit == "" || commit == "unknown" || commit == "dev" {
 		return ""
 	}
-	switch normalize(os.Getenv("PACELEVER_STALE_WARN")) {
+	switch normalize(FirstEnv("PACELEVER_STALE_WARN")) {
 	case "0", "off", "false", "no":
 		return ""
 	}
