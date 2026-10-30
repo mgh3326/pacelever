@@ -1264,6 +1264,7 @@
   "defaults": {
     "opus": "high",
     "sonnet": "high",
+    "fable": "high",
     "haiku": "low",
     "codex-sol": "max",
     "codex-luna": "medium",
