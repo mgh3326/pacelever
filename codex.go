@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -70,24 +68,15 @@ func parseCodexAPI(o *Observation, raw map[string]json.RawMessage, header http.H
 // present, cannot open a browser sign-in — and falls back to the wham usage
 // API on any RPC failure.
 func fetchCodex(ctx context.Context, home string, selectors map[string]string, cfg Config, client HTTPDoer, now func() time.Time) Observation {
-	dir := selectors["CODEX_HOME"]
-	if dir == "" {
-		dir = os.Getenv("CODEX_HOME")
-	}
-	if dir == "" {
-		dir = filepath.Join(home, ".codex")
-	}
-	tokens := object(readObject(filepath.Join(dir, "auth.json"))["tokens"])
+	dir := codexHome(home, selectors)
+	tokens := codexTokens(dir)
 	token := str(tokens["access_token"])
 	if token == "" {
 		return Observation{ID: "codex", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
 	}
 	acct := str(tokens["account_id"])
 	if o, ok := fetchCodexRPC(ctx, home, cfg, dir); ok {
-		if acct != "" {
-			o.PublishFP = fingerprint("codex-account", acct)
-			o.PublishFPKind = FPKindAccount
-		}
+		o.publishAccount(accountFP("codex", acct))
 		return o
 	}
 	headers := map[string]string{"Authorization": "Bearer " + token}
@@ -95,10 +84,7 @@ func fetchCodex(ctx context.Context, home string, selectors map[string]string, c
 		headers["ChatGPT-Account-Id"] = acct
 	}
 	o := (HTTPProvider{ID: "codex", URL: "https://chatgpt.com/backend-api/wham/usage", Headers: headers, Client: client, Now: now}).Fetch(ctx)
-	if acct != "" {
-		o.PublishFP = fingerprint("codex-account", acct)
-		o.PublishFPKind = FPKindAccount
-	}
+	o.publishAccount(accountFP("codex", acct))
 	return o
 }
 

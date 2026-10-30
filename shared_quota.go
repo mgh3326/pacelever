@@ -166,30 +166,6 @@ func sameOrigin(a, b string) bool {
 	return oa != "" && oa == origin(b)
 }
 
-// Resolve identity before any provider request, using exactly the provider hash.
-func localAccountFP(pool string, selectors map[string]string) string {
-	home, _ := os.UserHomeDir()
-	switch pool {
-	case "codex":
-		dir := selectors["CODEX_HOME"]
-		if dir == "" {
-			dir = os.Getenv("CODEX_HOME")
-		}
-		if dir == "" {
-			dir = filepath.Join(home, ".codex")
-		}
-		return fingerprint("codex-account", str(object(readObject(filepath.Join(dir, "auth.json"))["tokens"])["account_id"]))
-	case "claude":
-		_, identity, _, shareable := claudeLocations(home, selectors)
-		if !shareable {
-			return ""
-		}
-		return fingerprint("claude-account", str(object(readObject(identity)["oauthAccount"])["accountUuid"]))
-	case "devin":
-		return devinAccountFP()
-	}
-	return ""
-}
 func (c Collector) accountKey(pool string) (string, bool) {
 	local := localAccountFP(pool, c.Selectors)
 	fp := c.Config.Quota.Accounts[pool]
@@ -441,7 +417,7 @@ func sharedAuto(x *SharedObservation, pool, key string, now time.Time, ttl time.
 	if age < 0 {
 		age = 0
 	}
-	o := Observation{ID: pool, Plan: x.Plan, Source: SourceHandoffkeep, FetchedAt: float64(x.MeasuredAt.UnixMilli()) / 1000, AgeS: ptr(age.Seconds()), AccountFP: strings.SplitN(key, ":", 2)[1], AccountFPKind: FPKindAccount, AccountFPMatch: ptr(true)}
+	o := Observation{ID: pool, Plan: x.Plan, Source: SourceHandoffkeep, FetchedAt: float64(x.MeasuredAt.UnixMilli()) / 1000, AgeS: ptr(age.Seconds()), AccountFP: accountKeyFP(key), AccountFPKind: FPKindAccount, AccountFPMatch: ptr(true)}
 	o.FreeBucket = free
 	if pool == "devin" {
 		// Shared organization identity is for publication. Keeping it separate
@@ -641,7 +617,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		// The optional web source selects its organization independently of
 		// the CLI login. Require its attested identity; current request config
 		// is only an additional constraint, not proof of what was measured.
-		configuredFP := fingerprint("devin-account", strings.TrimSpace(c.Config.Pools[pool].OrgID))
+		configuredFP := accountFP("devin", strings.TrimSpace(c.Config.Pools[pool].OrgID))
 		if fp == "" || kind != FPKindAccount || configuredFP != "" && configuredFP != fp {
 			return finish(fail(ErrKindAccountMismatch))
 		}
@@ -650,7 +626,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		return finish(fail(ErrKindAccountMismatch))
 	}
 	if pool == "devin" {
-		if localAccountFP(pool, c.Selectors) != strings.SplitN(key, ":", 2)[1] {
+		if localAccountFP(pool, c.Selectors) != accountKeyFP(key) {
 			return finish(fail(ErrKindAccountMismatch))
 		}
 		// The free bucket is unmeasurable and independent of paid-credit
@@ -658,7 +634,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		if observed.Error != "" || observed.Warning != "" || observed.Stale {
 			if observed.ErrorKind == ErrKindRateLimited {
 				observed.ID = pool
-				observed.PublishFP, observed.PublishFPKind = strings.SplitN(key, ":", 2)[1], FPKindAccount
+				observed.publishAccount(accountKeyFP(key))
 				if observed.RetryAfterS <= 0 {
 					observed.RetryAfterS = 300
 				}
@@ -683,8 +659,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		if kind == ErrKindRateLimited {
 			failedAt := c.quotaNow()
 			if fp == "" {
-				observed.PublishFP = strings.SplitN(key, ":", 2)[1]
-				observed.PublishFPKind = FPKindAccount
+				observed.publishAccount(accountKeyFP(key))
 			}
 			if observed.RetryAfterS <= 0 {
 				observed.RetryAfterS = 300

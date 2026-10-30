@@ -61,10 +61,7 @@ func fetchCommandCode(ctx context.Context, token string, client HTTPDoer, now fu
 	if account == "" {
 		account = orgID
 	}
-	if fp := fingerprint("commandcode-account", account); fp != "" {
-		o.PublishFP = fp
-		o.PublishFPKind = FPKindAccount
-	}
+	o.publishAccount(accountFP("commandcode", account))
 	return o
 }
 

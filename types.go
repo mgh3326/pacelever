@@ -161,6 +161,11 @@ func ClockNow(now func() time.Time) time.Time {
 	}
 	return time.Now().UTC()
 }
+
+// clockFunc is ClockNow as a never-nil clock, for code that passes one on.
+func clockFunc(now func() time.Time) func() time.Time {
+	return func() time.Time { return ClockNow(now) }
+}
 func validPct(p *float64) bool {
 	return p != nil && !math.IsNaN(*p) && !math.IsInf(*p, 0) && *p >= 0 && *p <= 100
 }

@@ -20,14 +20,12 @@ func devinWebProvider(cfg Config, client HTTPDoer, now func() time.Time) Provide
 	if token == "" || !devinOrgRE.MatchString(org) {
 		return nil
 	}
-	if now == nil {
-		now = time.Now
-	}
+	now = clockFunc(now)
 	return ProviderFunc(func(ctx context.Context) Observation {
 		o := fetchDevinWeb(ctx, token, org, client, now)
 		// Attest the organization captured by this provider, independently of
 		// any later changes to the collector's request configuration.
-		o.PublishFP, o.PublishFPKind = fingerprint("devin-account", org), FPKindAccount
+		o.publishAccount(accountFP("devin", org))
 		return o
 	})
 }

@@ -72,7 +72,7 @@ func grokRecords(home string, selectors map[string]string) []grokRecord {
 			ClientID:     strings.TrimSpace(str(fields["oidc_client_id"])),
 		}
 		if user := strings.TrimSpace(str(fields["user_id"])); user != "" {
-			record.Fingerprint = fingerprint("grok-account", user)
+			record.Fingerprint = accountFP("grok", user)
 		}
 		if expires := parseOptionalTime(str(fields["expires_at"])); !expires.IsZero() {
 			record.Expires, record.HasExpiry = expires, true

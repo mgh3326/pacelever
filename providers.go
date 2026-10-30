@@ -194,7 +194,7 @@ func DefaultProvidersFor(cfg Config, selectors map[string]string) map[string]Pro
 // DefaultProvidersAt wires every provider to one clock; nil means the wall
 // clock in UTC.
 func DefaultProvidersAt(cfg Config, selectors map[string]string, now func() time.Time) map[string]Provider {
-	clock := func() time.Time { return ClockNow(now) }
+	clock := clockFunc(now)
 	home, _ := os.UserHomeDir()
 	result := map[string]Provider{}
 	result["claude"] = ProviderFunc(func(ctx context.Context) Observation {
@@ -241,10 +241,7 @@ func DefaultProvidersAt(cfg Config, selectors map[string]string, now func() time
 			return Observation{ID: "grok", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
 		}
 		o := fetchGrokRecord(ctx, record, nil, clock)
-		if record.Fingerprint != "" {
-			o.PublishFP = record.Fingerprint
-			o.PublishFPKind = FPKindAccount
-		}
+		o.publishAccount(record.Fingerprint)
 		return o
 	})
 	agy := newAgyProvider(home, cfg, nil)

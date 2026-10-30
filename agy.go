@@ -44,7 +44,6 @@ type agySecrets interface {
 func newAgyProvider(home string, cfg Config, client HTTPDoer) agyProvider {
 	p := agyProvider{
 		client:     client,
-		now:        time.Now,
 		file:       func() string { return agyToken(home) },
 		localProcs: agyLocalProcesses,
 		localPorts: agyListenPorts,
@@ -74,10 +73,7 @@ func (p agyProvider) secretToken(ctx context.Context) string {
 }
 
 func (p agyProvider) Fetch(ctx context.Context) Observation {
-	now := p.now
-	if now == nil {
-		now = time.Now
-	}
+	now := clockFunc(p.now)
 	// The running app's own server answers without a stored credential, so
 	// it is strictly safer than the token path and goes first; any local
 	// failure falls back to today's cloud source unchanged.

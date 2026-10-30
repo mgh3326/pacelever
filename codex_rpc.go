@@ -280,8 +280,7 @@ func fetchCodexRPC(ctx context.Context, home string, cfg Config, codexDir string
 		}
 		if json.Unmarshal(acct, &a) == nil && a.Account != nil && a.Account.Email != "" {
 			if o.PublishFP == "" {
-				o.PublishFP = fingerprint("codex-account", a.Account.Email)
-				o.PublishFPKind = FPKindAccount
+				o.publishAccount(accountFP("codex", a.Account.Email))
 			}
 		}
 	}
