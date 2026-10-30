@@ -202,6 +202,11 @@ It admits while the balance is positive and unexpired and below that cutoff;
 admission. A stale entry still admits, with a warning, so the operator can
 update it by hand.
 
+Peer inflight documents carry the `pacelever.quota-inflight.v1` schema; a host
+ignores any other. Upgrade every host of a pool with `inflight_reserve_pct`
+together: until a peer upgrades, its running jobs are not counted against the
+reserve.
+
 `PACELEVER_QUOTA_SHARE=0` disables the peer inflight exchange. `PACELEVER_NOTIFY=0`
 disables exhaustion notices. `PACELEVER_STALE_WARN=0` disables stale-build checks.
 `operator-switch` is an explicit
