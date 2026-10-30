@@ -90,7 +90,7 @@ func devinKey(org string) string {
 	return "devin:" + hex.EncodeToString(sum[:8])
 }
 
-func gateAccount(t *testing.T, hk *memoryHK, measurable []string, profile, key string) (int, error, map[string]any) {
+func gateAccount(t *testing.T, hk *memoryHK, measurable []string, profile, key string) (int, map[string]any, error) {
 	t.Helper()
 	cfg := pl.Config{Quota: pl.QuotaConfig{MeasurableAccounts: measurable, WaitS: .001}}
 	var out, errOut bytes.Buffer
@@ -102,13 +102,13 @@ func gateAccount(t *testing.T, hk *memoryHK, measurable []string, profile, key s
 	code, err := app.gate(context.Background(), v)
 	record := map[string]any{}
 	_ = json.Unmarshal(out.Bytes(), &record)
-	return code, err, record
+	return code, record, err
 }
 
 func TestGateAccountFreeDevinPublishedAndAdmitted(t *testing.T) {
 	key := devinHost(t, refreshOrg)
 	hk := &memoryHK{}
-	code, err, record := gateAccount(t, hk, []string{key}, "devin-swe2-medium", key)
+	code, record, err := gateAccount(t, hk, []string{key}, "devin-swe2-medium", key)
 	if err != nil || code != pl.Admitted || record["ok"] != true || record["gate_basis"] != "free-bucket:swe-2-medium" {
 		t.Fatalf("code=%d err=%v record=%v", code, err, record)
 	}
@@ -117,7 +117,7 @@ func TestGateAccountFreeDevinPublishedAndAdmitted(t *testing.T) {
 		t.Fatalf("published=%d wire=%s", hk.published, wire)
 	}
 	// The next gate reads the fresh free state and does not measure again.
-	code, err, _ = gateAccount(t, hk, nil, "devin-swe2-medium", key)
+	code, _, err = gateAccount(t, hk, nil, "devin-swe2-medium", key)
 	if err != nil || code != pl.Admitted || hk.published != 1 {
 		t.Fatalf("second gate: code=%d err=%v published=%d", code, err, hk.published)
 	}
@@ -127,7 +127,7 @@ func TestGateAccountStaleSameAccountRefreshesThenAdmits(t *testing.T) {
 	key := devinHost(t, refreshOrg)
 	stale := &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: time.Now().Add(-time.Hour), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketAvailable}}
 	hk := &memoryHK{latest: pl.SharedLatest{Observation: stale}}
-	code, err, record := gateAccount(t, hk, []string{key}, "devin-swe2-medium", key)
+	code, record, err := gateAccount(t, hk, []string{key}, "devin-swe2-medium", key)
 	if err != nil || code != pl.Admitted || record["account_key"] != key {
 		t.Fatalf("code=%d err=%v record=%v", code, err, record)
 	}
@@ -141,7 +141,7 @@ func TestGateAccountStaleOtherAccountStillRefused(t *testing.T) {
 	other := devinKey(otherOrg)
 	stale := &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: time.Now().Add(-time.Hour), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketAvailable}}
 	hk := &memoryHK{latest: pl.SharedLatest{Observation: stale}}
-	code, err, record := gateAccount(t, hk, []string{local, other}, "devin-swe2-medium", other)
+	code, record, err := gateAccount(t, hk, []string{local, other}, "devin-swe2-medium", other)
 	if err == nil || code != pl.Unmeasurable || record["ok"] == true || !strings.Contains(err.Error(), "does not hold the account") {
 		t.Fatalf("code=%d err=%v record=%v", code, err, record)
 	}
@@ -163,7 +163,7 @@ func TestGateAccountStaleRefusedWhenHostCannotMeasure(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hk := &memoryHK{failWrite: tc.failWrite}
-			code, err, record := gateAccount(t, hk, tc.measurable, "devin-swe2-medium", key)
+			code, record, err := gateAccount(t, hk, tc.measurable, "devin-swe2-medium", key)
 			if err == nil || code != pl.Unmeasurable || record["ok"] == true || !strings.Contains(err.Error(), tc.want) || hk.published != 0 {
 				t.Fatalf("code=%d err=%v record=%v published=%d", code, err, record, hk.published)
 			}
@@ -186,9 +186,30 @@ func TestGateAccountFreeStateGatesTheFreeRung(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fresh := &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: time.Now(), Buckets: []pl.SharedBucket{}, FreeBucket: tc.free}
 			hk := &memoryHK{latest: pl.SharedLatest{Observation: fresh}}
-			code, _, record := gateAccount(t, hk, nil, "devin-swe2-medium", key)
+			code, record, _ := gateAccount(t, hk, nil, "devin-swe2-medium", key)
 			if code != tc.want || (tc.want != pl.Admitted && record["ok"] == true) {
 				t.Fatalf("code=%d want=%d record=%v", code, tc.want, record)
+			}
+		})
+	}
+}
+
+func TestGateAccountMalformedReadingIsNotRefreshed(t *testing.T) {
+	key := devinHost(t, refreshOrg)
+	for _, tc := range []struct {
+		name string
+		x    *pl.SharedObservation
+	}{
+		{"exhausted without reset", &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: time.Now(), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketExhausted}}},
+		{"invalid percentage", &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: time.Now().Add(-time.Hour), Buckets: []pl.SharedBucket{{Window: "7d", UsedPct: 101, Scope: "account"}}}},
+		{"future measurement", &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: time.Now().Add(time.Hour), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketAvailable}}},
+		{"manual kind", &pl.SharedObservation{ID: 1, Kind: "manual", MeasuredAt: time.Now(), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketAvailable}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hk := &memoryHK{latest: pl.SharedLatest{Observation: tc.x}}
+			code, record, err := gateAccount(t, hk, []string{key}, "devin-swe2-medium", key)
+			if err == nil || code != pl.Unmeasurable || record["ok"] == true || hk.leases != 0 || hk.published != 0 {
+				t.Fatalf("code=%d err=%v leases=%d published=%d", code, err, hk.leases, hk.published)
 			}
 		})
 	}

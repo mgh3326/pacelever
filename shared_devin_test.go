@@ -424,3 +424,30 @@ func TestDevinSharedFreeStateValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestGateAccountScopedFreeBucketStates(t *testing.T) {
+	future, past := testNow.Add(time.Hour), testNow.Add(-time.Hour)
+	for _, tc := range []struct {
+		name string
+		free *FreeBucketState
+		want int
+	}{
+		{"absent", nil, Unmeasurable},
+		{"unknown", &FreeBucketState{State: FreeBucketUnknown}, Unmeasurable},
+		{"available", &FreeBucketState{State: FreeBucketAvailable}, Admitted},
+		{"exhausted until reset", &FreeBucketState{State: FreeBucketExhausted, ResetsAt: &future}, Blocked},
+		{"exhausted past reset", &FreeBucketState{State: FreeBucketExhausted, ResetsAt: &past}, Admitted},
+		{"exhausted without reset", &FreeBucketState{State: FreeBucketExhausted}, Unmeasurable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := Gate(Inputs{Now: testNow, AccountScoped: true, Observations: []Observation{{ID: "devin", FreeBucket: tc.free}}}, Request{Profile: "devin-swe2-medium"})
+			if d.ExitCode != tc.want || d.OK != (tc.want == Admitted) {
+				t.Fatalf("exit=%d ok=%v reason=%q", d.ExitCode, d.OK, d.Reason)
+			}
+		})
+	}
+	// Outside account scope the local free-limit record stays authoritative.
+	if d := Gate(Inputs{Now: testNow, Observations: []Observation{{ID: "devin", FreeBucket: &FreeBucketState{State: FreeBucketUnknown}}}}, Request{Profile: "devin-swe2-medium"}); !d.OK {
+		t.Fatalf("local gate changed: %+v", d)
+	}
+}

@@ -191,8 +191,13 @@ func gate(in Inputs, req Request) Decision {
 			if fb == nil || fb.State == FreeBucketUnknown {
 				return failure(d, Unmeasurable, "shared free bucket state unavailable")
 			}
-			if fb.State == FreeBucketExhausted && fb.ResetsAt != nil && fb.ResetsAt.After(now) {
-				return failure(d, Blocked, "free limit exceeded until "+fb.ResetsAt.UTC().Format(time.RFC3339))
+			if fb.State == FreeBucketExhausted {
+				if fb.ResetsAt == nil {
+					return failure(d, Unmeasurable, "shared free bucket exhausted without a reset time")
+				}
+				if fb.ResetsAt.After(now) {
+					return failure(d, Blocked, "free limit exceeded until "+fb.ResetsAt.UTC().Format(time.RFC3339))
+				}
 			}
 		}
 		d.OK = true

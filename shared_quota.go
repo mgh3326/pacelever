@@ -464,8 +464,16 @@ func (c Collector) AccountObservation(ctx context.Context, key string) (Observat
 	if err != nil {
 		return Observation{}, deny(Unmeasurable, "shared quota unavailable for account")
 	}
-	o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(pool), false)
+	now := c.quotaNow()
+	o, ok := sharedAuto(latest.Observation, pool, key, now, c.Config.Quota.freshTTL(pool), false)
 	if !ok {
+		// Missing, expired or rolled-over readings are stale; a present reading
+		// that is invalid at any age is malformed and stays a plain refusal.
+		if latest.Observation != nil {
+			if _, wellFormed := sharedAuto(latest.Observation, pool, key, now, math.MaxInt64, true); !wellFormed {
+				return Observation{}, deny(Unmeasurable, msgAccountMalformed)
+			}
+		}
 		return Observation{}, deny(Unmeasurable, msgAccountStale)
 	}
 	o.PoolClass = c.Config.Pool(pool, c.quotaNow()).Class

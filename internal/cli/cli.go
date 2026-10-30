@@ -487,6 +487,8 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 			}
 			in.Observations = []pl.Observation{o}
 			in.AccountScoped = true
+			// A refresh takes time; judge the reset against the clock now.
+			in.Now = a.now()
 			d = pl.Gate(in, req)
 		}
 	} else if d.ExitCode == pl.Unmeasurable {

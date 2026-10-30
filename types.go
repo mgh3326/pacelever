@@ -68,6 +68,9 @@ const (
 	// msgAccountStale is the refusal for a named account with no fresh
 	// automatic shared observation.
 	msgAccountStale = "fresh automatic shared quota unavailable for account"
+	// msgAccountMalformed is the refusal for a shared reading that is present
+	// but unusable; it is never refreshed over.
+	msgAccountMalformed = "shared quota observation unusable for account"
 )
 
 // failed is an observation of pool id that measured nothing.

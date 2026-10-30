@@ -18,7 +18,8 @@ the gate measures once, publishes under the normal lease and judges the fresh
 value. Any other host keeps the read-only behavior and exits 4 with the reason
 (`this host does not hold the account`, or `this host may not measure the
 account`); a failed refresh exits 4 with `local refresh failed (<kind>)`. A fresh
-reading is never re-measured.
+reading is never re-measured, and a malformed one (invalid, future-dated or
+non-automatic) exits 4 without a refresh.
 
 A free SWE-2 profile (`devin-swe2`, `devin-swe2-medium`, `devin-swe2-max`) on a
 named account is judged on the shared `free_bucket`: `available` admits,
