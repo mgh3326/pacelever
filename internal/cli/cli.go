@@ -197,10 +197,13 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 		if o.Error != "" {
 			return pl.Unmeasurable, fmt.Errorf("%s", o.Error)
 		}
-		if e = a.json(o); e != nil || !publishFailed.Load() {
-			return 0, e
+		if e = a.json(o); e != nil {
+			return pl.Invalid, e
 		}
-		return pl.Unmeasurable, fmt.Errorf("%s measured but not published", pool)
+		if publishFailed.Load() {
+			return pl.Unmeasurable, fmt.Errorf("%s measured but not published", pool)
+		}
+		return 0, nil
 	case "observe":
 		pool := "devin"
 		if v.at(1) == "commandcode-limit" {
