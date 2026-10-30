@@ -142,15 +142,32 @@ func TestRepsListToleratesInvalidStoredOutcome(t *testing.T) {
 	if e := WriteJSON(repsPath(), []Rep{good, bad}); e != nil {
 		t.Fatal(e)
 	}
-	rows, _, e := (BenchClient{}).ReadReps(context.Background(), "")
-	if len(rows) != 2 {
-		t.Fatalf("stored outcome blocked listing: %v %+v", e, rows)
+	rows, source, e := (BenchClient{}).ReadReps(context.Background(), "")
+	if e != nil || source != BenchLocal || len(rows) != 2 {
+		t.Fatalf("stored outcome blocked listing: %v %q %+v", e, source, rows)
 	}
 	for _, r := range rows {
 		wantPending := r.LocalID == 2
 		if r.Pending != wantPending {
 			t.Fatalf("pending mismatch: %+v", r)
 		}
+	}
+}
+
+// With no remote configured nothing was read, so ReadRows reports no usable
+// source with its error; ReadReps answers from the local reps alone, and a
+// configured handoffkeep backend that is unreachable stays an error.
+func TestBenchSourceMatchesError(t *testing.T) {
+	isolate(t)
+	rows, source, e := (BenchClient{}).ReadRows(context.Background(), "reps")
+	if e == nil || source != BenchUnavailable || rows != nil {
+		t.Fatalf("no backend: %v %q %+v", e, source, rows)
+	}
+	var cfg Config
+	cfg.Bench.Backend = "handoffkeep"
+	_, source, e = (BenchClient{Config: cfg}).ReadReps(context.Background(), "")
+	if e == nil || source != BenchUnavailable {
+		t.Fatalf("unreachable handoffkeep: %v %q", e, source)
 	}
 }
 func TestBundledCatalogMonotonic(t *testing.T) {

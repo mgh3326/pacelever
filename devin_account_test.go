@@ -3,6 +3,7 @@ package pacelever
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -85,5 +86,21 @@ func TestDevinAccountKeyFromLocalLogin(t *testing.T) {
 	c.Config.Quota.MeasurableAccounts = []string{"grok:0123456789abcdef"}
 	if key, allowed := c.accountKey("grok"); key != "grok:0123456789abcdef" || !allowed {
 		t.Fatalf("listed non-derivable key %q, allowed=%v", key, allowed)
+	}
+}
+
+// Only claude, codex and devin derive an account from a local login, so the
+// derived-key shortcut in accountKey cannot skip measurable_accounts for any
+// other pool.
+func TestLocalAccountFPOnlyForDerivablePools(t *testing.T) {
+	isolate(t)
+	for _, pool := range append(slices.Clone(ProviderIDs), "anthropic-api", "unknown") {
+		switch pool {
+		case "claude", "codex", "devin":
+			continue
+		}
+		if got := localAccountFP(pool, nil); got != "" {
+			t.Fatalf("pool %q derived a local account", pool)
+		}
 	}
 }
