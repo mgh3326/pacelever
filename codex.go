@@ -72,7 +72,7 @@ func fetchCodex(ctx context.Context, home string, selectors map[string]string, c
 	tokens := codexTokens(dir)
 	token := str(tokens["access_token"])
 	if token == "" {
-		return Observation{ID: "codex", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
+		return failed("codex", ErrKindCredentials, msgNoCredentials)
 	}
 	acct := str(tokens["account_id"])
 	if o, ok := fetchCodexRPC(ctx, home, cfg, dir); ok {

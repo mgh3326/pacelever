@@ -176,7 +176,7 @@ func fetchGrok(ctx context.Context, token string, client HTTPDoer, now func() ti
 // concurrent `grok` process is not raced and a refresh it performs is kept.
 func fetchGrokRecord(ctx context.Context, record grokRecord, client HTTPDoer, now func() time.Time) Observation {
 	if strings.TrimSpace(record.Token) == "" {
-		return Observation{ID: "grok", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
+		return failed("grok", ErrKindCredentials, msgNoCredentials)
 	}
 	refreshed, refreshTried := false, false
 	if grokRefreshDue(record, now()) {
@@ -221,13 +221,13 @@ func grokRefreshDue(record grokRecord, now time.Time) bool {
 func grokBilling(ctx context.Context, token string, client HTTPDoer, now func() time.Time) Observation {
 	resp, e := doJSON(ctx, client, "GET", "https://cli-chat-proxy.grok.com/v1/billing?format=credits", map[string]string{"Authorization": "Bearer " + token, "x-grok-client-mode": "build"}, nil)
 	if e != nil {
-		return Observation{ID: "grok", Error: "usage request failed", ErrorKind: ErrKindNetwork}
+		return failed("grok", ErrKindNetwork, msgRequestFailed)
 	}
 	if resp.Status != 200 {
 		return statusObservation("grok", resp.Status, resp.Header, now(), ErrKindAuthFailed, "grok authentication failed; run grok login", 0)
 	}
 	if resp.ParseError {
-		return Observation{ID: "grok", Error: "invalid usage JSON", ErrorKind: ErrKindParse}
+		return failed("grok", ErrKindParse, msgInvalidJSON)
 	}
 	return parseGrok(resp.Body)
 }
@@ -341,7 +341,7 @@ func parseGrok(raw map[string]any) Observation {
 	}
 	used, ok := finiteNumber(config["creditUsagePercent"])
 	if !ok || !validPct(&used) {
-		return Observation{ID: "grok", Error: "usage response has no valid credit percentage", ErrorKind: ErrKindParse}
+		return failed("grok", ErrKindParse, "usage response has no valid credit percentage")
 	}
 	period := object(config["currentPeriod"])
 	kind := strings.ToUpper(str(period["type"]))
@@ -354,7 +354,7 @@ func parseGrok(raw map[string]any) Observation {
 	case strings.Contains(kind, "DAILY"):
 		window, label = "1d", "1d"
 	default:
-		return Observation{ID: "grok", Error: "usage response has an unrecognized billing period", ErrorKind: ErrKindParse}
+		return failed("grok", ErrKindParse, "usage response has an unrecognized billing period")
 	}
 	// The current period's end, or else the billing period's end — never one
 	// shape's start with the other's end.

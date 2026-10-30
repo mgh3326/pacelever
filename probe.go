@@ -70,8 +70,7 @@ func (p PTYProvider) Fetch(ctx context.Context) Observation {
 	e := WithFileLock(filepath.Join(CacheDir(), "probe-"+p.ID+".lock"), true, func() error {
 		text, e := p.screen(ctx)
 		if e != nil {
-			result.Error = e.Error()
-			result.ErrorKind = ErrKindProbe
+			result.fail(ErrKindProbe, e.Error())
 		} else {
 			result = ParseScreen(p.ID, text, ClockNow(p.Now))
 		}
@@ -93,11 +92,10 @@ func (p PTYProvider) Fetch(ctx context.Context) Observation {
 		return nil
 	})
 	if e == ErrBusy {
-		return Observation{ID: p.ID, Error: "probe already in progress", ErrorKind: ErrKindProbeInProgress}
+		return failed(p.ID, ErrKindProbeInProgress, "probe already in progress")
 	}
 	if e != nil {
-		result.Error = "probe lock unavailable"
-		result.ErrorKind = ErrKindProbe
+		result.fail(ErrKindProbe, "probe lock unavailable")
 	}
 	return result
 }

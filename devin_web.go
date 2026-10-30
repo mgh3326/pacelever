@@ -36,7 +36,7 @@ func devinWebProvider(cfg Config, client HTTPDoer, now func() time.Time) Provide
 // setting, so no browser storage is read and nothing is written back.
 func fetchDevinWeb(ctx context.Context, token, org string, client HTTPDoer, now func() time.Time) Observation {
 	if token == "" || !devinOrgRE.MatchString(org) {
-		return Observation{ID: "devin", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
+		return failed("devin", ErrKindCredentials, msgNoCredentials)
 	}
 	endpoint := "https://app.devin.ai/api/" + url.PathEscape(org) + "/billing/quota/usage"
 	resp, e := doJSON(ctx, client, "GET", endpoint, map[string]string{
@@ -44,7 +44,7 @@ func fetchDevinWeb(ctx context.Context, token, org string, client HTTPDoer, now 
 		"x-cog-org-id":  org,
 	}, nil)
 	if e != nil {
-		return Observation{ID: "devin", Error: "usage request failed", ErrorKind: ErrKindNetwork}
+		return failed("devin", ErrKindNetwork, msgRequestFailed)
 	}
 	if resp.Status != 200 {
 		if resp.Status == 401 || resp.Status == 403 {
@@ -53,7 +53,7 @@ func fetchDevinWeb(ctx context.Context, token, org string, client HTTPDoer, now 
 		return statusObservation("devin", resp.Status, resp.Header, now(), "", "", 0)
 	}
 	if resp.ParseError {
-		return Observation{ID: "devin", Error: "invalid usage JSON", ErrorKind: ErrKindParse}
+		return failed("devin", ErrKindParse, msgInvalidJSON)
 	}
 	return parseDevin(resp.Body)
 }
@@ -71,8 +71,7 @@ func parseDevin(raw map[string]any) Observation {
 	}
 	o.Plan = devinPlan(raw)
 	if len(o.Buckets) == 0 {
-		o.Error = "usage response has no recognized windows"
-		o.ErrorKind = ErrKindParse
+		o.fail(ErrKindParse, msgNoWindows)
 	}
 	return o
 }

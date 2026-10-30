@@ -20,26 +20,26 @@ func commandCodeToken(home string) string {
 
 func fetchCommandCode(ctx context.Context, token string, client HTTPDoer, now func() time.Time) Observation {
 	if token == "" {
-		return Observation{ID: "commandcode", Error: "credentials unavailable", ErrorKind: ErrKindCredentials}
+		return failed("commandcode", ErrKindCredentials, msgNoCredentials)
 	}
 	// The API's edge rejects generic clients; use the CLI's own user agent.
 	headers := map[string]string{"Authorization": "Bearer " + token, "User-Agent": "cmd/1.88.1"}
 	who, e := doJSON(ctx, client, "GET", "https://api.commandcode.ai/alpha/whoami?limits=1", headers, nil)
 	if e != nil {
-		return Observation{ID: "commandcode", Error: "usage request failed", ErrorKind: ErrKindNetwork}
+		return failed("commandcode", ErrKindNetwork, msgRequestFailed)
 	}
 	if who.Status != 200 {
 		return commandCodeStatus(who.Status, who.Header, who.ParseError, now())
 	}
 	if who.ParseError {
-		return Observation{ID: "commandcode", Error: "invalid usage JSON", ErrorKind: ErrKindParse}
+		return failed("commandcode", ErrKindParse, msgInvalidJSON)
 	}
 	identity := object(who.Body["data"])
 	if len(identity) == 0 {
 		identity = who.Body
 	}
 	if success, ok := identity["success"].(bool); ok && !success {
-		return Observation{ID: "commandcode", Error: "commandcode rejected the request", ErrorKind: ErrKindHTTP}
+		return failed("commandcode", ErrKindHTTP, "commandcode rejected the request")
 	}
 	orgID := str(object(identity["org"])["id"])
 	endpoint := "https://api.commandcode.ai/alpha/billing/credits"
@@ -48,13 +48,13 @@ func fetchCommandCode(ctx context.Context, token string, client HTTPDoer, now fu
 	}
 	billing, e := doJSON(ctx, client, "GET", endpoint, headers, nil)
 	if e != nil {
-		return Observation{ID: "commandcode", Error: "usage request failed", ErrorKind: ErrKindNetwork}
+		return failed("commandcode", ErrKindNetwork, msgRequestFailed)
 	}
 	if billing.Status != 200 {
 		return commandCodeStatus(billing.Status, billing.Header, billing.ParseError, now())
 	}
 	if billing.ParseError {
-		return Observation{ID: "commandcode", Error: "invalid usage JSON", ErrorKind: ErrKindParse}
+		return failed("commandcode", ErrKindParse, msgInvalidJSON)
 	}
 	o := parseCommandCode(billing.Body)
 	account := str(object(identity["user"])["id"])
@@ -135,8 +135,7 @@ func parseCommandCode(raw map[string]any) Observation {
 		}
 	}
 	if len(o.Buckets) == 0 {
-		o.Error = "usage response has no recognized windows"
-		o.ErrorKind = ErrKindParse
+		o.fail(ErrKindParse, msgNoWindows)
 	}
 	return o
 }
