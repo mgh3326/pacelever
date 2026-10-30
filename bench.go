@@ -176,7 +176,7 @@ func (b BenchClient) ReadRows(ctx context.Context, scope string) ([]map[string]a
 		if b.Config.Bench.Backend == "handoffkeep" {
 			return nil, BenchUnavailable, fmt.Errorf("configured handoffkeep backend unavailable")
 		}
-		return nil, BenchLocal, nil
+		return nil, BenchLocal, fmt.Errorf("bench backend unavailable")
 	}
 	var cache benchCache
 	_ = ReadJSON(b.cachePath(scope), &cache)

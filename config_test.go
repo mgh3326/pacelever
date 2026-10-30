@@ -117,19 +117,6 @@ func TestCreditMaxAgeConfig(t *testing.T) {
 	}
 }
 
-func TestLegacyManualPathStillLoads(t *testing.T) {
-	isolate(t)
-	path := filepath.Join(cacheBase(), "scopefuel", "manual.json")
-	data := `{"schema":"scopefuel.manual.v1","latest":{"claude:5h":"old"},"history":[{"event":"set","manual_observation_id":"old","pool":"claude","window":"5h","used_pct":10,"measured_at":"2026-10-28T00:00:00Z","expires_at":"2026-10-28T01:00:00Z"}]}`
-	if e := AtomicWrite(path, []byte(data)); e != nil {
-		t.Fatal(e)
-	}
-	s, e := LoadManual()
-	if e != nil || len(s.History) != 1 {
-		t.Fatalf("legacy manual not loaded: %v", e)
-	}
-}
-
 func TestManualAuditFieldsPreserved(t *testing.T) {
 	isolate(t)
 	path := filepath.Join(CacheDir(), "manual.json")

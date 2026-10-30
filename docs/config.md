@@ -135,9 +135,7 @@ forwarded bearer token.
 ## State and manual evidence
 
 New state lives under `$XDG_CACHE_HOME/pacelever` (default `~/.cache/pacelever`).
-`PACELEVER_CACHE` selects a snapshot file. For one release, manual observations
-stored at `~/.cache/scopefuel/manual.json` still load when the pacelever manual
-file is absent; new writes go to the pacelever file.
+`PACELEVER_CACHE` selects a snapshot file.
 No database server, SQL service or CGO driver is required.
 
 New files use mode 0600, atomic rename and stable kernel-lock inodes. A killed

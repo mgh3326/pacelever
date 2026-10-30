@@ -8,8 +8,7 @@
   (`PublishQuota`/`QuotaFallback`, `scopefuel.quota-share.v1`, remote inflight
   documents). Shared observations publish only to `/v1/quota/*`.
   For one release, a pre-existing `~/.config/scopefuel/config.toml` still
-  loads (with a migration warning) and `~/.cache/scopefuel/manual.json`
-  still supplies manual observations when the pacelever files are absent.
+  loads (with a migration warning) when the pacelever file is absent.
 - Shared account keys come from the local credential for derivable pools
   (claude, codex, devin); `measurable_accounts` now gates only pools that
   cannot derive a login, and a configured fingerprint that disagrees with the

@@ -45,11 +45,6 @@ func LoadManual() (ManualStore, error) {
 	p := filepath.Join(CacheDir(), "manual.json")
 	e := ReadJSON(p, &s)
 	if os.IsNotExist(e) {
-		// One release: manual observations recorded under the scopefuel cache
-		// still load so gate evidence is not silently lost on upgrade.
-		e = ReadJSON(filepath.Join(cacheBase(), "scopefuel", "manual.json"), &s)
-	}
-	if os.IsNotExist(e) {
 		return ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}, nil
 	}
 	if e != nil {

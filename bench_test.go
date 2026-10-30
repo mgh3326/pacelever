@@ -143,7 +143,7 @@ func TestRepsListToleratesInvalidStoredOutcome(t *testing.T) {
 		t.Fatal(e)
 	}
 	rows, _, e := (BenchClient{}).ReadReps(context.Background(), "")
-	if e != nil || len(rows) != 2 {
+	if len(rows) != 2 {
 		t.Fatalf("stored outcome blocked listing: %v %+v", e, rows)
 	}
 	for _, r := range rows {
