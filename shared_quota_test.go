@@ -911,14 +911,18 @@ func TestSharedQuotaMidWindowPublishServed(t *testing.T) {
 }
 
 // leaseDeniedHK never grants the lease but keeps answering reads with the
-// current holder's short window, like a publisher that keeps failing.
-type leaseDeniedHK struct{ inner *fakeHK }
+// current holder's short window, like a publisher that keeps failing. The
+// deadline is fixed, so each reported window does close.
+type leaseDeniedHK struct {
+	inner    *fakeHK
+	deadline time.Time
+}
 
 func (l leaseDeniedHK) Latest(ctx context.Context, key string) (SharedLatest, error) {
 	return l.inner.Latest(ctx, key)
 }
 func (l leaseDeniedHK) Lease(context.Context, string, string, int) (SharedLease, error) {
-	return SharedLease{Holder: "unlucky-host", ExpiresAt: time.Now().Add(50 * time.Millisecond), Acquired: false}, nil
+	return SharedLease{Holder: "unlucky-host", ExpiresAt: l.deadline, Acquired: false}, nil
 }
 func (l leaseDeniedHK) Publish(ctx context.Context, key, holder string, x SharedObservation) error {
 	return l.inner.Publish(ctx, key, holder, x)
@@ -933,7 +937,7 @@ func (l leaseDeniedHK) Release(ctx context.Context, key, holder string) error {
 func TestSharedQuotaClosedWindowReportsFailed(t *testing.T) {
 	f := &fakeHK{}
 	c := sharedCollector(t, f)
-	c.Shared = leaseDeniedHK{inner: f}
+	c.Shared = leaseDeniedHK{inner: f, deadline: time.Now().Add(50 * time.Millisecond)}
 	o := collectShared(t, c)
 	if o.ErrorKind != ErrKindSharedFailed || f.published != 0 {
 		t.Fatalf("closed window %+v published=%d", o, f.published)

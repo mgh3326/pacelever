@@ -621,13 +621,21 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 			reachable = false
 			return fail(ErrKindSharedUnavailable)
 		}
-		if lease.Acquired && lease.Holder == holder {
-			break
-		}
-		holder = ""
-		// Wall clock pacing: the lease expiry is set by the server and the
-		// wait is bounded by it and by ctx, so this loop always terminates.
-		for lease.ExpiresAt.After(time.Now()) {
+		publisherGone = false
+		waitedOut := false
+		// Wall clock pacing: each window ends at the holder's lease expiry and
+		// the whole wait is bounded by ctx and by two lease windows, so the
+		// loop terminates even if the server keeps reporting new contention.
+		deadline := time.Now().Add(2 * time.Duration(c.Config.Quota.leaseTTL()) * time.Second)
+		for !lease.Acquired || lease.Holder != holder {
+			if !lease.ExpiresAt.After(time.Now()) {
+				publisherGone = true
+				break
+			}
+			if time.Now().After(deadline) {
+				waitedOut = true
+				break
+			}
 			wait := c.Config.Quota.waitTime()
 			if rem := time.Until(lease.ExpiresAt); rem < wait {
 				wait = rem
@@ -643,8 +651,19 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 			if o, ok := fresh(); ok {
 				return finish(o)
 			}
+			// A holder that finishes or fails early releases its lease;
+			// retrying each poll ends the wait on release, not on expiry. A
+			// failed retry keeps the wait on the last seen expiry.
+			if retry, e := source.Lease(ctx, key, holder, c.Config.Quota.leaseTTL()); e == nil {
+				lease = retry
+			}
 		}
-		publisherGone = !lease.ExpiresAt.After(time.Now())
+		if !lease.Acquired || lease.Holder != holder {
+			holder = ""
+		}
+		if waitedOut {
+			break
+		}
 	}
 	if holder == "" {
 		if waitQuota(ctx, c.Config.Quota.waitTime()) != nil {
