@@ -53,9 +53,8 @@ credits or another rung's tag. Observed short-window free limits are advisory.
 
 Pool cutoffs default to 99% for spend and 90% for preserve. Inflight reservation
 uses `used + count × reserve` for configured windows. Unknown counts remain
-visible and preserve the base verdict. Peer snapshots require an account identity
-match and at most 15 minutes of age. Inflight jobs are deduplicated by job ID and
-age out after eight hours. Peer values never become local automatic measurements.
+visible and preserve the base verdict. Inflight jobs are deduplicated by job ID
+and age out after eight hours.
 
 Weekly pace is usage divided by elapsed window fraction, unknown during the first
 5% or without a valid reset. Every paid pool can trigger alternative promotion at
@@ -116,7 +115,7 @@ separate `bench push-catalog` operation.
 | Refresh, including detached workers | Implemented with independent deadlines and locks |
 | Free-limit and Command Code limit observations | Implemented; account-scoped local state |
 | Herdr event bridge, brief/watch gauge | Implemented; nested event data, scoped cache, stable metadata token |
-| Inflight and quota sharing | Implemented; identity, age and duplicate guards |
+| Inflight reservation and shared quota | Implemented; identity, age and duplicate guards |
 | Grades propose/apply; area summaries | Implemented with evidence and monotonicity checks |
 | Recommend and area exceptions | Implemented within current grade placements |
 | Stale build warning; models verify | Implemented; advisory cached warning and serving-identity comparison |

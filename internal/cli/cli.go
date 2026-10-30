@@ -596,6 +596,9 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 		}
 		collector := a.Collector
 		collector.TTL = time.Minute
+		// Keep publishes tracked: this scoped collector must report into the
+		// same PublishLog the CLI drains before exit.
+		collector.PublishLog = a.Collector.PublishLog
 		if event.Credential != "default" {
 			collector.CachePath = filepath.Join(base, "snapshot-"+event.Provider+"-"+event.Credential+".json")
 			collector.Providers = pl.DefaultProvidersAt(a.Config, event.Selectors, a.Now)

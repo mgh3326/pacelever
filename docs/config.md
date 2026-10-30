@@ -197,10 +197,9 @@ It admits while the balance is positive and unexpired and below that cutoff;
 admission. A stale entry still admits, with a warning, so the operator can
 update it by hand.
 
-`PACELEVER_QUOTA_SHARE=0` disables peer snapshot exchange. `PACELEVER_NOTIFY=0`
+`PACELEVER_NOTIFY=0`
 disables exhaustion notices. `PACELEVER_STALE_WARN=0` disables stale-build checks.
-The legacy quota-share and stale-warning switches remain supported. Use these
-controls while comparing shadow verdicts. `operator-switch` is an explicit
+`operator-switch` is an explicit
 notification policy; it changes neither the quota verdict nor the login account.
 
 ## Exploration policy

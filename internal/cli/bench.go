@@ -228,7 +228,11 @@ func (a *App) reps(ctx context.Context, v args) (int, error) {
 				data, _ := json.Marshal(notes)
 				notes = string(data)
 			}
-			fmt.Fprintf(a.Out, "id=%s profile=%s model=%s effort=%s task=%s tier=%s role=%s grade=%s rounds=%d blockers_found=%d completed=%s recorded_at=%s notes=%s\n", pl.RepRef(r), r.Profile, r.ModelID, r.Effort, r.TaskRef, r.Tier, r.Role, r.Grade, r.Rounds, r.BlockersFound, completed, r.RecordedAt, notes)
+			pendingMark := ""
+			if r.Pending {
+				pendingMark = " pending=true"
+			}
+			fmt.Fprintf(a.Out, "id=%s profile=%s model=%s effort=%s task=%s tier=%s role=%s grade=%s rounds=%d blockers_found=%d completed=%s recorded_at=%s%s notes=%s\n", pl.RepRef(r), r.Profile, r.ModelID, r.Effort, r.TaskRef, r.Tier, r.Role, r.Grade, r.Rounds, r.BlockersFound, completed, r.RecordedAt, pendingMark, notes)
 		}
 		if strings.Contains(source, "truncated") {
 			fmt.Fprintln(a.Err, "warning: rep window is truncated")
