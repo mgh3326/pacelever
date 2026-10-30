@@ -162,7 +162,13 @@ func limitPath(pool string) string {
 }
 func readLimits(pool string) limitStore {
 	var s limitStore
-	_ = ReadJSON(limitPath(pool), &s)
+	e := ReadJSON(limitPath(pool), &s)
+	if os.IsNotExist(e) {
+		// One-release grace: a host whose only limit records still live at the
+		// retired cache path keeps honoring them; the next write lands in the
+		// pacelever file. Remove with the other graces after the 10-30 cleanup.
+		_ = ReadJSON(filepath.Join(cacheBase(), "scopefuel", filepath.Base(limitPath(pool))), &s)
+	}
 	if s.Records == nil {
 		s.Records = map[string]LimitRecord{}
 	}

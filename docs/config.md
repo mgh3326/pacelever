@@ -53,7 +53,9 @@ to 99% for spend or 90% for preserve. The weekly pace threshold never blocks a
 launch. `exclude` and `subscribed = false` skip automatic probes. A subscribed
 profile override can re-enable that profile on an unsubscribed pool.
 `fusion_billing_fp` optionally selects the billing account for a Fusion lead;
-its value is not printed by policy list.
+its value is not printed by policy list. A Fusion rung exits 4 unless the
+measured account is that fingerprint; with shared quota the lead's account is
+judged through `gate --account-key devin:<fp>`.
 
 Credit pools (`anthropic-api`) accept `credit_max_age_s`, defaulting to 259200
 (three days). A hand-entered balance older than that still admits with a
@@ -137,8 +139,10 @@ New state lives under `$XDG_CACHE_HOME/pacelever` (default `~/.cache/pacelever`)
 `PACELEVER_CACHE` selects a snapshot file. For one release a manual store whose
 schema is still named `scopefuel.manual.v1`, or which still lives at
 `$XDG_CACHE_HOME/scopefuel/manual.json`, loads read-only; the next save lands in
-the pacelever file and never edits the old one. Every other file must be
-pacelever's own. No database server, SQL service or CGO driver is required.
+the pacelever file and never edits the old one. Devin free-limit and Command
+Code limit records get the same read-only grace at the retired cache path.
+Every other file must be pacelever's own. No database server, SQL service or
+CGO driver is required.
 
 New files use mode 0600, atomic rename and stable kernel-lock inodes. A killed
 owner releases its lock. Provider errors retain the last successful snapshot and

@@ -8,7 +8,11 @@
   fallback/publication endpoints, remote inflight merging and the golden
   capture script are gone. Two read-only graces stay for one release so a
   running host keeps loading: `~/.config/scopefuel/config.toml` when it is the
-  host's only configuration, and `scopefuel.manual.v1` manual stores. The
+  host's only configuration, and manual/limit stores still named
+  `scopefuel.*.v1` or still at `~/.cache/scopefuel/` (read-only; the next save
+  lands in the pacelever file). `fusion_billing_fp` still fails closed in the
+  local gate; with shared quota, a Fusion lead's account is judged through
+  `gate --account-key devin:<fp>` instead of the removed document path. The
   `scopefuel.v1`/`scopefuel.gate.v1` wire schemas and the golden fixture
   remain the recorded contract.
 - Shared account keys come from local credentials for claude/codex/devin:

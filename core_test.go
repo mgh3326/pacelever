@@ -2,6 +2,7 @@ package pacelever
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -204,5 +205,43 @@ func TestActiveFreeLimitReadsDamagedRecordsFromDisk(t *testing.T) {
 	_ = WriteJSON(limitPath("devin"), s)
 	if ActiveFreeLimit(testNow.Add(2*time.Hour)) != nil {
 		t.Fatal("expired default hold still active")
+	}
+}
+
+// A host whose only limit records still live at the retired cache path keeps
+// honoring them for one release; the pacelever file wins and writes never
+// touch the old one.
+func TestFreeLimitReadsRetiredPathAsGrace(t *testing.T) {
+	isolate(t)
+	observed := testNow.Add(-5 * time.Minute).Format(time.RFC3339)
+	record := LimitRecord{ResetAt: testNow.Add(time.Hour).Format(time.RFC3339), ObservedAt: observed, Source: "job:fixture"}
+	legacy := filepath.Join(cacheBase(), "scopefuel", "devin-free-limit.json")
+	s := limitStore{Schema: "scopefuel.devin-free-limit.v1", Records: map[string]LimitRecord{limitIdentity("devin"): record}}
+	if e := WriteJSON(legacy, s); e != nil {
+		t.Fatal(e)
+	}
+	hold := ActiveFreeLimit(testNow)
+	if hold == nil || hold.ResetAt != record.ResetAt {
+		t.Fatalf("retired-path record ignored: %+v", hold)
+	}
+	// The pacelever file wins: a readable but expired record there shadows the
+	// retired file's active one.
+	s.Records[limitIdentity("devin")] = LimitRecord{ResetAt: testNow.Add(-time.Hour).Format(time.RFC3339), ObservedAt: observed}
+	if e := WriteJSON(limitPath("devin"), s); e != nil {
+		t.Fatal(e)
+	}
+	if ActiveFreeLimit(testNow) != nil {
+		t.Fatal("pacelever record did not win")
+	}
+	if e := ObserveLimit("devin", record, false, "", testNow); e != nil {
+		t.Fatal(e)
+	}
+	var rewritten limitStore
+	if e := ReadJSON(limitPath("devin"), &rewritten); e != nil || rewritten.Schema != "pacelever.devin-free-limit.v1" {
+		t.Fatalf("save did not land in the pacelever file: %+v %v", rewritten, e)
+	}
+	var untouched limitStore
+	if e := ReadJSON(legacy, &untouched); e != nil || untouched.Records[limitIdentity("devin")].ResetAt != record.ResetAt {
+		t.Fatal("retired file modified")
 	}
 }
