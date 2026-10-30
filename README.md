@@ -80,8 +80,8 @@ verification command. No external database server is needed.
 The frozen reference fixture in `testdata/` records 59 gate cases and 56 launch
 cases, including 39 successful reference launch JSONs. Their existing fields remain
 identical; the new mandatory label is checked separately. Three credit builder-seat cases
-intentionally implement the newer seat rule. Regenerate only with the read-only
-fixture procedure in [DESIGN.md](DESIGN.md).
+intentionally implement the newer seat rule. The fixture is frozen: changing it is a
+contract change, described in [DESIGN.md](DESIGN.md).
 
 `.mergewake/policy.yaml` uses shadow mode (`enabled: false`). Landing, recovery,
 installation and service management are separate operator actions.
