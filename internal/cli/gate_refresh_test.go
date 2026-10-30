@@ -158,7 +158,6 @@ func TestGateAccountStaleRefusedWhenHostCannotMeasure(t *testing.T) {
 		failWrite  bool
 		want       string
 	}{
-		{"not measurable here", nil, false, "may not measure"},
 		{"publish refused", []string{key}, true, "local refresh failed (shared_publish_failed)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

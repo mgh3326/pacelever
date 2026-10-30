@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -166,26 +167,34 @@ func sameOrigin(a, b string) bool {
 	return oa != "" && oa == origin(b)
 }
 
+// derivedPool reports whether the pool's account key comes from the local CLI
+// login rather than from configuration.
+func derivedPool(pool string) bool {
+	return pool == "claude" || pool == "codex" || pool == "devin"
+}
+
+// accountKey is this host's key for pool and whether it may measure it. A
+// derived pool is keyed by the local login and may always measure it; a
+// configured fingerprint that differs never blocks measurement, presence or
+// publish. Without a local login the configured fingerprint is read-only. Any
+// other pool takes its key from quota.accounts and measures it only when
+// measurable_accounts lists it.
 func (c Collector) accountKey(pool string) (string, bool) {
-	local := localAccountFP(pool, c.Selectors)
 	fp := c.Config.Quota.Accounts[pool]
-	if fp == "" {
-		fp = local
+	if derivedPool(pool) {
+		if local := localAccountFP(pool, c.Selectors); local != "" {
+			return pool + ":" + local, true
+		}
+		if !accountFPRE.MatchString(fp) {
+			return "", false
+		}
+		return pool + ":" + fp, false
 	}
 	if !accountFPRE.MatchString(fp) {
 		return "", false
 	}
 	key := pool + ":" + fp
-	allowed := false
-	for _, v := range c.Config.Quota.MeasurableAccounts {
-		if v == key {
-			allowed = true
-		}
-	}
-	if (pool == "claude" || pool == "codex" || pool == "devin") && local != fp {
-		allowed = false
-	}
-	return key, allowed
+	return key, slices.Contains(c.Config.Quota.MeasurableAccounts, key)
 }
 
 // presenceHostID is stable per host and never the raw hostname when an explicit
