@@ -138,9 +138,10 @@ forwarded bearer token.
 State lives under `$XDG_CACHE_HOME/pacelever` (default `~/.cache/pacelever`).
 `PACELEVER_CACHE` selects a snapshot file. Bench evidence comes only from the
 handoffkeep bench backend and its JSON cache; without a backend there is none.
-A manual store written under the previous `scopefuel.manual.v1` schema name
-still loads for one release and is rewritten as `pacelever.manual.v1` on the
-next save. No database server, SQL service or CGO driver is required.
+A `manual.json` in this directory written under the previous
+`scopefuel.manual.v1` schema name still loads for one release and is rewritten
+as `pacelever.manual.v1` on the next save. State in the retired tool's cache
+directory (snapshots, manual entries, limit records) is not read. No database server, SQL service or CGO driver is required.
 
 New files use mode 0600, atomic rename and stable kernel-lock inodes. A killed
 owner releases its lock. Provider errors retain the last successful snapshot and
