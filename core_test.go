@@ -227,3 +227,12 @@ func TestFusionBillingAccountFailsClosed(t *testing.T) {
 		t.Fatalf("matching billing account refused: %+v", d)
 	}
 }
+
+// A consult launch of fable without an effort carries the catalog default rung;
+// the golden fixture only records the ungated (blocked) requests.
+func TestFableLaunchDefaultsToHigh(t *testing.T) {
+	d, e := ResolveLaunch(BundledCatalog(), Config{}, Request{Profile: "fable", OperatorRequest: "hk:task/1"})
+	if e != nil || d.Effort != "high" || d.ModelID != "claude-fable-5-1" {
+		t.Fatalf("fable default launch: %+v %v", d, e)
+	}
+}
