@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `gate --account-key`: when the shared reading is stale and this host holds the
+  same account and may measure it, measure, publish and judge on the fresh value
+  instead of refusing; other hosts still exit 4 with the reason. A free SWE-2
+  profile on a named account is judged on the shared `free_bucket`
+  (`available` admits, `exhausted` blocks until its reset, `unknown` is exit 4).
 - Refresh an expired or refused Grok login in memory with the `refresh_token`
   and OIDC issuer from `auth.json`, and read the optional `/v1/settings` tier
   step; product usage, the on-demand cap share and the prepaid balance become

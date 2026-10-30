@@ -466,9 +466,52 @@ func (c Collector) AccountObservation(ctx context.Context, key string) (Observat
 	}
 	o, ok := sharedAuto(latest.Observation, pool, key, c.quotaNow(), c.Config.Quota.freshTTL(pool), false)
 	if !ok {
-		return Observation{}, deny(Unmeasurable, "fresh automatic shared quota unavailable for account")
+		return Observation{}, deny(Unmeasurable, msgAccountStale)
 	}
 	o.PoolClass = c.Config.Pool(pool, c.quotaNow()).Class
+	return o, nil
+}
+
+// IsAccountStale reports whether err is AccountObservation's refusal for a
+// missing or expired automatic reading, as opposed to an unreachable store.
+func IsAccountStale(err error) bool {
+	e, ok := err.(*PolicyError)
+	return ok && e.Code == Unmeasurable && e.Message == msgAccountStale
+}
+
+// RefreshAccount is the placement fallback for a stale named account. Only a
+// host that holds the same account (its derived key equals key) and may measure
+// it re-measures, publishes under the shared lease and returns the fresh
+// reading; any other host is refused with the reason. A failed refresh refuses
+// with the same code as a stale read and the failure kind, never provider text.
+func (c Collector) RefreshAccount(ctx context.Context, key string) (Observation, error) {
+	if err := ValidateAccountKey(key); err != nil {
+		return Observation{}, err
+	}
+	pool, _, _ := strings.Cut(key, ":")
+	own, allowed := c.accountKey(pool)
+	switch {
+	case own != key:
+		return Observation{}, deny(Unmeasurable, msgAccountStale+"; this host does not hold the account")
+	case !allowed:
+		return Observation{}, deny(Unmeasurable, msgAccountStale+"; this host may not measure the account (measurable_accounts)")
+	}
+	observed, err := c.Collect(ctx, []string{pool})
+	if err != nil || len(observed) != 1 {
+		return Observation{}, deny(Unmeasurable, msgAccountStale+"; local refresh failed")
+	}
+	o := observed[0]
+	fp := o.PublishFP
+	if fp == "" {
+		fp = o.AccountFP
+	}
+	if o.Stale || o.Degraded || o.Error != "" || o.Source != SourceHandoffkeep || pool+":"+fp != key {
+		reason := msgAccountStale + "; local refresh failed"
+		if o.ErrorKind != "" {
+			reason += " (" + o.ErrorKind + ")"
+		}
+		return Observation{}, deny(Unmeasurable, reason)
+	}
 	return o, nil
 }
 

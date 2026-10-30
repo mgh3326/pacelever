@@ -479,10 +479,14 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 		}
 		if d.OK || d.ExitCode == pl.Unmeasurable {
 			o, err := a.Collector.AccountObservation(ctx, key)
+			if pl.IsAccountStale(err) {
+				o, err = a.Collector.RefreshAccount(ctx, key)
+			}
 			if err != nil {
 				return pl.ExitCode(err), err
 			}
 			in.Observations = []pl.Observation{o}
+			in.AccountScoped = true
 			d = pl.Gate(in, req)
 		}
 	} else if d.ExitCode == pl.Unmeasurable {
