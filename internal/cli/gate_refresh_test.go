@@ -261,3 +261,18 @@ func TestRefreshFailsWhenNotPublished(t *testing.T) {
 		})
 	}
 }
+
+func TestRefreshWithoutPresenceEndpointSucceeds(t *testing.T) {
+	devinHost(t, refreshOrg)
+	hk := &memoryHK{}
+	var out, errOut bytes.Buffer
+	var reported []error
+	app := App{Out: &out, Err: &errOut, Collector: pl.Collector{Shared: hk, CachePath: filepath.Join(t.TempDir(), "cache.json"), PublishFailed: func(err error) { reported = append(reported, err) }}}
+	v, err := parse([]string{"refresh", "devin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, err := app.run(context.Background(), v); code != pl.Admitted || err != nil || hk.published != 1 || len(reported) != 0 {
+		t.Fatalf("code=%d err=%v published=%d reported=%v", code, err, hk.published, reported)
+	}
+}

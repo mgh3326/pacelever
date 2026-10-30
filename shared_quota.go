@@ -210,12 +210,7 @@ func (q QuotaConfig) presenceHostID() string {
 // publishPresence records where an account was measured. It completes before
 // returning, bounded by a short timeout, so a CLI never exits with the record
 // still in flight; its result never changes a verdict.
-func (c Collector) publishPresence(ctx context.Context, source ObservationSource, key string, at time.Time) error {
-	publisher, ok := source.(PresenceSource)
-	host := c.Config.Quota.presenceHostID()
-	if !ok || !accountKeyRE.MatchString(key) || host == "" {
-		return fmt.Errorf("presence publisher unavailable")
-	}
+func (c Collector) publishPresence(ctx context.Context, publisher PresenceSource, host, key string, at time.Time) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	return publisher.PublishPresence(ctx, PresenceRecord{HostID: host, AccountKey: key, LastSeen: at})
@@ -278,9 +273,11 @@ func (c Collector) presenceUndo(host, key string, ts int64) {
 
 // maybePresence publishes presence for an observation served from the shared
 // store. allowed is the accountKey verdict, so a host never publishes for an
-// account whose local CLI identity does not resolve to the same key.
+// account whose local CLI identity does not resolve to the same key. A source
+// without a presence endpoint has nothing to publish, which is not a failure.
 func (c Collector) maybePresence(ctx context.Context, source ObservationSource, key string, allowed bool, o Observation) {
-	if !allowed || o.Stale || o.Degraded || o.Source != SourceHandoffkeep {
+	publisher, ok := source.(PresenceSource)
+	if !ok || !allowed || !accountKeyRE.MatchString(key) || o.Stale || o.Degraded || o.Source != SourceHandoffkeep {
 		return
 	}
 	host := c.Config.Quota.presenceHostID()
@@ -291,7 +288,7 @@ func (c Collector) maybePresence(ctx context.Context, source ObservationSource, 
 	if !due {
 		return
 	}
-	if err := c.publishPresence(ctx, source, key, c.quotaNow()); err != nil {
+	if err := c.publishPresence(ctx, publisher, host, key, c.quotaNow()); err != nil {
 		c.presenceUndo(host, key, ts)
 		pool, _, _ := strings.Cut(key, ":")
 		c.publishFailed(fmt.Errorf("%s presence publish failed: %w", pool, err))
