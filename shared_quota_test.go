@@ -880,3 +880,87 @@ func TestSharedQuotaSkipsUnmeasuredBucket(t *testing.T) {
 		t.Fatalf("out-of-range value must still fail: %+v", o)
 	}
 }
+
+// A contended lease whose publisher never lands is waited out until the
+// holder's lease expires, then taken over: a failed or killed measurement
+// cannot pin the account on "pending".
+func TestSharedQuotaDeadPublisherTakenOver(t *testing.T) {
+	f := &fakeHK{holder: "dead-host", expires: time.Now().Add(150 * time.Millisecond)}
+	c := sharedCollector(t, f)
+	o := collectShared(t, c)
+	if o.Stale || o.Degraded || o.Error != "" || len(o.Buckets) != 1 || f.published != 1 || f.holder != "" {
+		t.Fatalf("takeover %+v published=%d holder=%q", o, f.published, f.holder)
+	}
+}
+
+// While the lease is contended the waiter polls until the in-flight
+// publication lands instead of reporting pending after one short wait.
+func TestSharedQuotaMidWindowPublishServed(t *testing.T) {
+	f := &fakeHK{holder: "busy-host", expires: time.Now().Add(2 * time.Second)}
+	f.onRead = func(n int) *SharedObservation {
+		if n >= 3 {
+			return sampleShared(time.Now())
+		}
+		return nil
+	}
+	c := sharedCollector(t, f)
+	o := collectShared(t, c)
+	if o.Stale || o.Degraded || o.Error != "" || len(o.Buckets) != 1 || f.published != 0 {
+		t.Fatalf("mid-window %+v published=%d", o, f.published)
+	}
+}
+
+// leaseDeniedHK never grants the lease but keeps answering reads with the
+// current holder's short window, like a publisher that keeps failing.
+type leaseDeniedHK struct{ inner *fakeHK }
+
+func (l leaseDeniedHK) Latest(ctx context.Context, key string) (SharedLatest, error) {
+	return l.inner.Latest(ctx, key)
+}
+func (l leaseDeniedHK) Lease(context.Context, string, string, int) (SharedLease, error) {
+	return SharedLease{Holder: "unlucky-host", ExpiresAt: time.Now().Add(50 * time.Millisecond), Acquired: false}, nil
+}
+func (l leaseDeniedHK) Publish(ctx context.Context, key, holder string, x SharedObservation) error {
+	return l.inner.Publish(ctx, key, holder, x)
+}
+func (l leaseDeniedHK) Release(ctx context.Context, key, holder string) error {
+	return l.inner.Release(ctx, key, holder)
+}
+
+// A measuring host that waits out publisher windows that never produce a
+// reading reports the measurement as failed, distinct from an in-flight
+// pending lease and from an unreachable store.
+func TestSharedQuotaClosedWindowReportsFailed(t *testing.T) {
+	f := &fakeHK{}
+	c := sharedCollector(t, f)
+	c.Shared = leaseDeniedHK{inner: f}
+	o := collectShared(t, c)
+	if o.ErrorKind != ErrKindSharedFailed || f.published != 0 {
+		t.Fatalf("closed window %+v published=%d", o, f.published)
+	}
+}
+
+// A holder whose probe fails releases the lease before returning, so the
+// next caller can take over immediately instead of waiting out the TTL.
+func TestSharedQuotaFailedMeasurementReleasesLease(t *testing.T) {
+	f := &fakeHK{}
+	c := sharedCollector(t, f)
+	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation {
+		return Observation{Error: "probe blew up", ErrorKind: ErrKindProbe}
+	})
+	o := collectShared(t, c)
+	if o.ErrorKind != ErrKindProbe || f.holder != "" || f.published != 0 {
+		t.Fatalf("failed measurement %+v published=%d holder=%q", o, f.published, f.holder)
+	}
+}
+
+// A holder that cannot publish releases the lease too; a stranded lease is
+// worse than a lost observation because every other host waits behind it.
+func TestSharedQuotaFailedPublishReleasesLease(t *testing.T) {
+	f := &fakeHK{fail: "publish"}
+	c := sharedCollector(t, f)
+	o := collectShared(t, c)
+	if o.ErrorKind != ErrKindSharedPublishFailed || f.holder != "" {
+		t.Fatalf("failed publish %+v holder=%q", o, f.holder)
+	}
+}

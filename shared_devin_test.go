@@ -451,3 +451,21 @@ func TestGateAccountScopedFreeBucketStates(t *testing.T) {
 		t.Fatalf("local gate changed: %+v", d)
 	}
 }
+
+// A local exceed is merged into the shared reading exactly once: the next
+// read sees the shared exceed converge with the local record and does not
+// demand another publication, so needsPublish cannot loop.
+func TestDevinSharedExceedPublishesOnce(t *testing.T) {
+	reset := testNow.Add(time.Hour)
+	f := &fakeHK{latest: SharedLatest{Observation: &SharedObservation{Kind: "auto", MeasuredAt: testNow, FreeBucket: &FreeBucketState{State: FreeBucketAvailable}}}}
+	c := devinSharedCollector(t, f)
+	if err := ObserveLimit("devin", LimitRecord{ResetAt: reset.Format(time.RFC3339), ObservedAt: testNow.Format(time.RFC3339), Source: "job:fixture"}, false, "", testNow); err != nil {
+		t.Fatal(err)
+	}
+	if o := collectDevinShared(t, c); o.FreeBucket == nil || o.FreeBucket.State != FreeBucketExhausted || f.published != 1 {
+		t.Fatalf("first read %+v published=%d", o, f.published)
+	}
+	if o := collectDevinShared(t, c); o.FreeBucket == nil || o.FreeBucket.State != FreeBucketExhausted || f.published != 1 {
+		t.Fatalf("second read republished: %+v published=%d", o, f.published)
+	}
+}
