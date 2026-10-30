@@ -237,7 +237,9 @@ func (t *PublishTracker) end() {
 		t.wg.Done()
 	}
 }
-func (t *PublishTracker) fail(pool, kind string) {
+
+// Fail records a shared write that did not land; a repeat is kept once.
+func (t *PublishTracker) Fail(pool, kind string) {
 	if t == nil {
 		return
 	}
@@ -286,7 +288,7 @@ func (c Collector) publishPresence(source ObservationSource, key string, at time
 		err := publisher.PublishPresence(ctx, record)
 		if err != nil {
 			pool, _, _ := strings.Cut(key, ":")
-			c.Publishes.fail(pool, ErrKindPresencePublishFailed)
+			c.Publishes.Fail(pool, ErrKindPresencePublishFailed)
 		}
 		if onDone != nil {
 			onDone(err == nil)
@@ -869,7 +871,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	}
 	if source.Publish(ctx, key, holder, x) != nil {
 		reachable = false
-		c.Publishes.fail(pool, ErrKindSharedPublishFailed)
+		c.Publishes.Fail(pool, ErrKindSharedPublishFailed)
 		return finish(fail(ErrKindSharedPublishFailed))
 	}
 	o, ok := sharedAuto(&x, pool, key, at, c.Config.Quota.freshTTL(pool), false)
@@ -878,7 +880,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 	}
 	if releaseQuota(source, key, holder) != nil {
 		reachable = false
-		c.Publishes.fail(pool, ErrKindSharedReleaseFailed)
+		c.Publishes.Fail(pool, ErrKindSharedReleaseFailed)
 		return finish(fail(ErrKindSharedReleaseFailed))
 	}
 	released = true

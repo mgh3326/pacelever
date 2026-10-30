@@ -35,6 +35,7 @@ const (
 	// Shared quota.
 	ErrKindAccountMismatch       = "account_mismatch"
 	ErrKindAccountUnknown        = "account_unknown"
+	ErrKindInflightPublishFailed = "inflight_publish_failed" // the inflight document was not accepted
 	ErrKindManualOnly            = "manual_only"
 	ErrKindPresencePublishFailed = "presence_publish_failed" // the presence record was not accepted
 	ErrKindProbeFailed           = "probe_failed"

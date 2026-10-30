@@ -153,7 +153,7 @@ func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inpu
 			in.Inflight[o.ID] = read.N
 			if e == nil && (o.AccountFPKind == pl.FPKindAccount || o.PublishFPKind == pl.FPKindAccount) {
 				if a.Bench.PublishInflight(ctx, o.ID, fp, local) != nil {
-					fmt.Fprintf(a.Err, "warning: inflight publish failed: %s\n", o.ID)
+					a.Collector.Publishes.Fail(o.ID, pl.ErrKindInflightPublishFailed)
 				}
 			}
 		}

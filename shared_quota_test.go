@@ -382,6 +382,23 @@ func TestPublishTrackerRecordsObservationPublishFailure(t *testing.T) {
 		t.Fatalf("failures %v", got)
 	}
 }
+
+// Failures are reported once each, in pool then kind order; a nil tracker is inert.
+func TestPublishTrackerFailOrderedAndDeduplicated(t *testing.T) {
+	var none *PublishTracker
+	none.Fail("codex", ErrKindInflightPublishFailed)
+	if got := none.Wait(); got != nil {
+		t.Fatalf("nil tracker reported %v", got)
+	}
+	tr := &PublishTracker{}
+	tr.Fail("grok", ErrKindInflightPublishFailed)
+	tr.Fail("codex", ErrKindPresencePublishFailed)
+	tr.Fail("grok", ErrKindInflightPublishFailed)
+	want := []PublishFailure{{"codex", ErrKindPresencePublishFailed}, {"grok", ErrKindInflightPublishFailed}}
+	if got := tr.Wait(); !slices.Equal(got, want) {
+		t.Fatalf("failures %v, want %v", got, want)
+	}
+}
 func TestSharedQuotaRereadAndReadOnly(t *testing.T) {
 	for _, readOnly := range []bool{false, true} {
 		f := &fakeHK{onRead: func(n int) *SharedObservation {
