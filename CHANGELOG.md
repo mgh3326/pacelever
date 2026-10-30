@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Host presence is written before the CLI returns. A failed presence or
+  inflight write is reported on stderr and leaves the admission verdict
+  unchanged; a failed presence write is retried by the next shared read.
+- Removed the legacy document quota share: the `scopefuel.quota-share.v1`
+  read and write path and the remote fusion-billing fallback that used it.
+  The shared quota store is the only observation source.
 - Claude, Codex and Devin accounts are keyed by the local login. A configured
   `quota.accounts` fingerprint that disagrees with it no longer blocks
   measurement, presence or publish, and these pools need no
