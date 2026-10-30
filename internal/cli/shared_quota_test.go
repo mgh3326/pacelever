@@ -59,3 +59,38 @@ func TestSharedQuotaManualOnlyStatus(t *testing.T) {
 	}
 	t.Fatal("manual-only row missing")
 }
+
+// refresh publishes: a presence record the store refuses is reported on stderr
+// and fails the command, after the observation itself was served.
+func TestRefreshFailsWhenPresencePublishIsRefused(t *testing.T) {
+	isolated(t)
+	now := time.Now().UTC()
+	refuse := true
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET":
+			_ = json.NewEncoder(w).Encode(pl.SharedLatest{Observation: &pl.SharedObservation{Kind: "auto", MeasuredAt: now, Plan: "fixture", Buckets: []pl.SharedBucket{{Window: "7d", UsedPct: 20, Scope: "account"}}}})
+		case r.URL.Path == "/v1/quota/presence" && refuse:
+			w.WriteHeader(500)
+		default:
+			w.WriteHeader(204)
+		}
+	}))
+	defer h.Close()
+	t.Setenv("QUOTA_TEST_CREDENTIAL", "fixture-token")
+	cfg := pl.Config{Bench: pl.BenchConfig{AllowPlaintextQuotaShare: true}, Quota: pl.QuotaConfig{URL: h.URL, CredentialEnv: "QUOTA_TEST_CREDENTIAL", HostID: "fixture-host", Accounts: map[string]string{"grok": "0123456789abcdef"}, MeasurableAccounts: []string{"grok:0123456789abcdef"}}}
+	for _, tc := range []struct {
+		refuse bool
+		code   int
+	}{{true, pl.Unmeasurable}, {false, 0}} {
+		refuse = tc.refuse
+		var out, errOut strings.Builder
+		app := App{Out: &out, Err: &errOut, Config: cfg, Bench: pl.NewBenchClient(cfg)}
+		app.Collector = pl.Collector{Config: cfg, CachePath: t.TempDir() + "/cache.json", Report: app.report}
+		a, _ := parse([]string{"refresh", "grok"})
+		code, err := app.run(context.Background(), a)
+		if code != tc.code || (err != nil) != tc.refuse || strings.Contains(errOut.String(), "warning: "+pl.MsgPresencePublishFailed) != tc.refuse {
+			t.Fatalf("refused=%v: code=%d err=%v stderr=%q", tc.refuse, code, err, errOut.String())
+		}
+	}
+}

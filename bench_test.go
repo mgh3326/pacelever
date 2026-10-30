@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -133,23 +132,6 @@ func TestRepWriteAheadRetry(t *testing.T) {
 		t.Fatalf("retry changed identity: %+v %v", ids, e)
 	}
 }
-func TestLegacyBenchReader(t *testing.T) {
-	isolate(t)
-	t.Setenv("SCOPEFUEL_BENCH_DB", "testdata/legacy_bench.sqlite3")
-	before, _ := os.ReadFile("testdata/legacy_bench.sqlite3")
-	rows, e := legacyRows("scores", false)
-	if e != nil || len(rows) != 1 || str(rows[0]["model_id"]) != "example-model" {
-		t.Fatalf("scores: %+v %v", rows, e)
-	}
-	rows, e = legacyRows("reps", false)
-	if e != nil || len(rows) != 1 {
-		t.Fatalf("reps: %+v %v", rows, e)
-	}
-	after, _ := os.ReadFile("testdata/legacy_bench.sqlite3")
-	if string(before) != string(after) {
-		t.Fatal("legacy database modified")
-	}
-}
 func TestBundledCatalogMonotonic(t *testing.T) {
 	if e := ValidateMonotonic(BundledCatalog().Rows); e != nil {
 		t.Fatal(e)
@@ -187,5 +169,28 @@ func TestDecodeCatalogInfersAgyGroupForNewProfiles(t *testing.T) {
 		if r.Group != want[r.Profile] {
 			t.Errorf("%s group=%q want %q", r.Profile, r.Group, want[r.Profile])
 		}
+	}
+}
+
+// A profile that runs on its own vendor CLI (claude or codex) is launched with
+// an explicit effort, so every one of them must resolve to a non-empty rung.
+func TestNativeProfilesResolveAnEffort(t *testing.T) {
+	c := BundledCatalog()
+	seen := map[string]bool{}
+	for _, r := range c.Rows {
+		if r.Pool != r.Family || (r.Pool != "claude" && r.Pool != "codex") || seen[r.Profile] {
+			continue
+		}
+		seen[r.Profile] = true
+		_, effort, _, e := resolveRow(c, Request{Profile: r.Profile})
+		if e != nil {
+			continue // barred or retired identities are never launched
+		}
+		if effort == "" {
+			t.Errorf("%s resolves to an empty effort", r.Profile)
+		}
+	}
+	if !seen["fable"] {
+		t.Fatal("fable missing from the bundled catalog")
 	}
 }

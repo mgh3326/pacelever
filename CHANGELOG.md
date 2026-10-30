@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- Remove every trace of the retired `scopefuel` and `wrk` tools without
+  compatibility shims: the `SCOPEFUEL_*` environment aliases (including
+  `SCOPEFUEL_BIN`-style `<POOL>_BIN` names), the legacy cache, manual and limit
+  fallbacks, the read-only SQLite bench reader and its dependency, the capture
+  script, and the `scopefuel` herdr metadata names (`pacelever.gauge`,
+  `pacelever_quota`). Inflight documents are now `pacelever.quota-inflight.v1`.
+  Kept for one release, as the only exceptions: a configuration at the previous
+  tool's config path, and a manual store with its old schema name, still load.
+  The wire identifiers `scopefuel.v1` and `scopefuel.gate.v1` are unchanged.
+  `testdata/scopefuel_golden.json` is now `testdata/gate_golden.json`.
+- Remove the legacy document publish path (`PublishQuota`, `QuotaFallback`, the
+  `scopefuel.quota-share.v1` snapshot and `/v1/documents/quota/<pool>/<fp>/latest`):
+  nothing read it. A Fusion lead with `fusion_billing_fp` is now judged only on a
+  host whose own measurement is for that account.
+- Account keys: for `claude`, `codex` and `devin` the local login decides the key
+  and whether the host may measure and publish; `measurable_accounts` applies only
+  to pools with no local derivation, and a configured `quota.accounts` entry that
+  differs from the login never blocks measurement, presence or publication.
+- Presence and in-flight publishes finish before the command exits. A failed one
+  prints a `warning:` line on stderr, and `refresh` exits 4 for a refused
+  presence publish instead of dropping it.
+- Give `fable` a default effort (`high`) so a seat that requires an effort can
+  launch it without `--effort`; a test now requires every claude/codex-family
+  profile to resolve an effort.
+
 - `gate --account-key`: when the shared reading is stale and this host holds the
   same account and may measure it, measure, publish and judge on the fresh value
   instead of refusing; other hosts still exit 4 with the reason. A free SWE-2
@@ -46,8 +71,7 @@
 - Read Grok billing over HTTP and add Antigravity's cloud quota summary as `agy`.
 - Refresh a refused Antigravity token by running `agy models` once and retrying,
   with a read-only macOS Keychain fallback when the token file is missing or
-  stays refused. A legacy scopefuel backoff no longer blocks pools pacelever
-  measures itself; imported measurements still serve as stale fallbacks.
+  stays refused.
 - Claude keeps a 900-second cache, honours `Retry-After` with a 300-second
   default, and serves its last good value as stale after a rate limit.
 - ClinePass accepts `CLINEPASS_API_KEY` and

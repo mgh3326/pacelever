@@ -71,6 +71,12 @@ const (
 	// msgAccountMalformed is the refusal for a shared reading that is present
 	// but unusable; it is never refreshed over.
 	msgAccountMalformed = "shared quota observation unusable for account"
+	// MsgPresencePublishFailed reports a presence record the shared store did
+	// not accept; the host stays unlisted until the next due publish.
+	MsgPresencePublishFailed = "shared presence publish failed"
+	// msgInflightPublishFailed reports an in-flight job list the shared store
+	// did not accept.
+	MsgInflightPublishFailed = "shared inflight publish failed"
 )
 
 // failed is an observation of pool id that measured nothing.
