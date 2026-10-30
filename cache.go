@@ -37,6 +37,9 @@ type Collector struct {
 	Now             func() time.Time
 	TTL             time.Duration
 	NoCache         bool
+	// Publish, when set, joins asynchronous shared publishes so the caller can
+	// wait for them and report failures before exiting.
+	Publish *PublishTracker
 }
 
 func LoadSnapshots() (map[string]CacheEntry, error) {
