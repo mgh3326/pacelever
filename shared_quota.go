@@ -191,7 +191,7 @@ func (c Collector) accountKey(pool string) (string, bool) {
 // presenceHostID is stable per host and never the raw hostname when an explicit
 // identifier is absent. Precedence: environment, then quota.host_id, then a hash.
 func (q QuotaConfig) presenceHostID() string {
-	if v := strings.TrimSpace(firstEnv("PACELEVER_HOST_ID", "HANDOFFKEEP_HOST_ID")); v != "" {
+	if v := strings.TrimSpace(FirstEnv("PACELEVER_HOST_ID", "HANDOFFKEEP_HOST_ID")); v != "" {
 		return safeHost(v)
 	}
 	if v := strings.TrimSpace(q.HostID); v != "" {

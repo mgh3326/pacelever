@@ -34,7 +34,7 @@ type BenchClient struct {
 
 func NewBenchClient(cfg Config) BenchClient {
 	b := BenchClient{Config: cfg}
-	envOverride := firstEnv("HANDOFFKEEP_URL", "HANDOFFKEEP_TOKEN") != ""
+	envOverride := FirstEnv("HANDOFFKEEP_URL", "HANDOFFKEEP_TOKEN") != ""
 	values := map[string]string{}
 	if !envOverride {
 		path := os.Getenv("HANDOFFKEEP_CONFIG")

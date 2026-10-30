@@ -20,5 +20,5 @@ func (a *App) models(ctx context.Context, v args) (int, error) {
 		rows, code := pl.VerifyModels(ctx, pl.ServedModels(), pl.ProbeServedModel)
 		return code, a.json(rows)
 	}
-	return 2, fmt.Errorf("models list or verify required")
+	return pl.Invalid, fmt.Errorf("models list or verify required")
 }

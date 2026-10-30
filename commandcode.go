@@ -12,7 +12,7 @@ import (
 )
 
 func commandCodeToken(home string) string {
-	if token := firstEnv("COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"); token != "" {
+	if token := FirstEnv("COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"); token != "" {
 		return token
 	}
 	return strings.TrimSpace(str(readObject(filepath.Join(home, ".commandcode", "auth.json"))["apiKey"]))

@@ -26,7 +26,7 @@ func parseClinePass(o *Observation, raw map[string]json.RawMessage) {
 }
 
 func clineToken(home string) string {
-	if token := firstEnv("CLINE_API_KEY", "CLINEPASS_API_KEY"); token != "" {
+	if token := FirstEnv("CLINE_API_KEY", "CLINEPASS_API_KEY"); token != "" {
 		return token
 	}
 	providers := object(readObject(filepath.Join(home, ".cline", "data", "settings", "providers.json"))["providers"])

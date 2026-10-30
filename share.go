@@ -41,7 +41,7 @@ func safeHost(host string) string {
 	return host
 }
 func quotaEnabled() bool {
-	v := normalize(firstEnv("PACELEVER_QUOTA_SHARE", "SCOPEFUEL_QUOTA_SHARE"))
+	v := normalize(FirstEnv("PACELEVER_QUOTA_SHARE", "SCOPEFUEL_QUOTA_SHARE"))
 	return v != "0" && v != "off" && v != "false"
 }
 func identity(o Observation) (string, string) {
@@ -141,7 +141,7 @@ func validJob(j InflightJob, now time.Time) bool {
 	return e == nil && j.JobID != "" && age >= -time.Minute && age <= 8*time.Hour
 }
 func LocalInflight(ctx context.Context, pool string, now time.Time) ([]InflightJob, error) {
-	binary := firstEnv("ARBITER_BIN")
+	binary := FirstEnv("ARBITER_BIN")
 	if binary == "" {
 		binary = "arbiter"
 	}
