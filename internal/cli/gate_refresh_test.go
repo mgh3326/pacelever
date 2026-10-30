@@ -229,18 +229,21 @@ func (p *presenceHK) PublishPresence(context.Context, pl.PresenceRecord) error {
 	return p.err
 }
 
-func TestRefreshFailsWhenPresenceIsNotPublished(t *testing.T) {
+func TestRefreshFailsWhenNotPublished(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		err  error
-		code int
+		name               string
+		failWrite          bool
+		presenceErr        error
+		code, sent, stored int
+		reported           int
 	}{
-		{"published", nil, pl.Admitted},
-		{"refused", errors.New("refused"), pl.Unmeasurable},
+		{"published", false, nil, pl.Admitted, 1, 1, 0},
+		{"presence refused", false, errors.New("refused"), pl.Unmeasurable, 1, 1, 1},
+		{"observation refused", true, nil, pl.Unmeasurable, 0, 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			devinHost(t, refreshOrg)
-			hk := &presenceHK{err: tc.err}
+			hk := &presenceHK{memoryHK: memoryHK{failWrite: tc.failWrite}, err: tc.presenceErr}
 			var out, errOut bytes.Buffer
 			var reported []error
 			app := App{Out: &out, Err: &errOut, Collector: pl.Collector{Shared: hk, CachePath: filepath.Join(t.TempDir(), "cache.json"), PublishFailed: func(err error) { reported = append(reported, err) }}}
@@ -249,11 +252,11 @@ func TestRefreshFailsWhenPresenceIsNotPublished(t *testing.T) {
 				t.Fatal(err)
 			}
 			code, err := app.run(context.Background(), v)
-			if code != tc.code || hk.sent != 1 || hk.published != 1 || !strings.Contains(out.String(), `"id": "devin"`) {
-				t.Fatalf("code=%d err=%v presence=%d published=%d out=%s", code, err, hk.sent, hk.published, out.String())
+			if code != tc.code || (code != pl.Admitted) != (err != nil) || hk.sent != tc.sent || hk.published != tc.stored || len(reported) != tc.reported {
+				t.Fatalf("code=%d err=%v presence=%d published=%d reported=%v", code, err, hk.sent, hk.published, reported)
 			}
-			if failed := tc.err != nil; failed != (err != nil) || failed != (len(reported) == 1) || len(reported) > 1 {
-				t.Fatalf("failure not reported: err=%v reported=%v", err, reported)
+			if tc.stored == 1 && !strings.Contains(out.String(), `"id": "devin"`) {
+				t.Fatalf("measurement not printed: %s", out.String())
 			}
 		})
 	}
