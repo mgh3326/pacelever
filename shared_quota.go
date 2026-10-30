@@ -554,7 +554,7 @@ func (c Collector) quotaNow() time.Time { return ClockNow(c.Now) }
 
 // ClaudeBar keeps a rate limiter per account: a 429 suppresses another fetch
 // for Retry-After (or a five-minute default), while the last good reading stays
-// available as stale evidence. A legacy scopefuel backoff does not transfer to
+// available as stale evidence. A legacy backoff does not transfer to
 // shared mode because it was not recorded against this account key.
 func sharedRateLimitBackoffActive(entry CacheEntry, pool, key string, now time.Time) bool {
 	if entry.legacy || entry.NegativeUntil <= float64(now.UnixMilli())/1000 || entry.LastError == nil || entry.LastError.ErrorKind != ErrKindRateLimited {

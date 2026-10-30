@@ -80,7 +80,7 @@ func envPath(key, fallback string) string {
 }
 
 // FirstEnv is the first non-blank variable among keys, trimmed. Callers list
-// the pacelever name before its legacy scopefuel or handoffkeep alias.
+// the pacelever name before its legacy handoffkeep alias.
 func FirstEnv(keys ...string) string {
 	for _, k := range keys {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
@@ -107,15 +107,17 @@ func CachePath() string {
 	}
 	return filepath.Join(CacheDir(), "snapshots.json")
 }
+
+// legacyCachePath is the default snapshot file of the retired build. It is read
+// for one release so a running host keeps its evidence; nothing writes it.
 func legacyCachePath() string {
-	if p := os.Getenv("SCOPEFUEL_CACHE"); p != "" {
-		return p
-	}
 	return filepath.Join(cacheBase(), "scopefuel", "snapshots.json")
 }
 func LoadConfig() (Config, error) {
 	path := ConfigPath()
 	b, e := os.ReadFile(path)
+	// The retired build's config file is read for one release so a running
+	// host keeps loading its settings; it is never written.
 	if os.IsNotExist(e) && os.Getenv("PACELEVER_CONFIG") == "" {
 		path = filepath.Join(configBase(), "scopefuel", "config.toml")
 		b, e = os.ReadFile(path)
@@ -237,7 +239,7 @@ func (c Config) CreditMaxAge(pool string) time.Duration {
 }
 
 // EditConfig preserves all unrecognized sections and keys. Legacy input is copied
-// into the pacelever config; the scopefuel file is never changed.
+// into the pacelever config; the legacy file is never changed.
 func EditConfig(edit func(map[string]any) error) error {
 	return WithFileLock(ConfigPath()+".lock", false, func() error {
 		c, e := LoadConfig()

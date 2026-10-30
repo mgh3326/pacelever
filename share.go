@@ -26,7 +26,7 @@ func safeHost(host string) string {
 	return host
 }
 func quotaEnabled() bool {
-	v := normalize(FirstEnv("PACELEVER_QUOTA_SHARE", "SCOPEFUEL_QUOTA_SHARE"))
+	v := normalize(FirstEnv("PACELEVER_QUOTA_SHARE"))
 	return v != "0" && v != "off" && v != "false"
 }
 func identity(o Observation) (string, string) {

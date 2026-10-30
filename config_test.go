@@ -14,7 +14,7 @@ func isolate(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(base, "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(base, "cache"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(base, "data"))
-	for _, k := range []string{"PACELEVER_CONFIG", "PACELEVER_CACHE", "SCOPEFUEL_CACHE", "SCOPEFUEL_BENCH_DB"} {
+	for _, k := range []string{"PACELEVER_CONFIG", "PACELEVER_CACHE", "PACELEVER_BENCH_DB"} {
 		t.Setenv(k, "")
 	}
 }
