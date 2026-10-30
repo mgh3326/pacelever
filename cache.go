@@ -37,6 +37,8 @@ type Collector struct {
 	Now             func() time.Time
 	TTL             time.Duration
 	NoCache         bool
+	// Warn receives non-fatal diagnostics, such as a failed presence publish.
+	Warn func(string)
 }
 
 func LoadSnapshots() (map[string]CacheEntry, error) {

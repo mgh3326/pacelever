@@ -217,27 +217,18 @@ func (q QuotaConfig) presenceHostID() string {
 	return "host-" + fingerprint("host", host)
 }
 
-// publishPresence records where an account was measured. It is asynchronous and
-// bounded, so it never adds latency to a collection or changes its verdict.
-// onDone, when set, reports whether the publish succeeded.
-func (c Collector) publishPresence(source ObservationSource, key string, at time.Time, onDone func(bool)) {
+// publishPresence records where an account was measured. It returns only after
+// the publish has finished, so the CLI cannot exit with a presence write still
+// in flight. The 3-second deadline bounds the wait.
+func (c Collector) publishPresence(source ObservationSource, key string, at time.Time) error {
 	publisher, ok := source.(PresenceSource)
 	host := c.Config.Quota.presenceHostID()
 	if !ok || !accountKeyRE.MatchString(key) || host == "" {
-		if onDone != nil {
-			onDone(false)
-		}
-		return
+		return fmt.Errorf("presence unavailable")
 	}
-	record := PresenceRecord{HostID: host, AccountKey: key, LastSeen: at}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		err := publisher.PublishPresence(ctx, record)
-		if onDone != nil {
-			onDone(err == nil)
-		}
-	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return publisher.PublishPresence(ctx, PresenceRecord{HostID: host, AccountKey: key, LastSeen: at})
 }
 func holderToken() (string, error) {
 	var b [16]byte
@@ -297,7 +288,9 @@ func (c Collector) presenceUndo(host, key string, ts int64) {
 
 // maybePresence publishes presence for an observation served from the shared
 // store. allowed is the accountKey verdict, so a host never publishes for an
-// account it may not measure.
+// account it may not measure. A failed publish releases its claim so the next
+// read retries it, and is reported on the collector's warning sink; it never
+// changes the observation's verdict.
 func (c Collector) maybePresence(source ObservationSource, key string, allowed bool, o Observation) {
 	if !allowed || o.Stale || o.Degraded || o.Source != SourceHandoffkeep {
 		return
@@ -310,11 +303,17 @@ func (c Collector) maybePresence(source ObservationSource, key string, allowed b
 	if !due {
 		return
 	}
-	c.publishPresence(source, key, c.quotaNow(), func(ok bool) {
-		if !ok {
-			c.presenceUndo(host, key, ts)
-		}
-	})
+	if err := c.publishPresence(source, key, c.quotaNow()); err != nil {
+		c.presenceUndo(host, key, ts)
+		c.warn("warning: host presence was not published; the next read retries it")
+	}
+}
+
+// warn sends a non-fatal diagnostic to the collector's sink, when one is set.
+func (c Collector) warn(msg string) {
+	if c.Warn != nil {
+		c.Warn(msg)
+	}
 }
 func (q QuotaConfig) freshTTL(pool string) time.Duration {
 	if ttl := q.PoolFreshTTLS[pool]; ttl > 0 {

@@ -29,21 +29,26 @@ type fakeHK struct {
 	presence  []PresenceRecord
 	onRead    func(int) *SharedObservation
 	reads     int
-	// presenceBlock holds the async publish open; presenceDone signals it ran.
-	presenceBlock chan struct{}
-	presenceDone  chan struct{}
+	// presenceDone, when set, is signalled without blocking; presenceErr fails the write.
+	presenceDone chan struct{}
+	presenceErr  error
 }
 
 func (f *fakeHK) PublishPresence(ctx context.Context, r PresenceRecord) error {
-	if f.presenceBlock != nil {
-		<-f.presenceBlock
-	}
 	f.mu.Lock()
+	if f.presenceErr != nil {
+		err := f.presenceErr
+		f.mu.Unlock()
+		return err
+	}
 	f.presence = append(f.presence, r)
 	done := f.presenceDone
 	f.mu.Unlock()
 	if done != nil {
-		done <- struct{}{}
+		select {
+		case done <- struct{}{}:
+		default:
+		}
 	}
 	return nil
 }
@@ -302,33 +307,41 @@ func TestPresenceRateLimitAcrossRuns(t *testing.T) {
 	}
 }
 
-func TestPresencePublishDoesNotBlockCollection(t *testing.T) {
-	f := &fakeHK{presenceBlock: make(chan struct{}), presenceDone: make(chan struct{}, 1)}
+// The CLI may exit as soon as collection returns, so the presence write must
+// already be recorded by then.
+func TestPresencePublishCompletesBeforeCollectionReturns(t *testing.T) {
+	f := &fakeHK{}
 	c := sharedCollector(t, f)
-	done := make(chan Observation, 1)
-	go func() {
-		obs, err := c.Collect(context.Background(), []string{"grok"})
-		if err != nil {
-			done <- Observation{Error: err.Error()}
-			return
-		}
-		done <- obs[0]
-	}()
-	select {
-	case o := <-done:
-		if o.Error != "" {
-			close(f.presenceBlock)
-			t.Fatal(o.Error)
-		}
-	case <-time.After(500 * time.Millisecond):
-		close(f.presenceBlock)
-		t.Fatal("collection waited for the presence publish")
+	obs, err := c.Collect(context.Background(), []string{"grok"})
+	if err != nil || len(obs) != 1 || obs[0].Error != "" {
+		t.Fatalf("collect: %v %+v", err, obs)
 	}
-	close(f.presenceBlock)
-	select {
-	case <-f.presenceDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("presence never ran")
+	if len(f.presence) != 1 {
+		t.Fatalf("presence not recorded when collection returned: %d", len(f.presence))
+	}
+}
+
+// A failed presence write is reported on the warning sink and releases its
+// claim, so the next shared read publishes again.
+func TestPresenceFailureIsReportedAndRetried(t *testing.T) {
+	f := &fakeHK{presenceErr: errors.New("offline")}
+	c := sharedCollector(t, f)
+	var warnings []string
+	c.Warn = func(msg string) { warnings = append(warnings, msg) }
+	if _, err := c.Collect(context.Background(), []string{"grok"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 1 || len(f.presence) != 0 {
+		t.Fatalf("warnings=%v presence=%d", warnings, len(f.presence))
+	}
+	f.mu.Lock()
+	f.presenceErr = nil
+	f.mu.Unlock()
+	if _, err := c.Collect(context.Background(), []string{"grok"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 1 || len(f.presence) != 1 {
+		t.Fatalf("retry: warnings=%v presence=%d", warnings, len(f.presence))
 	}
 }
 func TestSharedQuotaRereadAndReadOnly(t *testing.T) {
