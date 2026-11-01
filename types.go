@@ -5,6 +5,7 @@ package pacelever
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,17 @@ const (
 )
 
 var ProviderIDs = []string{"claude", "codex", "devin", "kimi", "grok", "kiro", "clinepass", "commandcode", "agy"}
+
+// CreditPools are prepaid API credit balances that the omp harness spends.
+// Nothing probes them: the operator records each balance with `manual set`.
+var CreditPools = []string{"anthropic-api", "openai-api"}
+
+// IsCreditPool reports whether pool is a hand-recorded API credit balance.
+func IsCreditPool(pool string) bool { return slices.Contains(CreditPools, pool) }
+
+// KnownPools lists the probed providers, then the credit pools.
+func KnownPools() []string { return slices.Concat(ProviderIDs, CreditPools) }
+
 var Grades = []string{"S+", "S", "A+", "A", "B", "C"}
 
 type Scope struct {
@@ -266,17 +278,7 @@ func Pace(b Bucket, now time.Time) *float64 {
 	}
 	return ptr(*b.UsedPct / 100 / fraction)
 }
-func knownPool(pool string) bool {
-	if pool == "anthropic-api" {
-		return true
-	}
-	for _, p := range ProviderIDs {
-		if p == pool {
-			return true
-		}
-	}
-	return false
-}
+func knownPool(pool string) bool { return slices.Contains(KnownPools(), pool) }
 
 // DisplayObservation uses manual evidence only for an unavailable automatic
 // reading. A confirmed automatic cutoff cannot be hidden on a dashboard.

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -1177,5 +1178,65 @@ func TestSharedQuotaFailedPublishReleasesLease(t *testing.T) {
 	o := collectShared(t, c)
 	if o.ErrorKind != ErrKindSharedPublishFailed || f.holder != "" {
 		t.Fatalf("failed publish %+v holder=%q", o, f.holder)
+	}
+}
+
+// A credit pool has no local login: a host holds it when omp is installed and
+// the shared store carries a live credit reading for the configured key.
+func TestCreditPresenceNeedsHarnessAndLiveCredit(t *testing.T) {
+	now := time.Now()
+	live, expired := now.Add(14*24*time.Hour), now.Add(-time.Minute)
+	reading := func(expires time.Time) []SharedObservation {
+		return []SharedObservation{{ID: 7, Kind: "manual", Window: "credit", MeasuredAt: now.Add(-time.Hour), ExpiresAt: &expires, Buckets: []SharedBucket{{Window: "credit", UsedPct: 20, Scope: ScopeAccount}}}}
+	}
+	installed := func(string) (string, error) { return "/usr/local/bin/omp", nil }
+	absent := func(string) (string, error) { return "", exec.ErrNotFound }
+	for _, tt := range []struct {
+		name, pool string
+		manual     []SharedObservation
+		look       func(string) (string, error)
+		want       bool
+	}{
+		{"omp and credit", "anthropic-api", reading(live), installed, true},
+		{"openai credit", "openai-api", reading(live), installed, true},
+		{"no omp", "anthropic-api", reading(live), absent, false},
+		{"no reading", "anthropic-api", nil, installed, false},
+		{"expired reading", "openai-api", reading(expired), installed, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeHK{latest: SharedLatest{Manual: tt.manual}, presenceDone: make(chan struct{}, 1)}
+			c := sharedCollector(t, f)
+			c.Config.Quota.Accounts = map[string]string{tt.pool: "fedcba9876543210"}
+			c.Config.Quota.MeasurableAccounts = nil
+			c.LookPath = tt.look
+			out, err := c.Collect(context.Background(), []string{tt.pool})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out[0].ErrorKind != ErrKindManualOnly {
+				t.Fatalf("credit pool observation %+v", out[0])
+			}
+			select {
+			case <-f.presenceDone:
+				if !tt.want {
+					t.Fatalf("published presence %+v", f.presence)
+				}
+			case <-time.After(300 * time.Millisecond):
+				if tt.want {
+					t.Fatal("no presence published")
+				}
+				return
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if len(f.presence) != 1 || f.presence[0].AccountKey != tt.pool+":fedcba9876543210" || f.presence[0].HostID != "fixture-host" {
+				t.Fatalf("presence %+v", f.presence)
+			}
+			for _, call := range f.calls {
+				if call != "read" {
+					t.Fatalf("credit pool leased or published: %v", f.calls)
+				}
+			}
+		})
 	}
 }

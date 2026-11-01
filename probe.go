@@ -308,7 +308,7 @@ func RunReaper(pgid int) error {
 // StartRefresh detaches only a pacelever worker, never a service. The worker
 // owns its deadline and kernel lock independently of the initiating caller.
 func StartRefresh(pool string) error {
-	if !knownPool(pool) || pool == "anthropic-api" {
+	if !knownPool(pool) || IsCreditPool(pool) {
 		return fmt.Errorf("unknown automatic pool")
 	}
 	err := WithFileLock(filepath.Join(CacheDir(), "refresh-"+pool+".lock"), true, func() error {

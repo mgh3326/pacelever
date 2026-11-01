@@ -36,6 +36,9 @@ type Collector struct {
 	// PublishLog collects publish failures so the caller can report them
 	// before exit; nil keeps failures off the record.
 	PublishLog *PublishLog
+	// LookPath finds a harness binary for credit-pool presence; nil uses
+	// exec.LookPath.
+	LookPath func(string) (string, error)
 }
 
 func LoadSnapshots() (map[string]CacheEntry, error) {
@@ -272,7 +275,7 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 	return obs
 }
 func (c Collector) Refresh(ctx context.Context, pool string) (Observation, error) {
-	if !knownPool(pool) || pool == "anthropic-api" {
+	if !knownPool(pool) || IsCreditPool(pool) {
 		return Observation{}, fmt.Errorf("unknown automatic pool")
 	}
 	c.NoCache = true

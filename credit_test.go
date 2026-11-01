@@ -205,3 +205,41 @@ func TestCreditManualPreparation(t *testing.T) {
 		t.Fatal("balance above total accepted")
 	}
 }
+
+// The OpenAI grant is its own credit pool: an omp-sol rung is admitted on a
+// live balance and refused once it is expired or exhausted, both from a dollar
+// balance and from the shared used-percentage reading.
+func TestOpenAICreditPoolGate(t *testing.T) {
+	cat := Catalog{Rows: []CatalogRow{{Profile: "omp-sol", Effort: "high", ModelID: "openai/gpt-6.1-sol", Pool: "openai-api", Grade: "S", Gate: "default", Placed: true}}}
+	req := Request{Profile: "omp-sol", Effort: "high", Role: "builder"}
+	balance := func(remaining float64, expires string) ManualStore {
+		m := creditEntry("grant", testNow.Add(-time.Hour), remaining, expires)
+		m.Pool, m.Credit.TotalUSD = "openai-api", 65
+		return creditStore(m)
+	}
+	shared := func(used float64, expires time.Time) ManualStore {
+		m := ManualObservation{ID: "hk-1", Event: "set", Pool: "openai-api", Window: "credit", UsedPct: Pct(used), MeasuredAt: testNow.Add(-time.Hour).Format(time.RFC3339), ExpiresAt: expires.Format(time.RFC3339), Source: SourceOperator}
+		return ManualStore{History: []ManualObservation{m}, Latest: map[string]string{"openai-api:credit": m.ID}}
+	}
+	for _, tt := range []struct {
+		name   string
+		manual ManualStore
+		want   int
+	}{
+		{"live balance", balance(64.92, "2026-11-18"), Admitted},
+		{"exhausted balance", balance(0, "2026-11-18"), Blocked},
+		{"expired grant", balance(30, "2026-10-27"), Blocked},
+		{"live shared reading", shared(0.12, testNow.Add(21*24*time.Hour)), Admitted},
+		{"exhausted shared reading", shared(100, testNow.Add(21*24*time.Hour)), Blocked},
+		{"expired shared reading", shared(10, testNow.Add(-time.Minute)), Unmeasurable},
+		{"no reading", ManualStore{}, Unmeasurable},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			obs := []Observation{{ID: "openai-api", ErrorKind: ErrKindManualOnly, Error: "shared measurement pending", Stale: true}}
+			d := Gate(Inputs{Now: testNow, Catalog: cat, Observations: obs, Manual: tt.manual}, req)
+			if d.ExitCode != tt.want || d.ProviderID != "openai-api" {
+				t.Fatalf("exit %d pool %s want %d: %s", d.ExitCode, d.ProviderID, tt.want, d.Reason)
+			}
+		})
+	}
+}

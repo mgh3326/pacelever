@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +34,9 @@ func TestSharedQuotaManualOnlyStatus(t *testing.T) {
 	defer h.Close()
 	t.Setenv("QUOTA_TEST_CREDENTIAL", "fixture-token")
 	cfg := pl.Config{Bench: pl.BenchConfig{AllowPlaintextQuotaShare: true}, Quota: pl.QuotaConfig{URL: h.URL, CredentialEnv: "QUOTA_TEST_CREDENTIAL", Accounts: map[string]string{"grok": "0123456789abcdef", "anthropic-api": "fedcba9876543210"}, MeasurableAccounts: []string{"anthropic-api:fedcba9876543210"}}}
-	app := App{Config: cfg, Collector: pl.Collector{Config: cfg}}
+	// No omp here, so the credit pool publishes no presence: only GETs reach hk.
+	absent := func(string) (string, error) { return "", exec.ErrNotFound }
+	app := App{Config: cfg, Collector: pl.Collector{Config: cfg, LookPath: absent}}
 	in, err := app.inputs(context.Background(), pl.Catalog{}, []string{"grok"})
 	if err != nil {
 		t.Fatal(err)

@@ -215,3 +215,26 @@ func TestDecodeCatalogInfersAgyGroupForNewProfiles(t *testing.T) {
 		}
 	}
 }
+
+// The omp credit rungs bill two credit pools. A bench catalog row for the
+// OpenAI grant must survive decoding so `policy launch omp-sol` resolves.
+func TestDecodeCatalogKeepsCreditPoolRows(t *testing.T) {
+	row := func(profile, model, pool string) map[string]any {
+		return map[string]any{"profile": profile, "effort": "high", "model_id": model, "pool": pool, "grade": "S", "gate": "default", "billing": "credit", "family": "openai"}
+	}
+	rows, err := decodeCatalog([]map[string]any{
+		row("omp-opus", "anthropic/claude-opus-5-5", "anthropic-api"),
+		row("omp-sol", "openai/gpt-6.1-sol", "openai-api"),
+		row("upstage-x", "solar", "upstage"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows %+v", rows)
+	}
+	d, err := ResolveLaunch(Catalog{Rows: rows}, Config{}, Request{Profile: "omp-sol", Effort: "high"})
+	if err != nil || d.Pool != "openai-api" || d.ModelID != "openai/gpt-6.1-sol" {
+		t.Fatalf("omp-sol launch %+v %v", d, err)
+	}
+}

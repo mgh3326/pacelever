@@ -145,3 +145,54 @@ func TestGateAccountFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+// runtug gates a credit seat with --account-key. A credit account has only the
+// operator's shared credit entry, so that entry is the judgment: live admits,
+// exhausted blocks, missing or expired is unmeasurable. Nothing is probed,
+// leased or published.
+func TestGateAccountCreditPool(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		used    float64
+		expires time.Duration
+		manual  bool
+		want    int
+	}{
+		{"live credit", 20.04, 14 * 24 * time.Hour, true, pl.Admitted},
+		{"exhausted credit", 100, 14 * 24 * time.Hour, true, pl.Blocked},
+		{"expired credit", 20, -time.Minute, true, pl.Unmeasurable},
+		{"no credit entry", 0, 0, false, pl.Unmeasurable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolated(t)
+			now := time.Now().UTC()
+			expiry := now.Add(tc.expires)
+			key := "anthropic-api:fedcba9876543210"
+			h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "GET" || r.URL.Path != "/v1/quota/accounts/"+key+"/latest" {
+					t.Errorf("unexpected shared request: %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(500)
+					return
+				}
+				latest := pl.SharedLatest{}
+				if tc.manual {
+					latest.Manual = []pl.SharedObservation{{ID: 9, Kind: "manual", Window: "credit", MeasuredAt: now.Add(-time.Hour), ExpiresAt: &expiry, Buckets: []pl.SharedBucket{{Window: "credit", UsedPct: tc.used, Scope: "account"}}}}
+				}
+				_ = json.NewEncoder(w).Encode(latest)
+			}))
+			defer h.Close()
+			t.Setenv("QUOTA_TEST_CREDENTIAL", "fixture-token")
+			cfg := pl.Config{Bench: pl.BenchConfig{AllowPlaintextQuotaShare: true}, Quota: pl.QuotaConfig{URL: h.URL, CredentialEnv: "QUOTA_TEST_CREDENTIAL", Accounts: map[string]string{"anthropic-api": "fedcba9876543210"}}}
+			var out, errOut bytes.Buffer
+			app := App{Config: cfg, Out: &out, Err: &errOut, Collector: pl.Collector{Config: cfg}}
+			v, err := parse([]string{"gate", "-m", "pi-sonnet55", "--effort", "high", "--role", "worker", "--account-key", key, "--json"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			code, err := app.gate(context.Background(), v)
+			if err != nil || code != tc.want {
+				t.Fatalf("code=%d want=%d err=%v out=%s stderr=%s", code, tc.want, err, out.String(), errOut.String())
+			}
+		})
+	}
+}
