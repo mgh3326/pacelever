@@ -849,6 +849,11 @@ func TestClineProvidersJSON(t *testing.T) {
 	}
 }
 
+// grokFixtureNow is the fixed clock for the grok auth fixtures below: their
+// expires_at values are absolute dates, so time.Now() made these tests fail
+// once the earliest fixture expired (2026-11-01).
+var grokFixtureNow = time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+
 func TestProviderTokens(t *testing.T) {
 	home := t.TempDir()
 	if e := os.MkdirAll(filepath.Join(home, ".commandcode"), 0700); e != nil {
@@ -869,7 +874,7 @@ func TestProviderTokens(t *testing.T) {
 	if e := os.WriteFile(filepath.Join(home, ".grok", "auth.json"), []byte(grok), 0600); e != nil {
 		t.Fatal(e)
 	}
-	if record, ok := selectGrokRecord(grokRecords(home, nil), "", time.Now()); !ok || record.Token != "fixture-grok" {
+	if record, ok := selectGrokRecord(grokRecords(home, nil), "", grokFixtureNow); !ok || record.Token != "fixture-grok" {
 		t.Fatalf("grok token %q", record.Token)
 	}
 	if e := os.MkdirAll(filepath.Join(home, ".gemini", "antigravity-cli"), 0700); e != nil {
@@ -895,16 +900,16 @@ func TestGrokRecordDeterministic(t *testing.T) {
 	if e := os.WriteFile(filepath.Join(home, ".grok", "auth.json"), []byte(body), 0600); e != nil {
 		t.Fatal(e)
 	}
-	record, ok := selectGrokRecord(grokRecords(home, nil), "", time.Now())
+	record, ok := selectGrokRecord(grokRecords(home, nil), "", grokFixtureNow)
 	if !ok || record.Token != "newer" || record.Fingerprint != fingerprint("grok-account", "fixture-new") {
 		t.Fatalf("grok picked %q %q", record.Token, record.Fingerprint)
 	}
 	want := fingerprint("grok-account", "fixture-old")
-	record, ok = selectGrokRecord(grokRecords(home, nil), want, time.Now())
+	record, ok = selectGrokRecord(grokRecords(home, nil), want, grokFixtureNow)
 	if !ok || record.Token != "older" || record.Fingerprint != want {
 		t.Fatalf("grok did not honour the account key: %q %q", record.Token, record.Fingerprint)
 	}
-	if _, ok := selectGrokRecord(grokRecords(home, nil), "ffffffffffffffff", time.Now()); ok {
+	if _, ok := selectGrokRecord(grokRecords(home, nil), "ffffffffffffffff", grokFixtureNow); ok {
 		t.Fatal("grok used a record for another account")
 	}
 }
