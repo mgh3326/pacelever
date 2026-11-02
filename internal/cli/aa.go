@@ -17,9 +17,19 @@ func (a *App) aaSync(ctx context.Context, v args) (int, error) {
 		}
 		client = &loaded
 	}
-	c, err := a.Bench.ReadCatalog(ctx)
+	bench := a.Bench
+	if v.get("out") != "" {
+		bench.NoCache = true
+	}
+	c, err := bench.ReadCatalog(ctx)
 	if err != nil {
 		return pl.Invalid, fmt.Errorf("aa-sync requires a readable catalog")
+	}
+	for _, warning := range c.Warnings {
+		fmt.Fprintln(a.Err, "warning:", warning)
+	}
+	if v.get("out") != "" && (c.Info.Source != pl.BenchServer || c.Info.Stale) {
+		return pl.Invalid, fmt.Errorf("aa-sync --out requires a fresh server catalog")
 	}
 	models, err := client.Fetch(ctx)
 	if err != nil {

@@ -48,9 +48,13 @@ The command saves annotations in
 `$XDG_DATA_HOME/pacelever/aa-priors.json` (default
 `~/.local/share/pacelever/aa-priors.json`). Catalog reads attach these priors to
 the exact profile, model ID, and effort, while retaining a newer server prior.
+An unreadable or corrupt prior store produces a warning and leaves the catalog
+usable. A successful sync replaces the damaged store.
 `--dry-run` previews the rows without updating that store. `--out FILE` explicitly
 writes a catalog artifact, including during a dry-run, for separate review and
 `bench push-catalog`. Sync itself makes no catalog PUT.
+`--out` forces a catalog GET and requires a fresh server response. A cache or
+bundled snapshot fallback returns exit 2 before fetching AA or writing an artifact.
 
 `bench catalog list` and its JSON expose `benchmark_source` and
 `benchmark_annotation`; `policy launch --json` includes them on the resolved row.
@@ -60,6 +64,7 @@ The annotation is JSON text, matching the backend's text field, with
 `price_1m_output_tokens`, `median_output_tokens_per_second`, `aa_name`, and
 `fetched_at`. Prices are USD per million tokens. Missing measurements are null;
 a missing coding index is omitted. These are model priors for candidate choice.
+AA's zero-throughput sentinel is null; zero prices remain valid free prices.
 Grades, scores, gates, placements, and grade evidence fingerprints remain based
 on fleet evidence.
 

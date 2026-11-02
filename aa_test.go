@@ -300,3 +300,42 @@ func TestAAPriorsRetainNewerServerMeasurement(t *testing.T) {
 		t.Fatal("newer local prior was not attached")
 	}
 }
+
+func TestAACorruptPriorsDoNotFailCatalog(t *testing.T) {
+	for _, unreadable := range []bool{false, true} {
+		t.Run(fmt.Sprint(unreadable), func(t *testing.T) {
+			isolate(t)
+			if unreadable {
+				if err := os.MkdirAll(aaPriorsPath(), 0700); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := AtomicWrite(aaPriorsPath(), []byte("truncated JSON")); err != nil {
+				t.Fatal(err)
+			}
+			c, err := (BenchClient{}).ReadCatalog(context.Background())
+			if err != nil || !reflect.DeepEqual(c.Rows, BundledCatalog().Rows) || c.Info.Stale || len(c.Warnings) != 1 || c.Warnings[0] != "cannot read Artificial Analysis priors" {
+				t.Fatalf("optional prior store broke catalog: %v %+v", err, c.Info)
+			}
+		})
+	}
+}
+
+func TestAAZeroThroughputIsUnknownAndZeroPricesAreFree(t *testing.T) {
+	row := CatalogRow{Profile: "codex-luna", ModelID: "gpt-6-luna", Effort: "medium"}
+	r := AnnotateAA([]CatalogRow{row}, aaFixture(t), testNow)
+	var annotation BenchmarkAnnotation
+	if err := json.Unmarshal([]byte(r.Rows[0].BenchmarkAnnotation), &annotation); err != nil {
+		t.Fatal(err)
+	}
+	if annotation.OutputTokensPerSecond != nil {
+		t.Fatalf("AA missing throughput became a measurement: %g", *annotation.OutputTokensPerSecond)
+	}
+	model := AAModel{ID: aaMappings[aaKey(row)], Name: "synthetic free model", Pricing: map[string]any{"price_1m_input_tokens": 0, "price_1m_output_tokens": 0}, OutputTokensPerSecond: 12.5}
+	r = AnnotateAA([]CatalogRow{row}, []AAModel{model}, testNow)
+	if err := json.Unmarshal([]byte(r.Rows[0].BenchmarkAnnotation), &annotation); err != nil {
+		t.Fatal(err)
+	}
+	if annotation.OutputTokensPerSecond == nil || *annotation.OutputTokensPerSecond != 12.5 || annotation.Price1MInputTokens == nil || *annotation.Price1MInputTokens != 0 || annotation.Price1MOutputTokens == nil || *annotation.Price1MOutputTokens != 0 {
+		t.Fatalf("valid throughput or free prices lost: %+v", annotation)
+	}
+}

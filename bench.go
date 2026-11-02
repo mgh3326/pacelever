@@ -28,6 +28,8 @@ type BenchClient struct {
 	Config         Config
 	Client         HTTPDoer
 	Now            func() time.Time
+	// NoCache skips fresh cache hits; last-good fallback remains available.
+	NoCache bool
 }
 
 func NewBenchClient(cfg Config) BenchClient {
@@ -199,7 +201,7 @@ func (b BenchClient) ReadRows(ctx context.Context, scope string) ([]map[string]a
 	}
 	stamp, _ := ParseTime(cache.FetchedAt)
 	age := b.now().Sub(stamp).Seconds()
-	if cache.EndpointID == b.endpointID() && cache.Rows != nil && age >= 0 && age < ttl {
+	if !b.NoCache && cache.EndpointID == b.endpointID() && cache.Rows != nil && age >= 0 && age < ttl {
 		return cache.Rows, BenchCache, nil
 	}
 
@@ -306,8 +308,8 @@ func decodeCatalog(rows []map[string]any) ([]CatalogRow, error) {
 }
 func (b BenchClient) ReadCatalog(ctx context.Context) (c Catalog, err error) {
 	defer func() {
-		if e := AttachAAPriors(&c); e != nil && err == nil {
-			err = e
+		if e := AttachAAPriors(&c); e != nil {
+			c.Warnings = append(c.Warnings, e.Error())
 		}
 	}()
 	base := BundledCatalog()

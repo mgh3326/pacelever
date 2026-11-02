@@ -105,6 +105,9 @@ func (a *App) catalog(ctx context.Context) pl.Catalog {
 	if e != nil {
 		fmt.Fprintln(a.Err, "warning: catalog unavailable; serving stale bundled snapshot")
 	}
+	for _, warning := range c.Warnings {
+		fmt.Fprintln(a.Err, "warning:", warning)
+	}
 	return c
 }
 func request(a args) pl.Request {

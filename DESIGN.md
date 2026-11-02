@@ -78,6 +78,8 @@ annotation text. Local priors attach only to the same launcher identity and
 never replace a newer server prior. The sync does not publish catalog changes;
 an explicit output artifact can be reviewed and pushed separately. Priors do
 not enter grade proposals or their evidence fingerprints.
+Artifact export forces a fresh server catalog read and refuses cache or snapshot
+fallbacks. Optional prior-cache failures warn without failing catalog reads.
 
 The public snapshot contains model and launcher metadata, not operator config,
 credentials, quota values, host identities or evidence records. Legacy SQLite is

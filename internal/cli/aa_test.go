@@ -61,6 +61,9 @@ func TestAASyncCLIDryRunAndPersistence(t *testing.T) {
 	out.Reset()
 	errOut.Reset()
 	path := filepath.Join(t.TempDir(), "catalog.json")
+	cfg := pl.Config{Bench: pl.BenchConfig{Backend: "handoffkeep"}}
+	payload, _ := json.Marshal(map[string]any{"catalog": pl.CatalogWire(pl.BundledCatalog().Rows)})
+	app.Bench = pl.BenchClient{Config: cfg, URL: "https://recorded-catalog.example.invalid", Token: "fixture-placeholder", Now: app.Now, Client: httpFunc(func(*http.Request) (*http.Response, error) { return httpReply(string(payload)), nil })}
 	v, _ = parse([]string{"bench", "aa-sync", "--out", path})
 	code, err = app.bench(context.Background(), v)
 	if err != nil || code != 0 || *calls != 2 {
@@ -151,5 +154,131 @@ func TestAASyncFailureDoesNotPersist(t *testing.T) {
 	c, _ := app.Bench.ReadCatalog(context.Background())
 	if !reflect.DeepEqual(c.Rows, pl.BundledCatalog().Rows) {
 		t.Fatal("failed sync changed catalog")
+	}
+}
+
+func TestAAExportRefusesSnapshotAndCacheFallbacks(t *testing.T) {
+	for _, scenario := range []struct {
+		name         string
+		remote, seed bool
+		age          time.Duration
+	}{
+		{name: "local snapshot"},
+		{name: "unavailable server", remote: true},
+		{name: "fresh cache with unavailable server", remote: true, seed: true},
+		{name: "last-good cache", remote: true, seed: true, age: 2 * time.Hour},
+		{name: "stale cache", remote: true, seed: true, age: 48 * time.Hour},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			app, aaCalls := aaTestApp(t, &out, &errOut)
+			if scenario.remote {
+				cfg := pl.Config{Bench: pl.BenchConfig{Backend: "handoffkeep"}}
+				payload, _ := json.Marshal(map[string]any{"catalog": pl.CatalogWire(pl.BundledCatalog().Rows)})
+				available := true
+				now := app.now()
+				app.Bench = pl.BenchClient{Config: cfg, URL: "https://recorded-catalog.example.invalid", Token: "fixture-placeholder", Now: func() time.Time { return now }, Client: httpFunc(func(*http.Request) (*http.Response, error) {
+					if !available {
+						return nil, fmt.Errorf("server unavailable")
+					}
+					return httpReply(string(payload)), nil
+				})}
+				if scenario.seed {
+					if _, err := app.Bench.ReadCatalog(context.Background()); err != nil {
+						t.Fatal(err)
+					}
+				}
+				available = false
+				now = now.Add(scenario.age)
+			}
+			path := filepath.Join(t.TempDir(), "catalog.json")
+			v, _ := parse([]string{"bench", "aa-sync", "--out", path})
+			code, err := app.bench(context.Background(), v)
+			if code != pl.Invalid || err == nil || *aaCalls != 0 {
+				t.Fatalf("unsafe export accepted: code=%d err=%v AA calls=%d", code, err, *aaCalls)
+			}
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatal("refused export wrote an artifact")
+			}
+			if _, err := os.Stat(filepath.Join(os.Getenv("XDG_DATA_HOME"), "pacelever", "aa-priors.json")); !os.IsNotExist(err) {
+				t.Fatal("refused export persisted priors")
+			}
+		})
+	}
+}
+
+func TestAAExportRefreshesServerGradesGatesAndRetirements(t *testing.T) {
+	var out, errOut bytes.Buffer
+	app, aaCalls := aaTestApp(t, &out, &errOut)
+	rows := pl.BundledCatalog().Rows
+	cfg := pl.Config{Bench: pl.BenchConfig{Backend: "handoffkeep"}}
+	serverCalls := 0
+	app.Bench = pl.BenchClient{Config: cfg, URL: "https://recorded-catalog.example.invalid", Token: "fixture-placeholder", Now: app.Now, Client: httpFunc(func(r *http.Request) (*http.Response, error) {
+		serverCalls++
+		if r.Method != "GET" {
+			t.Fatal("export attempted a catalog write")
+		}
+		payload, _ := json.Marshal(map[string]any{"catalog": pl.CatalogWire(rows)})
+		return httpReply(string(payload)), nil
+	})}
+	if _, err := app.Bench.ReadCatalog(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for i := range rows {
+		if rows[i].Profile == "sonnet" && rows[i].Effort == "high" {
+			rows[i].Grade = "B"
+			rows[i].Gate = "escalation"
+			stamp := "2026-11-02T04:59:00Z"
+			rows[i].RetiredAt = &stamp
+		}
+	}
+	path := filepath.Join(t.TempDir(), "catalog.json")
+	v, _ := parse([]string{"bench", "aa-sync", "--dry-run", "--out", path})
+	code, err := app.bench(context.Background(), v)
+	if code != 0 || err != nil || serverCalls != 2 || *aaCalls != 1 {
+		t.Fatalf("export did not refresh catalog: code=%d err=%v server=%d AA=%d", code, err, serverCalls, *aaCalls)
+	}
+	var saved struct {
+		Catalog []pl.CatalogRow `json:"catalog"`
+	}
+	if err := pl.ReadJSON(path, &saved); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range saved.Catalog {
+		if row.Profile == "sonnet" && row.Effort == "high" {
+			if row.Grade != "B" || row.Gate != "escalation" || row.RetiredAt == nil {
+				t.Fatalf("export reverted server policy: %+v", row)
+			}
+			return
+		}
+	}
+	t.Fatal("retired server row missing from export")
+}
+
+func TestAACorruptPriorWarningAndRepair(t *testing.T) {
+	var out, errOut bytes.Buffer
+	app, _ := aaTestApp(t, &out, &errOut)
+	path := filepath.Join(os.Getenv("XDG_DATA_HOME"), "pacelever", "aa-priors.json")
+	if err := pl.AtomicWrite(path, []byte("truncated prior cache")); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := parse([]string{"policy", "launch", "sonnet", "--effort", "high", "--role", "worker", "--json"})
+	code, err := app.run(context.Background(), v)
+	if code != 0 || err != nil || !strings.Contains(out.String(), `"profile": "sonnet"`) {
+		t.Fatalf("optional cache broke launch: %d %v", code, err)
+	}
+	if !strings.Contains(errOut.String(), "warning: cannot read Artificial Analysis priors") || strings.Contains(errOut.String(), "catalog unavailable") {
+		t.Fatalf("wrong cache warning: %s", errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	v, _ = parse([]string{"bench", "aa-sync"})
+	code, err = app.bench(context.Background(), v)
+	if code != 0 || err != nil {
+		t.Fatalf("sync could not repair optional cache: %d %v", code, err)
+	}
+	var priors []map[string]any
+	if err := pl.ReadJSON(path, &priors); err != nil || len(priors) == 0 {
+		t.Fatalf("cache not repaired: %v", err)
 	}
 }

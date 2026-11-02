@@ -153,12 +153,16 @@ func AnnotateAA(rows []CatalogRow, models []AAModel, at time.Time) AASyncResult 
 			continue
 		}
 		m := matches[0]
+		throughput := aaNumber(m.OutputTokensPerSecond)
+		if throughput != nil && *throughput == 0 {
+			throughput = nil
+		}
 		a := BenchmarkAnnotation{
 			IntelligenceIndex:     aaNumber(m.Evaluations["artificial_analysis_intelligence_index"]),
 			CodingIndex:           aaNumber(m.Evaluations["artificial_analysis_coding_index"]),
 			Price1MInputTokens:    aaNumber(m.Pricing["price_1m_input_tokens"]),
 			Price1MOutputTokens:   aaNumber(m.Pricing["price_1m_output_tokens"]),
-			OutputTokensPerSecond: aaNumber(m.OutputTokensPerSecond),
+			OutputTokensPerSecond: throughput,
 			AAName:                m.Name, FetchedAt: at.UTC().Format(time.RFC3339Nano),
 		}
 		data, _ := json.Marshal(a)

@@ -40,6 +40,7 @@ type CatalogInfo struct {
 type Catalog struct {
 	Rows     []CatalogRow      `json:"rows"`
 	Info     CatalogInfo       `json:"catalog"`
+	Warnings []string          `json:"warnings,omitempty"`
 	Defaults map[string]string `json:"-"`
 	Aliases  map[string]string `json:"-"`
 }
