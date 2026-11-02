@@ -12,23 +12,25 @@ import (
 var snapshot []byte
 
 type CatalogRow struct {
-	Profile         string   `json:"profile"`
-	Effort          string   `json:"effort"`
-	ModelID         string   `json:"model_id"`
-	Pool            string   `json:"pool"`
-	Grade           string   `json:"grade"`
-	Score           *float64 `json:"score"`
-	Gate            string   `json:"gate"`
-	GateReason      *string  `json:"gate_reason"`
-	Placed          bool     `json:"placed"`
-	Billing         string   `json:"billing,omitempty"`
-	Family          string   `json:"family,omitempty"`
-	Group           string   `json:"group,omitempty"`
-	RetiredAt       *string  `json:"retired_at,omitempty"`
-	BoundaryVersion string   `json:"boundary_version,omitempty"`
-	DeviationRef    string   `json:"deviation_ref,omitempty"`
-	DecidedBy       string   `json:"decided_by,omitempty"`
-	DecidedAt       string   `json:"decided_at,omitempty"`
+	Profile             string   `json:"profile"`
+	Effort              string   `json:"effort"`
+	ModelID             string   `json:"model_id"`
+	Pool                string   `json:"pool"`
+	Grade               string   `json:"grade"`
+	Score               *float64 `json:"score"`
+	Gate                string   `json:"gate"`
+	GateReason          *string  `json:"gate_reason"`
+	Placed              bool     `json:"placed"`
+	Billing             string   `json:"billing,omitempty"`
+	Family              string   `json:"family,omitempty"`
+	Group               string   `json:"group,omitempty"`
+	RetiredAt           *string  `json:"retired_at,omitempty"`
+	BoundaryVersion     string   `json:"boundary_version,omitempty"`
+	DeviationRef        string   `json:"deviation_ref,omitempty"`
+	DecidedBy           string   `json:"decided_by,omitempty"`
+	DecidedAt           string   `json:"decided_at,omitempty"`
+	BenchmarkSource     string   `json:"benchmark_source,omitempty"`
+	BenchmarkAnnotation string   `json:"benchmark_annotation,omitempty"`
 }
 type CatalogInfo struct {
 	Source string   `json:"source"`
@@ -38,6 +40,7 @@ type CatalogInfo struct {
 type Catalog struct {
 	Rows     []CatalogRow      `json:"rows"`
 	Info     CatalogInfo       `json:"catalog"`
+	Warnings []string          `json:"warnings,omitempty"`
 	Defaults map[string]string `json:"-"`
 	Aliases  map[string]string `json:"-"`
 }
@@ -125,6 +128,8 @@ type LaunchDecision struct {
 	Billing               string            `json:"billing"`
 	Family                string            `json:"family"`
 	RoundExtensionBuilder map[string]string `json:"round_extension_builder,omitempty"`
+	BenchmarkSource       string            `json:"benchmark_source,omitempty"`
+	BenchmarkAnnotation   string            `json:"benchmark_annotation,omitempty"`
 }
 
 func validRef(s string) bool {
@@ -196,6 +201,7 @@ func ResolveLaunch(c Catalog, cfg Config, req Request) (LaunchDecision, error) {
 		return LaunchDecision{}, deny(Blocked, "catalog is stale; non-default gate requires --operator-request")
 	}
 	d := LaunchDecision{Profile: req.Profile, ModelID: row.ModelID, Effort: resolved, Pool: row.Pool, Gate: row.Gate, Grade: row.Grade, GateReason: row.GateReason, Catalog: c.Info, OperatorRequest: req.OperatorRequest != "", Billing: row.Billing, Family: row.Family}
+	d.BenchmarkSource, d.BenchmarkAnnotation = row.BenchmarkSource, row.BenchmarkAnnotation
 	d.Label = baselineLabel(d.Profile, d.Effort, ExplorationPolicy{})
 	if d.Billing == "" {
 		d.Billing = "unknown"

@@ -26,6 +26,7 @@ type App struct {
 	Commit    string
 	Config    pl.Config
 	Bench     pl.BenchClient
+	AA        *pl.AAClient
 	Collector pl.Collector
 	// Now is the command clock; nil means the wall clock in UTC.
 	Now func() time.Time
@@ -103,6 +104,9 @@ func (a *App) catalog(ctx context.Context) pl.Catalog {
 	c, e := a.Bench.ReadCatalog(ctx)
 	if e != nil {
 		fmt.Fprintln(a.Err, "warning: catalog unavailable; serving stale bundled snapshot")
+	}
+	for _, warning := range c.Warnings {
+		fmt.Fprintln(a.Err, "warning:", warning)
 	}
 	return c
 }
@@ -657,6 +661,7 @@ Usage:
   pacelever policy list|set|clear|profile|setting
   pacelever manual set|list|clear
   pacelever bench catalog list|status
+  pacelever bench aa-sync [--dry-run] [--out FILE] [--json]
   pacelever bench push-catalog FILE [--dry-run] | --emit-seed
   pacelever bench grades list|set
   pacelever reps add|list|compare|pending

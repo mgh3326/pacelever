@@ -28,6 +28,8 @@ type BenchClient struct {
 	Config         Config
 	Client         HTTPDoer
 	Now            func() time.Time
+	// NoCache skips fresh cache hits; last-good fallback remains available.
+	NoCache bool
 }
 
 func NewBenchClient(cfg Config) BenchClient {
@@ -199,7 +201,7 @@ func (b BenchClient) ReadRows(ctx context.Context, scope string) ([]map[string]a
 	}
 	stamp, _ := ParseTime(cache.FetchedAt)
 	age := b.now().Sub(stamp).Seconds()
-	if cache.EndpointID == b.endpointID() && cache.Rows != nil && age >= 0 && age < ttl {
+	if !b.NoCache && cache.EndpointID == b.endpointID() && cache.Rows != nil && age >= 0 && age < ttl {
 		return cache.Rows, BenchCache, nil
 	}
 
@@ -304,7 +306,12 @@ func decodeCatalog(rows []map[string]any) ([]CatalogRow, error) {
 	}
 	return out, nil
 }
-func (b BenchClient) ReadCatalog(ctx context.Context) (Catalog, error) {
+func (b BenchClient) ReadCatalog(ctx context.Context) (c Catalog, err error) {
+	defer func() {
+		if e := AttachAAPriors(&c); e != nil {
+			c.Warnings = append(c.Warnings, e.Error())
+		}
+	}()
 	base := BundledCatalog()
 	if !b.remote("catalog") {
 		if b.Config.Bench.Backend == "handoffkeep" {
@@ -346,6 +353,12 @@ func CatalogWire(rows []CatalogRow) []map[string]any {
 	out := make([]map[string]any, 0, len(rows))
 	for _, r := range rows {
 		v := map[string]any{"profile": r.Profile, "effort": r.Effort, "model_id": r.ModelID, "pool": r.Pool, "grade": r.Grade, "score": r.Score, "gate": r.Gate, "gate_reason": r.GateReason, "boundary_version": r.BoundaryVersion, "deviation_ref": r.DeviationRef, "decided_at": r.DecidedAt, "decided_by": r.DecidedBy, "retired_at": r.RetiredAt}
+		if r.BenchmarkSource != "" {
+			v["benchmark_source"] = r.BenchmarkSource
+		}
+		if r.BenchmarkAnnotation != "" {
+			v["benchmark_annotation"] = r.BenchmarkAnnotation
+		}
 		out = append(out, v)
 	}
 	return out
