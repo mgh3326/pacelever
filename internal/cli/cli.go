@@ -444,6 +444,8 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 		if pool != d.ProviderID {
 			return pl.Invalid, fmt.Errorf("--account-key does not match profile pool")
 		}
+		// The preliminary decision reads no manual store, so a Blocked one is a
+		// refusal (excluded pool, role, subscription, refs) no reading can lift.
 		if pl.IsCreditPool(pool) && (d.OK || d.ExitCode == pl.Unmeasurable) {
 			// A credit account is judged from its own shared credit entry.
 			in.Manual, e = a.Collector.AccountCredit(ctx, key)

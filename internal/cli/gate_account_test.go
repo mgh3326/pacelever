@@ -196,3 +196,46 @@ func TestGateAccountCreditPool(t *testing.T) {
 		})
 	}
 }
+
+// An exhausted local credit entry never decides a named credit account: with
+// --account-key the gate reads no local manual store, so the key's live shared
+// entry admits (review r4437955482).
+func TestGateAccountCreditIgnoresLocalExhaustion(t *testing.T) {
+	isolated(t)
+	now := time.Now().UTC()
+	local := pl.ManualObservation{Pool: "anthropic-api", MeasuredAt: now.Format(time.RFC3339), Reason: "console", Credit: &pl.Credit{RemainingUSD: 0, TotalUSD: 200, ExpiresOn: now.Add(14 * 24 * time.Hour).Format(time.RFC3339)}}
+	if _, err := pl.AddManual(local, 0, now); err != nil {
+		t.Fatal(err)
+	}
+	if d := pl.Gate(pl.Inputs{Now: now, Manual: mustLoadManual(t)}, pl.Request{Profile: "pi-sonnet55", Effort: "high", Role: "worker"}); d.ExitCode != pl.Blocked {
+		t.Fatalf("fixture: local entry should be exhausted, got %d %s", d.ExitCode, d.Reason)
+	}
+	expiry := now.Add(14 * 24 * time.Hour)
+	key := "anthropic-api:fedcba9876543210"
+	reads := 0
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reads++
+		_ = json.NewEncoder(w).Encode(pl.SharedLatest{Manual: []pl.SharedObservation{{ID: 9, Kind: "manual", Window: "credit", MeasuredAt: now.Add(-time.Hour), ExpiresAt: &expiry, Buckets: []pl.SharedBucket{{Window: "credit", UsedPct: 20, Scope: "account"}}}}})
+	}))
+	defer h.Close()
+	t.Setenv("QUOTA_TEST_CREDENTIAL", "fixture-token")
+	cfg := pl.Config{Bench: pl.BenchConfig{AllowPlaintextQuotaShare: true}, Quota: pl.QuotaConfig{URL: h.URL, CredentialEnv: "QUOTA_TEST_CREDENTIAL", Accounts: map[string]string{"anthropic-api": "fedcba9876543210"}}}
+	var out, errOut bytes.Buffer
+	app := App{Config: cfg, Out: &out, Err: &errOut, Collector: pl.Collector{Config: cfg}}
+	v, err := parse([]string{"gate", "-m", "pi-sonnet55", "--effort", "high", "--role", "worker", "--account-key", key, "--json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, err := app.gate(context.Background(), v); err != nil || code != pl.Admitted || reads != 1 {
+		t.Fatalf("code=%d reads=%d err=%v out=%s", code, reads, err, out.String())
+	}
+}
+
+func mustLoadManual(t *testing.T) pl.ManualStore {
+	t.Helper()
+	s, err := pl.LoadManual()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
