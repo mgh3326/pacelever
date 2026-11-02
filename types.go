@@ -32,7 +32,10 @@ func IsCreditPool(pool string) bool { return slices.Contains(CreditPools, pool) 
 // KnownPools lists the probed providers, then the credit pools.
 func KnownPools() []string { return slices.Concat(ProviderIDs, CreditPools) }
 
-var Grades = []string{"S+", "S", "A+", "A", "B", "C"}
+// GradeUnrated marks a catalog rung without a measured or operator-set grade.
+const GradeUnrated = "unrated"
+
+var Grades = []string{"S+", "S", "A+", "A", "B", "C", GradeUnrated}
 
 type Scope struct {
 	Kind string `json:"kind"`

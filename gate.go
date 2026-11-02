@@ -80,6 +80,10 @@ func Gate(in Inputs, req Request) Decision {
 	return d
 }
 func gate(in Inputs, req Request) Decision {
+	return gateWithUnrated(in, req, unratedRole(req))
+}
+
+func gateWithUnrated(in Inputs, req Request, allowUnrated bool) Decision {
 	d := decision(req)
 	now := in.clock()
 	c := in.catalog()
@@ -116,16 +120,16 @@ func gate(in Inputs, req Request) Decision {
 		return failure(d, Blocked, "requested_by_invalid")
 	}
 	for _, candidate := range rows {
-		if req.Effort != "" && candidate.Effort == normalize(req.Effort) && !candidate.Placed && candidate.Gate != "consult_only" && !strings.HasPrefix(canonical, "devin-argon") && req.E6Arm != canonical+"@"+candidate.Effort {
+		if req.Effort != "" && candidate.Effort == normalize(req.Effort) && measurementMarkerRequired(candidate, allowUnrated) && req.E6Arm != canonical+"@"+candidate.Effort {
 			return failure(d, Blocked, "e6_arm_required: exact measurement marker required")
 		}
 	}
-	row, resolved, arm, e := resolveRow(c, req)
+	row, resolved, arm, e := resolveRow(c, req, allowUnrated)
 	if e != nil {
 		return failure(d, ExitCode(e), e.Error())
 	}
 	d.ProviderID = row.Pool
-	if row.Placed {
+	if row.Placed && row.Grade != GradeUnrated {
 		d.Grade = &row.Grade
 	}
 	if e = roleCheck(req, row); e != nil {
@@ -443,7 +447,7 @@ func recommendBase(in Inputs, grade, role, area string) []Recommendation {
 	seen := map[string]bool{}
 	for _, row := range c.Rows {
 		key := row.Profile + "@" + row.Effort
-		if seen[key] || row.Grade != grade || !row.Placed || row.Gate != "default" || row.RetiredAt != nil {
+		if seen[key] || row.Grade == GradeUnrated || row.Grade != grade || !row.Placed || row.Gate != "default" || row.RetiredAt != nil {
 			continue
 		}
 		seen[key] = true

@@ -91,6 +91,27 @@ requires `--allow-degraded REASON`; changed evidence or a non-monotonic selected
 subset is refused. A real catalog push is a separate explicit action and needs
 the server's operator credential.
 
+Catalog and `bench grades set` accept `unrated` for rungs without a grade decision.
+Ordinary grade-filtered recommendations skip these rows. Opt-in exploration for
+a task may still offer an unrated one-step downshift. The task 2639 seed contains only
+the 13 placeholder retags and preserves their original provenance:
+
+```sh
+pacelever bench push-catalog testdata/catalog_unrated_hk2639.json --dry-run
+```
+
+Before publishing this seed, install compatible pacelever and runtug readers
+on every consuming host and deploy handoffkeep's `unrated` store support.
+Older pacelever binaries reject a catalog containing even one unrated row and
+fall back to a stale bundled snapshot. The desk pushes the seed only after
+those upgrades are verified. After publication, restore reviewed pre-publication
+catalog data before downgrading readers; reverting a binary does not remove
+the new catalog values.
+
+`reps add --grade` takes a measured task grade from S+ through C. It rejects
+`unrated` in both real and dry-run writes. A rated task on an unrated model
+still records `table_grade=unrated` for evidence collection.
+
 ```sh
 pacelever observe devin-free-limit --reset '<RFC3339_RESET>' \
   --observed '<RFC3339_OBSERVATION>' --rung devin-swe2 --source job:example

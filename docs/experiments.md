@@ -15,8 +15,9 @@ experiment_id = "downshift-cohort-1"
 Eligibility requires all of the following:
 
 - A task ID and its required grade floor.
-- A placed default-gate baseline and a placed default-gate target meeting that
-  floor. Carrier grades on unmeasured rungs do not count as placements.
+- A placed default-gate baseline meeting the task floor. The default-gate target
+  either has a placed grade meeting that floor or is explicitly `unrated`.
+  Exploration can select an unrated target to gather evidence without an E6 marker.
 - A current paid weekly pace strictly below 1.0, or a proven Free model bucket.
   Unknown/stale pace and the first 5% of a window remain ineligible.
 - The same subscription pool, an enabled target subscription, an allowed seat,
@@ -25,8 +26,8 @@ Eligibility requires all of the following:
 The tool tries the nearest lower known effort on the same model. It never skips
 an ineligible intermediate effort to take a second step. It can instead try the
 next model in the pool's ordered ladder: Claude opus → sonnet → haiku, Codex sol →
-terra61 → luna, or API-credit pi-opus55 → pi-sonnet55 → pi-haiku55. A model missing
-its required placement blocks that route; the tool never skips it to take two
+terra61 → luna, or API-credit pi-opus55 → pi-sonnet55 → pi-haiku55. A target rung
+that is neither placed nor explicitly `unrated` blocks that route; the tool never skips it to take two
 model steps. The policy can provide `model_order` as data for other pools. Its
 hard eligibility guards still apply.
 

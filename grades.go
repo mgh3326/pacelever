@@ -120,7 +120,7 @@ func ProposeGrades(c Catalog, reps []Rep, source string, minPasses, window int, 
 				p.Excluded = append(p.Excluded, RepRef(r)+": anomalous evidence")
 				continue
 			}
-			if r.Grade == "" || gradeRank(r.Grade) == len(Grades) {
+			if r.Grade == "" || gradeRank(r.Grade) >= gradeRank(GradeUnrated) {
 				p.Excluded = append(p.Excluded, RepRef(r)+": task grade missing")
 				continue
 			}
@@ -197,8 +197,8 @@ func ProposeGrades(c Catalog, reps []Rep, source string, minPasses, window int, 
 		}
 		if postMerge || (failCount >= 2 && len(recent) > 0 && float64(failCount)/float64(len(recent)) >= rate) {
 			rank := gradeRank(worst) + 1
-			if rank >= len(Grades) {
-				rank = len(Grades) - 1
+			if rank >= gradeRank(GradeUnrated) {
+				rank = gradeRank(GradeUnrated) - 1
 			}
 			to = Grades[rank]
 			action = "demote"

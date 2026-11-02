@@ -109,10 +109,10 @@ func ResolveLaunchWithInputs(in Inputs, req Request) (LaunchDecision, error) {
 	if taskExperimentKey(req.TaskID) == "" {
 		return keep("task id required for deterministic exploration")
 	}
-	if req.RequiredGrade == "" || gradeRank(req.RequiredGrade) == len(Grades) {
+	if req.RequiredGrade == "" || gradeRank(req.RequiredGrade) >= gradeRank(GradeUnrated) {
 		return keep("a valid task grade floor is required")
 	}
-	normalRow, _, _, e := resolveRow(c, req)
+	normalRow, _, _, e := resolveRow(c, req, unratedRole(req))
 	if e != nil {
 		return baseline, e
 	}
@@ -129,7 +129,7 @@ func ResolveLaunchWithInputs(in Inputs, req Request) (LaunchDecision, error) {
 	}
 	target, found := downshiftTarget(in, req, baseline, policy)
 	if !found {
-		return keep("no one-step downshift has a placed grade meeting the task floor and seat")
+		return keep("no one-step downshift is unrated or meets the task floor and seat")
 	}
 	audit.Eligible = true
 	baseline.Label.ExperimentID = &policy.ExperimentID
@@ -142,7 +142,7 @@ func ResolveLaunchWithInputs(in Inputs, req Request) (LaunchDecision, error) {
 	targetRequest.E6Arm = ""
 	targetRequest.OperatorRequest = ""
 	targetRequest.RequestedBy = ""
-	shifted, e := ResolveLaunch(c, in.Config, targetRequest)
+	shifted, e := resolveLaunch(c, in.Config, targetRequest, true)
 	if e != nil {
 		return keep("downshift resolution refused")
 	}
@@ -152,7 +152,7 @@ func ResolveLaunchWithInputs(in Inputs, req Request) (LaunchDecision, error) {
 	}
 	shifted.Label = ExperimentLabel{Profile: shifted.Profile, Effort: shifted.Effort, Arm: "downshift", ExperimentID: &policy.ExperimentID}
 	audit.Selected = true
-	audit.Reason = "one-step downshift under headroom, seat and placed-grade guards"
+	audit.Reason = "one-step downshift under headroom and seat guards; target is unrated or meets the task grade floor"
 	shifted.Exploration = audit
 	return shifted, nil
 }
@@ -199,7 +199,10 @@ func explorationHeadroom(in Inputs, req Request, pool string) (bool, *float64, s
 func downshiftTarget(in Inputs, req Request, normal LaunchDecision, policy ExplorationPolicy) (CatalogRow, bool) {
 	c := in.catalog()
 	allowed := func(row CatalogRow) bool {
-		if !row.Placed || row.Gate != "default" || row.RetiredAt != nil || row.Pool != normal.Pool || gradeRank(row.Grade) > gradeRank(req.RequiredGrade) {
+		if (!row.Placed && row.Grade != GradeUnrated) || row.Gate != "default" || row.RetiredAt != nil || row.Pool != normal.Pool {
+			return false
+		}
+		if row.Grade != GradeUnrated && gradeRank(row.Grade) > gradeRank(req.RequiredGrade) {
 			return false
 		}
 		candidate := req
@@ -210,7 +213,7 @@ func downshiftTarget(in Inputs, req Request, normal LaunchDecision, policy Explo
 		candidate.RequestedBy = ""
 		// The target still passes ordinary quota and seat checks. No experiment
 		// marker may widen a gate or graduate a measurement rung.
-		return gate(in, candidate).OK
+		return gateWithUnrated(in, candidate, true).OK
 	}
 	// Pick only the nearest lower known effort. An ineligible intermediate
 	// rung is never skipped in favor of a second lower effort.

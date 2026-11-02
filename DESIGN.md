@@ -65,6 +65,18 @@ area's recommendation view.
 
 ## Catalog and evidence
 
+`unrated` marks a rung without a measured or operator-set grade. Grade-filtered
+recommendations skip it, and effort monotonicity compares only rated rows.
+Remote unrated rows are unplaced. Catalog and launch output show `unrated`,
+while the `scopefuel.gate.v1` audit grade remains null for these rows.
+Leads and consults without a grade floor may launch unrated rungs without an E6
+marker. Direct worker launches still require the exact measurement marker.
+Opt-in exploration can select an unrated target internally after proving eligibility, to gather
+evidence while preserving its quota, seat, subscription, and default-gate checks.
+Clean task evidence can promote an unrated rung to a grade. Failure-driven
+demotions stop at C. Rep writes reject `unrated` task grades; a rated task may
+still record `table_grade=unrated` when measuring an unrated model.
+
 The catalog ladder is server → fresh cache → last-good cache → bundled snapshot.
 Cache files are bound to an endpoint digest. Degraded catalog provenance is
 visible; a stale view cannot widen a non-default launch gate. A partially seeded
@@ -176,8 +188,9 @@ contract. The cohort hash uses experiment ID, optional seed, pool and normalized
 task ID. It is stable across repeated calls and equivalent task spellings. The
 policy never uses randomness from call timing. Eligibility is proved before cohort
 assignment: a current paid weekly pace strictly below 1.0 or an exact Free bucket,
-a placed ordinary baseline, a one-step placed target at or above the required
-task floor, the same pool, a subscribed target and its normal admission/seat checks.
+a placed ordinary baseline, a one-step target that is unrated or placed at or
+above the required task floor, the same pool, a subscribed target and its normal
+admission and seat checks.
 Ineligible work remains a baseline with a null experiment ID. Eligible controls
 and downshifts share the configured ID. `RecommendFor` offers the selected arm
 while retaining the baseline. `ResolveLaunchWithInputs` records the actual arm.

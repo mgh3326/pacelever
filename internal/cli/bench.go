@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -64,7 +65,7 @@ func (a *App) bench(ctx context.Context, v args) (int, error) {
 		if len(rows) == 0 {
 			return pl.Invalid, fmt.Errorf("non-empty catalog required")
 		}
-		if e = pl.ValidateMonotonic(rows); e != nil {
+		if e = pl.ValidateCatalog(rows); e != nil {
 			return pl.Invalid, e
 		}
 		if v.flags["dry-run"] {
@@ -82,6 +83,9 @@ func (a *App) bench(ctx context.Context, v args) (int, error) {
 		case "set":
 			if e := v.required("profile", "grade", "deviation-ref"); e != nil {
 				return pl.Invalid, e
+			}
+			if !slices.Contains(pl.Grades, v.get("grade")) {
+				return pl.Invalid, fmt.Errorf("invalid grade %q", v.get("grade"))
 			}
 			g := map[string]any{"profile": v.get("profile"), "grade": v.get("grade"), "deviation_ref": v.get("deviation-ref"), "boundary_version": v.get("boundary-version")}
 			if v.flags["dry-run"] {
@@ -103,6 +107,9 @@ func (a *App) reps(ctx context.Context, v args) (int, error) {
 	case "add":
 		if e := v.required("profile", "model", "task", "tier", "role", "grade"); e != nil {
 			return pl.Invalid, e
+		}
+		if !slices.Contains(pl.Grades, v.get("grade")) || v.get("grade") == pl.GradeUnrated {
+			return pl.Invalid, fmt.Errorf("invalid rep grade")
 		}
 		rounds, e := v.integer("rounds", 0)
 		if e != nil {
