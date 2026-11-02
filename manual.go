@@ -88,12 +88,12 @@ func prepareManual(m ManualObservation, ttl time.Duration, now time.Time) (Manua
 		return m, fmt.Errorf("known pool and --reason required")
 	}
 	if m.Window == "" {
-		switch m.Pool {
-		case "grok", "devin":
+		switch {
+		case m.Pool == "grok" || m.Pool == "devin":
 			m.Window = "7d"
-		case "kiro":
+		case m.Pool == "kiro":
 			m.Window = "30d"
-		case "anthropic-api", "commandcode":
+		case m.Pool == "commandcode" || IsCreditPool(m.Pool):
 			m.Window = "credit"
 		default:
 			return m, fmt.Errorf("--window required")
@@ -187,7 +187,7 @@ func ClearManual(pool string) error {
 	})
 }
 func RequiredWindows(pool, plan string, manual bool) []string {
-	if manual && (pool == "anthropic-api" || pool == "commandcode") {
+	if IsCreditPool(pool) || manual && pool == "commandcode" {
 		return []string{"credit"}
 	}
 	if pool == "codex" {
@@ -213,8 +213,6 @@ func RequiredWindows(pool, plan string, manual bool) []string {
 		// The HTTP windows are the measurable requirement; credits are
 		// informational for stale acceptance.
 		return []string{"5h", "7d"}
-	case "anthropic-api":
-		return []string{"credit"}
 	}
 	return nil
 }

@@ -11,7 +11,9 @@ Comments and formatting may be rewritten.
 Unknown pool sections are ignored with a warning naming the section. A malformed
 configuration is reported without echoing values. Retained automatic pools are
 `claude`, `codex`, `devin`, `kimi`, `grok`, `kiro`, `clinepass`, `commandcode`
-and `agy`. `anthropic-api` is a manual credit pool for `pi-*` profiles.
+and `agy`. `anthropic-api` and `openai-api` are manual credit pools: the
+Anthropic Console credit and the OpenAI credit grant that the `omp-*` profiles
+spend through the `omp` harness.
 
 ```toml
 [pools.claude]
@@ -55,7 +57,7 @@ profile override can re-enable that profile on an unsubscribed pool.
 `fusion_billing_fp` optionally selects the billing account for a Fusion lead;
 its value is not printed by policy list.
 
-Credit pools (`anthropic-api`) accept `credit_max_age_s`, defaulting to 259200
+Credit pools (`anthropic-api`, `openai-api`) accept `credit_max_age_s`, defaulting to 259200
 (three days). A hand-entered balance older than that still admits with a
 `credit_stale` warning; pacelever never replaces an old balance with a guess.
 
@@ -150,6 +152,8 @@ pacelever manual set claude --window 7d --used 30 \
   --measured-at '<RFC3339_TIME>' --ttl 30m --reason 'operator observation'
 pacelever manual set --pool anthropic-api --credit-balance 150 --credit-total 200 \
   --expires '2026-11-16T00:00:00Z' --reason 'console balance'
+pacelever manual set --pool openai-api --credit-balance 64.92 --credit-total 65 \
+  --expires '2026-11-18T00:00:00Z' --reason 'billing credit grant'
 pacelever manual set anthropic-api --window credit --remaining 75 --total 100 \
   --expires-on 2027-01-01 --measured-at '<RFC3339_TIME>' --reason 'balance observed'
 pacelever manual list

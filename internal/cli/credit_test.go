@@ -75,3 +75,41 @@ func TestManualCreditLegacyFlags(t *testing.T) {
 		t.Fatalf("legacy credit entry %v %+v", e, store.History)
 	}
 }
+
+// The OpenAI grant records like the Anthropic credit and shows its own row.
+func TestManualCreditOpenAIPool(t *testing.T) {
+	isolated(t)
+	now := time.Now().UTC()
+	expires := now.Add(16 * 24 * time.Hour).Format(time.RFC3339)
+	var out, err bytes.Buffer
+	code := Run(context.Background(), []string{"manual", "set", "--pool", "openai-api", "--credit-balance", "64.92", "--credit-total", "65", "--expires", expires}, &out, &err, strings.NewReader(""), "dev", "unknown")
+	if code != 0 {
+		t.Fatalf("manual set %d: %s", code, err.String())
+	}
+	store, e := pl.LoadManual()
+	if e != nil || len(store.Valid("openai-api", now)) != 1 {
+		t.Fatalf("stored openai credit %v %+v", e, store.History)
+	}
+	data, _ := json.Marshal(statusPayload(pl.Inputs{Manual: store, Now: now}))
+	var payload struct {
+		Providers []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Credit *struct {
+				BalanceUSD float64 `json:"balance_usd"`
+			} `json:"credit"`
+		} `json:"providers"`
+	}
+	if e = json.Unmarshal(data, &payload); e != nil {
+		t.Fatal(e)
+	}
+	for _, p := range payload.Providers {
+		if p.ID == "openai-api" {
+			if p.Status != "ok" || p.Credit == nil || p.Credit.BalanceUSD != 64.92 {
+				t.Fatalf("openai credit row %s", data)
+			}
+			return
+		}
+	}
+	t.Fatalf("openai credit row missing: %s", data)
+}

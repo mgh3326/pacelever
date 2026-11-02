@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -54,20 +55,14 @@ func (a *App) policy(ctx context.Context, v args) (int, error) {
 		if v.flags["json"] {
 			return 0, a.json(map[string]any{"pools": a.Config.Pools, "profiles": a.Config.Profiles, "settings": a.Config.Settings})
 		}
-		for _, p := range append(append([]string{}, pl.ProviderIDs...), "anthropic-api") {
+		for _, p := range pl.KnownPools() {
 			policy := a.Config.Pool(p, a.now())
 			fmt.Fprintf(a.Out, "%s class=%s boost=%g cutoff=%g subscribed=%t\n", p, policy.Class, policy.Boost, policy.Cutoff, a.Config.Subscribed("", p))
 		}
 		return 0, nil
 	case "set", "clear":
 		pool := v.at(2)
-		known := pool == "anthropic-api"
-		for _, p := range pl.ProviderIDs {
-			if pool == p {
-				known = true
-			}
-		}
-		if !known {
+		if !slices.Contains(pl.KnownPools(), pool) {
 			return pl.Invalid, fmt.Errorf("unknown pool")
 		}
 		e := pl.EditConfig(func(raw map[string]any) error {

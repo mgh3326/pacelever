@@ -145,3 +145,97 @@ func TestGateAccountFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+// runtug gates a credit seat with --account-key. A credit account has only the
+// operator's shared credit entry, so that entry is the judgment: live admits,
+// exhausted blocks, missing or expired is unmeasurable. Nothing is probed,
+// leased or published.
+func TestGateAccountCreditPool(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		used    float64
+		expires time.Duration
+		manual  bool
+		want    int
+	}{
+		{"live credit", 20.04, 14 * 24 * time.Hour, true, pl.Admitted},
+		{"exhausted credit", 100, 14 * 24 * time.Hour, true, pl.Blocked},
+		{"expired credit", 20, -time.Minute, true, pl.Unmeasurable},
+		{"no credit entry", 0, 0, false, pl.Unmeasurable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolated(t)
+			now := time.Now().UTC()
+			expiry := now.Add(tc.expires)
+			key := "anthropic-api:fedcba9876543210"
+			h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "GET" || r.URL.Path != "/v1/quota/accounts/"+key+"/latest" {
+					t.Errorf("unexpected shared request: %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(500)
+					return
+				}
+				latest := pl.SharedLatest{}
+				if tc.manual {
+					latest.Manual = []pl.SharedObservation{{ID: 9, Kind: "manual", Window: "credit", MeasuredAt: now.Add(-time.Hour), ExpiresAt: &expiry, Buckets: []pl.SharedBucket{{Window: "credit", UsedPct: tc.used, Scope: "account"}}}}
+				}
+				_ = json.NewEncoder(w).Encode(latest)
+			}))
+			defer h.Close()
+			t.Setenv("QUOTA_TEST_CREDENTIAL", "fixture-token")
+			cfg := pl.Config{Bench: pl.BenchConfig{AllowPlaintextQuotaShare: true}, Quota: pl.QuotaConfig{URL: h.URL, CredentialEnv: "QUOTA_TEST_CREDENTIAL", Accounts: map[string]string{"anthropic-api": "fedcba9876543210"}}}
+			var out, errOut bytes.Buffer
+			app := App{Config: cfg, Out: &out, Err: &errOut, Collector: pl.Collector{Config: cfg}}
+			v, err := parse([]string{"gate", "-m", "pi-sonnet55", "--effort", "high", "--role", "worker", "--account-key", key, "--json"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			code, err := app.gate(context.Background(), v)
+			if err != nil || code != tc.want {
+				t.Fatalf("code=%d want=%d err=%v out=%s stderr=%s", code, tc.want, err, out.String(), errOut.String())
+			}
+		})
+	}
+}
+
+// An exhausted local credit entry never decides a named credit account: with
+// --account-key the gate reads no local manual store, so the key's live shared
+// entry admits (review r4437955482).
+func TestGateAccountCreditIgnoresLocalExhaustion(t *testing.T) {
+	isolated(t)
+	now := time.Now().UTC()
+	local := pl.ManualObservation{Pool: "anthropic-api", MeasuredAt: now.Format(time.RFC3339), Reason: "console", Credit: &pl.Credit{RemainingUSD: 0, TotalUSD: 200, ExpiresOn: now.Add(14 * 24 * time.Hour).Format(time.RFC3339)}}
+	if _, err := pl.AddManual(local, 0, now); err != nil {
+		t.Fatal(err)
+	}
+	if d := pl.Gate(pl.Inputs{Now: now, Manual: mustLoadManual(t)}, pl.Request{Profile: "pi-sonnet55", Effort: "high", Role: "worker"}); d.ExitCode != pl.Blocked {
+		t.Fatalf("fixture: local entry should be exhausted, got %d %s", d.ExitCode, d.Reason)
+	}
+	expiry := now.Add(14 * 24 * time.Hour)
+	key := "anthropic-api:fedcba9876543210"
+	reads := 0
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reads++
+		_ = json.NewEncoder(w).Encode(pl.SharedLatest{Manual: []pl.SharedObservation{{ID: 9, Kind: "manual", Window: "credit", MeasuredAt: now.Add(-time.Hour), ExpiresAt: &expiry, Buckets: []pl.SharedBucket{{Window: "credit", UsedPct: 20, Scope: "account"}}}}})
+	}))
+	defer h.Close()
+	t.Setenv("QUOTA_TEST_CREDENTIAL", "fixture-token")
+	cfg := pl.Config{Bench: pl.BenchConfig{AllowPlaintextQuotaShare: true}, Quota: pl.QuotaConfig{URL: h.URL, CredentialEnv: "QUOTA_TEST_CREDENTIAL", Accounts: map[string]string{"anthropic-api": "fedcba9876543210"}}}
+	var out, errOut bytes.Buffer
+	app := App{Config: cfg, Out: &out, Err: &errOut, Collector: pl.Collector{Config: cfg}}
+	v, err := parse([]string{"gate", "-m", "pi-sonnet55", "--effort", "high", "--role", "worker", "--account-key", key, "--json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, err := app.gate(context.Background(), v); err != nil || code != pl.Admitted || reads != 1 {
+		t.Fatalf("code=%d reads=%d err=%v out=%s", code, reads, err, out.String())
+	}
+}
+
+func mustLoadManual(t *testing.T) pl.ManualStore {
+	t.Helper()
+	s, err := pl.LoadManual()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}

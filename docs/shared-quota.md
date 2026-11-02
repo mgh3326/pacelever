@@ -260,6 +260,15 @@ PUT /v1/quota/presence
 {"host_id":"<node-id>","account_key":"<pool>:<fingerprint>","last_seen":"<RFC3339>"}
 ```
 
+A credit pool (`anthropic-api`, `openai-api`) has no local login to resolve.
+A host publishes presence for `<pool>:<fingerprint>` from `[quota.accounts]`
+when the `omp` harness that spends the credit is on its `PATH` and hk holds an
+unexpired manual credit entry for that key. A host without `omp` never
+publishes it, and `measurable_accounts` does not apply. `gate --account-key
+<pool>:<fingerprint>` judges a credit account from that key's shared credit
+entry: a missing or expired entry is unmeasurable (exit 4), an exhausted one is
+blocked (exit 3).
+
 It is a separate record from the quota observation, which deliberately carries
 no host metadata. `host_id` is the node's `HUB_MACHINE_ID`, read directly from the panewire node
 env file (`[quota] node_env`, default `~/.config/panewire/hub-node.env`; a

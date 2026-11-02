@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `openai-api` is a second manual credit pool beside `anthropic-api`, for the
+  OpenAI credit grant spent by `omp-sol` and `omp-terra61`. Bench catalog rows on
+  it are no longer dropped, so `policy launch omp-sol` resolves, and
+  `manual set --pool openai-api --credit-balance …` records and gates the grant.
+- A host now publishes presence for a credit pool account when `omp` is on its
+  `PATH` and hk holds an unexpired credit entry for the `[quota.accounts]` key.
+  runtug can place `omp-*` seats on such a host; a host without `omp` never
+  claims the account. `gate --account-key anthropic-api:<fp>` (and
+  `openai-api:<fp>`) judges the key's shared credit entry instead of asking for
+  an automatic reading that a credit pool never has. (hk 2574)
 - The presence host id is now the node's `HUB_MACHINE_ID`, read from the panewire
   node env file (new `[quota] node_env`, default `~/.config/panewire/hub-node.env`).
   `PACELEVER_HOST_ID`, `HANDOFFKEEP_HOST_ID` and `[quota] host_id` are accepted only

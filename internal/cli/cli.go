@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -116,14 +117,11 @@ func (a *App) localManual() (pl.ManualStore, error) {
 }
 func (a *App) inputs(ctx context.Context, c pl.Catalog, pools []string) (pl.Inputs, error) {
 	if a.Config.Quota.URL != "" {
-		found := false
-		for _, pool := range pools {
-			if pool == "anthropic-api" {
-				found = true
+		pools = slices.Clone(pools)
+		for _, pool := range pl.CreditPools {
+			if !slices.Contains(pools, pool) {
+				pools = append(pools, pool)
 			}
-		}
-		if !found {
-			pools = append(append([]string(nil), pools...), "anthropic-api")
 		}
 	}
 	observations, e := a.Collector.Collect(ctx, pools)
@@ -309,9 +307,9 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 				}
 				fmt.Fprintln(a.Out)
 			}
-			if !present["anthropic-api"] {
-				if credit, ok := in.CreditStatus("anthropic-api"); ok {
-					fmt.Fprintf(a.Out, "anthropic-api %s\n", creditText(credit))
+			for _, pool := range pl.CreditPools {
+				if credit, ok := in.CreditStatus(pool); ok && !present[pool] {
+					fmt.Fprintf(a.Out, "%s %s\n", pool, creditText(credit))
 				}
 			}
 		}
@@ -368,7 +366,7 @@ func statusPayload(in pl.Inputs) map[string]any {
 	for _, o := range providers {
 		present[o.ID] = true
 	}
-	for _, pool := range []string{"anthropic-api", "commandcode"} {
+	for _, pool := range append(slices.Clone(pl.CreditPools), "commandcode") {
 		if !present[pool] {
 			providers = append(providers, pl.Observation{ID: pool, PoolClass: in.Config.Pool(pool, in.Now).Class, Error: "manual observation unavailable"})
 		}
@@ -446,7 +444,18 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 		if pool != d.ProviderID {
 			return pl.Invalid, fmt.Errorf("--account-key does not match profile pool")
 		}
-		if d.OK || d.ExitCode == pl.Unmeasurable {
+		// The preliminary decision reads no manual store, so a Blocked one is a
+		// refusal (excluded pool, role, subscription, refs) no reading can lift.
+		if pl.IsCreditPool(pool) && (d.OK || d.ExitCode == pl.Unmeasurable) {
+			// A credit account is judged from its own shared credit entry.
+			in.Manual, e = a.Collector.AccountCredit(ctx, key)
+			if e != nil {
+				return pl.ExitCode(e), e
+			}
+			in.AccountScoped = true
+			in.Now = a.now()
+			d = pl.Gate(in, req)
+		} else if d.OK || d.ExitCode == pl.Unmeasurable {
 			o, err := a.Collector.AccountObservation(ctx, key)
 			if pl.IsAccountStale(err) {
 				o, err = a.Collector.RefreshAccount(ctx, key)

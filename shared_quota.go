@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -351,6 +353,44 @@ func (c Collector) maybePresence(source ObservationSource, key string, allowed b
 	if !allowed || o.Stale || o.Degraded || o.Source != SourceHandoffkeep {
 		return
 	}
+	c.claimPresence(source, key)
+}
+
+// CreditHarness is the binary that spends every credit pool.
+const CreditHarness = "omp"
+
+// maybeCreditPresence publishes presence for a credit pool. A credit account
+// has no local login to read, so a host holds it when the harness that spends
+// the credit is installed and the shared store carries a live credit reading
+// for the configured key. A host without the harness never claims the account.
+func (c Collector) maybeCreditPresence(source ObservationSource, pool, key string, latest SharedLatest) {
+	if !c.harnessInstalled(CreditHarness) || !liveCredit(latest.Manual, pool, c.quotaNow()) {
+		return
+	}
+	c.claimPresence(source, key)
+}
+
+func (c Collector) harnessInstalled(name string) bool {
+	look := c.LookPath
+	if look == nil {
+		look = exec.LookPath
+	}
+	_, err := look(name)
+	return err == nil
+}
+
+// liveCredit reports whether a shared manual credit reading for pool has not
+// yet expired. Exhaustion is the gate's refusal, not a missing login.
+func liveCredit(xs []SharedObservation, pool string, now time.Time) bool {
+	return slices.ContainsFunc(sharedManual(xs, pool), func(m ManualObservation) bool {
+		expires, err := ParseTime(m.ExpiresAt)
+		return m.Window == "credit" && err == nil && expires.After(now)
+	})
+}
+
+// claimPresence publishes this host's presence for key unless one was
+// published within the presence interval.
+func (c Collector) claimPresence(source ObservationSource, key string) {
 	host, err := c.Config.Quota.presenceHostID()
 	if err != nil {
 		c.PublishLog.addOnce(err)
@@ -543,6 +583,33 @@ func (c Collector) AccountObservation(ctx context.Context, key string) (Observat
 	return o, nil
 }
 
+// AccountCredit reads the named credit account's shared manual readings. A
+// credit pool has no automatic reading: the operator's entry for that key is
+// the account's only evidence, and the gate judges its expiry and balance.
+func (c Collector) AccountCredit(ctx context.Context, key string) (ManualStore, error) {
+	pool, _, _ := strings.Cut(key, ":")
+	if err := ValidateAccountKey(key); err != nil {
+		return ManualStore{}, err
+	}
+	if !IsCreditPool(pool) {
+		return ManualStore{}, deny(Invalid, "not a credit pool account")
+	}
+	source := c.sharedSource()
+	if source == nil {
+		return ManualStore{}, deny(Unmeasurable, "shared quota unavailable for account")
+	}
+	latest, err := source.Latest(ctx, key)
+	if err != nil {
+		return ManualStore{}, deny(Unmeasurable, "shared quota unavailable for account")
+	}
+	out := ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}
+	for _, m := range sharedManual(latest.Manual, pool) {
+		out.History = append(out.History, m)
+		out.Latest[m.Pool+":"+m.Window] = m.ID
+	}
+	return out, nil
+}
+
 // IsAccountStale reports whether err is AccountObservation's refusal for a
 // missing or expired automatic reading, as opposed to an unreachable store.
 func IsAccountStale(err error) bool {
@@ -660,7 +727,8 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		}
 		return o, ok
 	}
-	if pool == "anthropic-api" {
+	if IsCreditPool(pool) {
+		c.maybeCreditPresence(source, pool, key, latest)
 		return finish(fail(ErrKindManualOnly))
 	}
 	if o, ok := fresh(); ok {
@@ -952,7 +1020,7 @@ func (c Collector) ReadManual(ctx context.Context) (ManualStore, error) {
 		return LoadManual()
 	}
 	out := ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}
-	for _, pool := range append(append([]string{}, ProviderIDs...), "anthropic-api") {
+	for _, pool := range KnownPools() {
 		key, _ := c.accountKey(pool)
 		if key == "" {
 			continue
