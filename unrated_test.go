@@ -117,7 +117,7 @@ func TestGradedRecommendationsSkipUnrated(t *testing.T) {
 func TestUnratedLaunchWithoutGrade(t *testing.T) {
 	c := Catalog{Rows: []CatalogRow{explorerRow("codex-sol", "high", "gpt-6.1-sol", "codex", "unrated")}}
 	c.Rows[0].Placed = false
-	for _, role := range []string{"lead", "consult"} {
+	for _, role := range []string{"lead", "consult", "builder", "counsel"} {
 		d, err := ResolveLaunch(c, Config{}, Request{Profile: "codex-sol", Effort: "high", Role: role})
 		if err != nil || d.Grade != "unrated" || d.Effort != "high" {
 			t.Fatalf("%s: launch=%+v err=%v", role, d, err)

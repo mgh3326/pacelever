@@ -3,6 +3,7 @@ package pacelever
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -32,7 +33,7 @@ func TestUnratedGateKeepsNullAuditGrade(t *testing.T) {
 		row := explorerRow("sonnet", "high", "sonnet-model", "claude", "unrated")
 		row.Placed = placed
 		in := Inputs{Catalog: Catalog{Rows: []CatalogRow{row}}, Now: testNow, Observations: []Observation{observation("claude", 10)}}
-		d := Gate(in, Request{Profile: "sonnet", Effort: "high", Role: "worker"})
+		d := Gate(in, Request{Profile: "sonnet", Effort: "high", Role: "lead"})
 		if !d.OK || d.Grade != nil {
 			t.Fatalf("unrated gate placed=%t: ok=%t grade=%v reason=%s", placed, d.OK, d.Grade, d.Reason)
 		}
@@ -47,6 +48,32 @@ func TestUnratedGateKeepsNullAuditGrade(t *testing.T) {
 		if grade, exists := audit["grade"]; !exists || grade != nil {
 			t.Fatalf("gate audit lost nullable grade contract: %s", data)
 		}
+	}
+}
+
+func TestUnratedWorkerNeedsMeasurementMarker(t *testing.T) {
+	for _, tc := range []struct{ role, grade string }{{"", ""}, {"worker", ""}, {"tester", ""}, {"reviewer", ""}, {"worker", "A"}, {"lead", "A"}, {"consult", "A"}} {
+		t.Run(tc.role+"/"+tc.grade, func(t *testing.T) {
+			c := Catalog{Rows: []CatalogRow{
+				{Profile: "codex-sol", Effort: "high", ModelID: "sol-model", Pool: "codex", Grade: "unrated", Gate: "default"},
+				{Profile: "codex-sol", Effort: "max", ModelID: "sol-model", Pool: "codex", Grade: "S+", Gate: "default", Placed: true},
+			}}
+			req := Request{Profile: "codex-sol", Effort: "high", Role: tc.role, RequiredGrade: tc.grade}
+			if d, err := ResolveLaunch(c, Config{}, req); err == nil || !strings.Contains(err.Error(), "e6_arm_required") {
+				t.Errorf("unmarked unrated request resolved: %+v err=%v", d, err)
+			}
+			in := Inputs{Catalog: c, Now: testNow, Observations: []Observation{observation("codex", 10)}}
+			if d := Gate(in, req); d.OK || !strings.Contains(d.Reason, "e6_arm_required") {
+				t.Errorf("unmarked unrated request admitted: %+v", d)
+			}
+			req.E6Arm = "codex-sol@high"
+			if d, err := ResolveLaunch(c, Config{}, req); err != nil || d.Grade != "unrated" || d.E6Arm == nil || *d.E6Arm != req.E6Arm {
+				t.Errorf("explicit measurement request refused: %+v err=%v", d, err)
+			}
+			if d := Gate(in, req); !d.OK || d.E6Arm != req.E6Arm {
+				t.Errorf("explicit measurement request not admitted: %+v", d)
+			}
+		})
 	}
 }
 

@@ -69,8 +69,9 @@ area's recommendation view.
 recommendations skip it, and effort monotonicity compares only rated rows.
 Remote unrated rows are unplaced. Catalog and launch output show `unrated`,
 while the `scopefuel.gate.v1` audit grade remains null for these rows.
-Launch resolution allows unrated rungs without an E6 marker. Leads and consults
-can use them without a grade floor. Opt-in exploration can select them to gather
+Leads and consults without a grade floor may launch unrated rungs without an E6
+marker. Direct worker launches still require the exact measurement marker.
+Opt-in exploration can select an unrated target internally after proving eligibility, to gather
 evidence while preserving its quota, seat, subscription, and default-gate checks.
 Clean task evidence can promote an unrated rung to a grade. Failure-driven
 demotions stop at C. Rep writes reject `unrated` task grades; a rated task may

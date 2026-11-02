@@ -180,7 +180,29 @@ func roleCheck(req Request, row CatalogRow) error {
 
 // ResolveLaunch resolves model identity and placement without probing providers.
 func ResolveLaunch(c Catalog, cfg Config, req Request) (LaunchDecision, error) {
-	row, resolved, arm, e := resolveRow(c, req)
+	return resolveLaunch(c, cfg, req, unratedRole(req))
+}
+
+func unratedRole(req Request) bool {
+	if req.RequiredGrade != "" {
+		return false
+	}
+	switch normalize(req.Role) {
+	case "lead", "consult", "builder", "counsel":
+		return true
+	}
+	return false
+}
+
+func measurementMarkerRequired(row CatalogRow, allowUnrated bool) bool {
+	if row.Grade == GradeUnrated {
+		return !allowUnrated
+	}
+	return !row.Placed && row.Gate != "consult_only" && !strings.HasPrefix(row.Profile, "devin-argon")
+}
+
+func resolveLaunch(c Catalog, cfg Config, req Request, allowUnrated bool) (LaunchDecision, error) {
+	row, resolved, arm, e := resolveRow(c, req, allowUnrated)
 	if e != nil {
 		return LaunchDecision{}, e
 	}
@@ -214,7 +236,7 @@ func ResolveLaunch(c Catalog, cfg Config, req Request) (LaunchDecision, error) {
 	}
 	return d, nil
 }
-func resolveRow(c Catalog, req Request) (CatalogRow, string, string, error) {
+func resolveRow(c Catalog, req Request, allowUnrated bool) (CatalogRow, string, string, error) {
 	profile := c.Canonical(req.Profile)
 	req.Profile = profile
 	requested := normalize(req.Effort)
@@ -267,7 +289,10 @@ func resolveRow(c Catalog, req Request) (CatalogRow, string, string, error) {
 selected:
 	var eligible []CatalogRow
 	for _, r := range rows {
-		if r.Placed || r.Grade == GradeUnrated || r.Gate == "consult_only" || strings.HasPrefix(profile, "devin-argon") || req.E6Arm == profile+"@"+r.Effort {
+		if requested == r.Effort && r.Grade == GradeUnrated && measurementMarkerRequired(r, allowUnrated) && req.E6Arm != profile+"@"+r.Effort {
+			return CatalogRow{}, "", "", deny(Blocked, "e6_arm_required: exact measurement marker required")
+		}
+		if !measurementMarkerRequired(r, allowUnrated) || req.E6Arm == profile+"@"+r.Effort {
 			eligible = append(eligible, r)
 		}
 	}
@@ -305,7 +330,7 @@ selected:
 		return CatalogRow{}, "", "", deny(Blocked, "rung is not in the catalog")
 	}
 	arm := ""
-	if !chosen.Placed && chosen.Grade != GradeUnrated && chosen.Gate != "consult_only" && !strings.HasPrefix(profile, "devin-argon") {
+	if measurementMarkerRequired(*chosen, allowUnrated) {
 		if req.E6Arm != profile+"@"+resolved {
 			return CatalogRow{}, "", "", deny(Blocked, "e6_arm_required")
 		}

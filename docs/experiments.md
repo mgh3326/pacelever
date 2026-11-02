@@ -26,8 +26,8 @@ Eligibility requires all of the following:
 The tool tries the nearest lower known effort on the same model. It never skips
 an ineligible intermediate effort to take a second step. It can instead try the
 next model in the pool's ordered ladder: Claude opus → sonnet → haiku, Codex sol →
-terra61 → luna, or API-credit pi-opus55 → pi-sonnet55 → pi-haiku55. A model missing
-its required placement blocks that route; the tool never skips it to take two
+terra61 → luna, or API-credit pi-opus55 → pi-sonnet55 → pi-haiku55. A target rung
+that is neither placed nor explicitly `unrated` blocks that route; the tool never skips it to take two
 model steps. The policy can provide `model_order` as data for other pools. Its
 hard eligibility guards still apply.
 

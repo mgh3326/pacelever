@@ -112,7 +112,7 @@ func ResolveLaunchWithInputs(in Inputs, req Request) (LaunchDecision, error) {
 	if req.RequiredGrade == "" || gradeRank(req.RequiredGrade) >= gradeRank(GradeUnrated) {
 		return keep("a valid task grade floor is required")
 	}
-	normalRow, _, _, e := resolveRow(c, req)
+	normalRow, _, _, e := resolveRow(c, req, unratedRole(req))
 	if e != nil {
 		return baseline, e
 	}
@@ -142,7 +142,7 @@ func ResolveLaunchWithInputs(in Inputs, req Request) (LaunchDecision, error) {
 	targetRequest.E6Arm = ""
 	targetRequest.OperatorRequest = ""
 	targetRequest.RequestedBy = ""
-	shifted, e := ResolveLaunch(c, in.Config, targetRequest)
+	shifted, e := resolveLaunch(c, in.Config, targetRequest, true)
 	if e != nil {
 		return keep("downshift resolution refused")
 	}
@@ -213,7 +213,7 @@ func downshiftTarget(in Inputs, req Request, normal LaunchDecision, policy Explo
 		candidate.RequestedBy = ""
 		// The target still passes ordinary quota and seat checks. No experiment
 		// marker may widen a gate or graduate a measurement rung.
-		return gate(in, candidate).OK
+		return gateWithUnrated(in, candidate, true).OK
 	}
 	// Pick only the nearest lower known effort. An ineligible intermediate
 	// rung is never skipped in favor of a second lower effort.

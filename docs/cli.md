@@ -92,7 +92,8 @@ subset is refused. A real catalog push is a separate explicit action and needs
 the server's operator credential.
 
 Catalog and `bench grades set` accept `unrated` for rungs without a grade decision.
-Grade-filtered recommendations skip these rows. The task 2639 seed contains only
+Ordinary grade-filtered recommendations skip these rows. Opt-in exploration for
+a task may still offer an unrated one-step downshift. The task 2639 seed contains only
 the 13 placeholder retags and preserves their original provenance:
 
 ```sh
