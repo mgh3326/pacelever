@@ -106,6 +106,9 @@ func (a *App) reps(ctx context.Context, v args) (int, error) {
 		if e := v.required("profile", "model", "task", "tier", "role", "grade"); e != nil {
 			return pl.Invalid, e
 		}
+		if !slices.Contains(pl.Grades, v.get("grade")) || v.get("grade") == pl.GradeUnrated {
+			return pl.Invalid, fmt.Errorf("invalid rep grade")
+		}
 		rounds, e := v.integer("rounds", 0)
 		if e != nil {
 			return pl.Invalid, e

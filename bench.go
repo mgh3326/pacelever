@@ -274,7 +274,7 @@ func decodeCatalog(rows []map[string]any) ([]CatalogRow, error) {
 			return nil, fmt.Errorf("duplicate catalog rung")
 		}
 		seen[key] = true
-		r.Placed = true
+		r.Placed = r.Grade != GradeUnrated
 		for _, old := range base.Rows {
 			if old.Profile == r.Profile && old.Effort == r.Effort {
 				r.Billing = old.Billing

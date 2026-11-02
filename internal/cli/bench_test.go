@@ -18,6 +18,52 @@ type benchDoFunc func(*http.Request) (*http.Response, error)
 
 func (f benchDoFunc) Do(r *http.Request) (*http.Response, error) { return f(r) }
 
+func TestUnratedRemoteProfileNotRecommended(t *testing.T) {
+	isolated(t)
+	var out bytes.Buffer
+	a := App{Out: &out, Bench: pl.BenchClient{URL: "https://catalog.example.invalid", Token: "fixture", Client: benchDoFunc(func(*http.Request) (*http.Response, error) {
+		return httpReply(`{"catalog":[{"profile":"omp-terra61","effort":"high","model_id":"openai/gpt-6.1-terra","pool":"openai-api","grade":"unrated","gate":"default"}]}`), nil
+	})}}
+	v, err := parse([]string{"--list-recommend-profiles"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, err := a.run(context.Background(), v); code != 0 || err != nil {
+		t.Fatalf("recommend profile list: code=%d err=%v", code, err)
+	}
+	if strings.Contains(out.String(), "omp-terra61") || !strings.Contains(out.String(), "sonnet") {
+		t.Fatalf("remote unrated profile entered placed-profile list: %s", out.String())
+	}
+}
+
+func TestUnratedRepAddCLI(t *testing.T) {
+	for _, grade := range []string{"A", "unrated"} {
+		for _, dry := range []bool{false, true} {
+			t.Run(grade+map[bool]string{true: "/dry-run"}[dry], func(t *testing.T) {
+				isolated(t)
+				var out bytes.Buffer
+				a := App{Out: &out}
+				argv := []string{"reps", "add", "--profile", "codex-sol", "--model", "gpt-6.1-sol", "--effort", "high", "--task", "hk:task/2639", "--tier", "T1", "--role", "impl", "--grade", grade, "--rounds", "1", "--blockers-found", "0", "--completed", "1", "--json"}
+				if dry {
+					argv = append(argv, "--dry-run")
+				}
+				v, err := parse(argv)
+				if err != nil {
+					t.Fatal(err)
+				}
+				code, err := a.reps(context.Background(), v)
+				if grade == "unrated" {
+					if code != pl.Invalid || err == nil || !strings.Contains(err.Error(), "invalid rep grade") || out.Len() != 0 {
+						t.Fatalf("unrated task accepted: code=%d err=%v out=%s", code, err, out.String())
+					}
+				} else if code != 0 || err != nil || !strings.Contains(out.String(), `"table_grade": "unrated"`) {
+					t.Fatalf("rated task on unrated model rejected: code=%d err=%v out=%s", code, err, out.String())
+				}
+			})
+		}
+	}
+}
+
 func TestBenchCatalogListsUnrated(t *testing.T) {
 	isolated(t)
 	for _, asJSON := range []bool{false, true} {

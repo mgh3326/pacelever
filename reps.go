@@ -84,7 +84,7 @@ func (b BenchClient) AddRep(ctx context.Context, r Rep) (Rep, error) {
 	if r.Profile == "" || r.ModelID == "" || r.TaskRef == "" || r.Rounds < 0 || r.BlockersFound < 0 || (!HasOutcomeFields(r) && r.Completed == nil) || (r.Completed != nil && *r.Completed != 0 && *r.Completed != 1) {
 		return r, fmt.Errorf("rep requires profile, model, task, valid rounds/blockers and completed 0/1")
 	}
-	if r.Grade != "" && gradeRank(r.Grade) == len(Grades) {
+	if r.Grade != "" && gradeRank(r.Grade) >= gradeRank(GradeUnrated) {
 		return r, fmt.Errorf("invalid rep grade")
 	}
 	if r.Tier != "T0" && r.Tier != "T1" && r.Tier != "T2" && r.Tier != "T3" {

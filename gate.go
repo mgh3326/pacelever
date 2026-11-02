@@ -125,7 +125,7 @@ func gate(in Inputs, req Request) Decision {
 		return failure(d, ExitCode(e), e.Error())
 	}
 	d.ProviderID = row.Pool
-	if row.Placed || row.Grade == GradeUnrated {
+	if row.Placed && row.Grade != GradeUnrated {
 		d.Grade = &row.Grade
 	}
 	if e = roleCheck(req, row); e != nil {

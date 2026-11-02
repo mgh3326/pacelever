@@ -67,11 +67,14 @@ area's recommendation view.
 
 `unrated` marks a rung without a measured or operator-set grade. Grade-filtered
 recommendations skip it, and effort monotonicity compares only rated rows.
+Remote unrated rows are unplaced. Catalog and launch output show `unrated`,
+while the `scopefuel.gate.v1` audit grade remains null for these rows.
 Launch resolution allows unrated rungs without an E6 marker. Leads and consults
 can use them without a grade floor. Opt-in exploration can select them to gather
 evidence while preserving its quota, seat, subscription, and default-gate checks.
 Clean task evidence can promote an unrated rung to a grade. Failure-driven
-demotions stop at C, and unrated task evidence cannot grade a model.
+demotions stop at C. Rep writes reject `unrated` task grades; a rated task may
+still record `table_grade=unrated` when measuring an unrated model.
 
 The catalog ladder is server → fresh cache → last-good cache → bundled snapshot.
 Cache files are bound to an endpoint digest. Degraded catalog provenance is
