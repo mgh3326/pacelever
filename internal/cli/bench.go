@@ -14,6 +14,8 @@ import (
 
 func (a *App) bench(ctx context.Context, v args) (int, error) {
 	switch v.at(1) {
+	case "aa-sync":
+		return a.aaSync(ctx, v)
 	case "catalog":
 		c := a.catalog(ctx)
 		switch v.at(2) {
@@ -22,7 +24,7 @@ func (a *App) bench(ctx context.Context, v args) (int, error) {
 				return 0, a.json(map[string]any{"catalog": pl.CatalogWire(c.Rows), "source": c.Info})
 			}
 			for _, r := range c.Rows {
-				fmt.Fprintf(a.Out, "%-3s %s@%s model=%s pool=%s gate=%s\n", r.Grade, r.Profile, r.Effort, r.ModelID, r.Pool, r.Gate)
+				fmt.Fprintf(a.Out, "%-3s %s@%s model=%s pool=%s gate=%s%s\n", r.Grade, r.Profile, r.Effort, r.ModelID, r.Pool, r.Gate, benchmarkText(r))
 			}
 			fmt.Fprintf(a.Out, "catalog=%s stale=%t\n", c.Info.Source, c.Info.Stale)
 			return 0, nil

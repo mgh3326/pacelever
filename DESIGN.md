@@ -71,6 +71,14 @@ visible; a stale view cannot widen a non-default launch gate. A partially seeded
 server fills only profiles it does not mention. Retirement and gate changes for
 mentioned profiles are authoritative.
 
+Artificial Analysis sync stores model priors separately from fleet grades.
+An explicit profile/model/effort table pins each prior to an AA model ID.
+Catalog and launch JSON carry the backend-compatible benchmark source and
+annotation text. Local priors attach only to the same launcher identity and
+never replace a newer server prior. The sync does not publish catalog changes;
+an explicit output artifact can be reviewed and pushed separately. Priors do
+not enter grade proposals or their evidence fingerprints.
+
 The public snapshot contains model and launcher metadata, not operator config,
 credentials, quota values, host identities or evidence records. Legacy SQLite is
 opened read-only through a pure Go file reader. New bench caches, manual events,

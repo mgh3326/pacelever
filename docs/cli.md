@@ -13,6 +13,7 @@ Run `pacelever --help` for a compact command list.
 | `policy setting altlane_pace_multiple VALUE\|none` | Pace threshold |
 | `manual set POOL`, `list [POOL]`, `clear POOL` | Bounded fallback observations; `--credit-balance/--credit-total/--expires` records a credit pool |
 | `bench catalog list\|status [--check]` | Canonical catalog and provenance |
+| `bench aa-sync [--dry-run] [--out FILE] [--json]` | Fetch Artificial Analysis model priors without publishing the catalog |
 | `bench push-catalog FILE [--dry-run]` | Explicit operator catalog PUT |
 | `bench push-catalog --emit-seed` | Emit bundled catalog without a write |
 | `bench grades list\|set` | Canonical grade projection |
@@ -35,6 +36,39 @@ Gate audit references use `--operator-request hk:task/NUMBER` or `hk:doc/KEY`;
 only satisfies the relevant consultation/escalation rule. It cannot bypass quota,
 subscription or role checks. `--pace-override REF` is an audit field; pace never
 refuses admission.
+
+`bench aa-sync` reads `ARTIFICIAL_ANALYSIS_API_KEY` from the environment, then
+`$XDG_CONFIG_HOME/pacelever/aa.env` (default `~/.config/pacelever/aa.env`). It makes
+one request to the [Artificial Analysis v2 models API](https://artificialanalysis.ai/api-reference).
+The explicit table in `aa_mappings.go` maps profile, model ID, and effort to an
+AA model ID. Unmapped rows retain their existing annotations and appear in the
+report. The command never substitutes another effort or model version.
+
+The command saves annotations in
+`$XDG_DATA_HOME/pacelever/aa-priors.json` (default
+`~/.local/share/pacelever/aa-priors.json`). Catalog reads attach these priors to
+the exact profile, model ID, and effort, while retaining a newer server prior.
+`--dry-run` previews the rows without updating that store. `--out FILE` explicitly
+writes a catalog artifact, including during a dry-run, for separate review and
+`bench push-catalog`. Sync itself makes no catalog PUT.
+
+`bench catalog list` and its JSON expose `benchmark_source` and
+`benchmark_annotation`; `policy launch --json` includes them on the resolved row.
+The source is `artificialanalysis:v2:YYYY-MM-DD`, using the UTC fetch date.
+The annotation is JSON text, matching the backend's text field, with
+`intelligence_index`, optional `coding_index`, `price_1m_input_tokens`,
+`price_1m_output_tokens`, `median_output_tokens_per_second`, `aa_name`, and
+`fetched_at`. Prices are USD per million tokens. Missing measurements are null;
+a missing coding index is omitted. These are model priors for candidate choice.
+Grades, scores, gates, placements, and grade evidence fingerprints remain based
+on fleet evidence.
+
+The last text line reports `aa-sync annotated=N unmapped=N changed=N dry_run=BOOL`.
+`changed` counts changed sources or measurements, excluding a refreshed
+`fetched_at` alone. With `--json`, the summary goes to stderr and stdout contains
+the catalog and counts. Exit 0 means the sync completed, including when some
+rows are unmapped. Missing keys, API failures, invalid data, and local I/O failures
+return exit 2. Failures with credentials identify the key name and withhold its value.
 
 ```sh
 pacelever reps add --profile sonnet --model claude-sonnet-5-5 --effort high \

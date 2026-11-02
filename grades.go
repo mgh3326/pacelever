@@ -37,6 +37,10 @@ type GradeProposal struct {
 
 func EvidenceFingerprint(c Catalog, reps []Rep) string {
 	rows := append([]CatalogRow(nil), c.Rows...)
+	for i := range rows {
+		// Model priors are not fleet evidence for a grade proposal.
+		rows[i].BenchmarkSource, rows[i].BenchmarkAnnotation = "", ""
+	}
 	sort.Slice(rows, func(i, j int) bool {
 		a, b := rows[i], rows[j]
 		if a.Profile != b.Profile {
