@@ -17,3 +17,5 @@ review_gate:
   land: graded
 fast_lane:
   max_changed_lines: 50
+
+deploy_approval: []
