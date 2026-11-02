@@ -351,10 +351,24 @@ func CatalogWire(rows []CatalogRow) []map[string]any {
 	return out
 }
 func (b BenchClient) PushCatalog(ctx context.Context, rows []CatalogRow) error {
+	if e := ValidateCatalog(rows); e != nil {
+		return e
+	}
+	return b.Send(ctx, "PUT", "/v1/bench/catalog", "catalog", map[string]any{"catalog": CatalogWire(rows)}, nil)
+}
+
+// ValidateCatalog checks both dry-run artifacts and catalog writes.
+func ValidateCatalog(rows []CatalogRow) error {
+	if len(rows) == 0 {
+		return fmt.Errorf("non-empty catalog required")
+	}
 	if e := ValidateMonotonic(rows); e != nil {
 		return e
 	}
 	for _, r := range rows {
+		if gradeRank(r.Grade) == len(Grades) {
+			return fmt.Errorf("invalid catalog grade %q", r.Grade)
+		}
 		if r.DecidedBy == "" || r.DeviationRef == "" {
 			return fmt.Errorf("catalog provenance required")
 		}
@@ -362,12 +376,12 @@ func (b BenchClient) PushCatalog(ctx context.Context, rows []CatalogRow) error {
 			return fmt.Errorf("catalog decided_at must include timezone")
 		}
 	}
-	return b.Send(ctx, "PUT", "/v1/bench/catalog", "catalog", map[string]any{"catalog": CatalogWire(rows)}, nil)
+	return nil
 }
 func ValidateMonotonic(rows []CatalogRow) error {
 	byProfile := map[string][]CatalogRow{}
 	for _, r := range rows {
-		if r.RetiredAt == nil && r.Effort != "" {
+		if r.RetiredAt == nil && r.Effort != "" && r.Grade != GradeUnrated {
 			byProfile[r.Profile] = append(byProfile[r.Profile], r)
 		}
 	}

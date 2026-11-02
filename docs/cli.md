@@ -52,6 +52,14 @@ requires `--allow-degraded REASON`; changed evidence or a non-monotonic selected
 subset is refused. A real catalog push is a separate explicit action and needs
 the server's operator credential.
 
+Catalog and `bench grades set` accept `unrated` for rungs without a grade decision.
+Grade-filtered recommendations skip these rows. The task 2639 seed contains only
+the 13 placeholder retags and preserves their original provenance:
+
+```sh
+pacelever bench push-catalog testdata/catalog_unrated_hk2639.json --dry-run
+```
+
 ```sh
 pacelever observe devin-free-limit --reset '<RFC3339_RESET>' \
   --observed '<RFC3339_OBSERVATION>' --rung devin-swe2 --source job:example

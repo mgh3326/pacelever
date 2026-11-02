@@ -224,13 +224,15 @@ The default ladders are opus → sonnet → haiku, codex-sol → codex-terra61 �
 codex-luna, and pi-opus55 → pi-sonnet55 → pi-haiku55. Devin's baked SWE-2
 profiles can step max → high → medium. A lower effort on the same model is tried
 first. A configured model order can describe other pool-specific ladders, but
-same-pool, subscription, default-gate, placed-grade and normal admission checks
-remain mandatory. An unplaced/retired intermediate model is never skipped.
+same-pool, subscription, default-gate, and normal admission checks remain mandatory.
+The target must have a sufficient placed grade or be explicitly `unrated`.
+An ineligible intermediate model is never skipped.
 
 Supply `--task KEY --grade FLOOR` to `policy launch`, or `--task KEY` alongside
 `--recommend GRADE`. Missing attribution, unknown/stale weekly pace, pace ≥1.0,
-or a missing sufficient placement keeps the baseline. Paid credit pools need an
-actual weekly observation to prove pace; a credit balance alone is insufficient.
+or a target with neither a sufficient placement nor an `unrated` grade keeps the
+baseline. Paid credit pools need an actual weekly observation to prove pace;
+a credit balance alone is insufficient.
 The policy does not infer extra headroom from an unknown reset.
 
 See [experiments](experiments.md) for labels, PR outcome fields and grading.

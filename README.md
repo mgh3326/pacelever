@@ -41,8 +41,8 @@ Credit profiles require an explicit effort and seat. A placed, default-gate
 credit rungs permit worker/tester seats under their existing gate restrictions.
 An omitted seat is refused.
 
-Optional per-pool exploration offers a deterministic one-step downshift only
-under headroom and a sufficient placed grade. It defaults off. Every launch
+Optional per-pool exploration offers a deterministic one-step downshift under
+headroom to a sufficient placed grade or an `unrated` rung. It defaults off. Every launch
 includes a `label` with profile, effort, `baseline|downshift`, and a nullable
 experiment ID. [Exploration and PR outcomes](docs/experiments.md) describes the
 policy, labels and outcome evidence.

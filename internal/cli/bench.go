@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +23,7 @@ func (a *App) bench(ctx context.Context, v args) (int, error) {
 				return 0, a.json(map[string]any{"catalog": pl.CatalogWire(c.Rows), "source": c.Info})
 			}
 			for _, r := range c.Rows {
-				fmt.Fprintf(a.Out, "%-3s %s@%s model=%s pool=%s gate=%s\n", r.Grade, r.Profile, r.Effort, r.ModelID, r.Pool, r.Gate)
+				fmt.Fprintf(a.Out, "%-7s %s@%s model=%s pool=%s gate=%s\n", r.Grade, r.Profile, r.Effort, r.ModelID, r.Pool, r.Gate)
 			}
 			fmt.Fprintf(a.Out, "catalog=%s stale=%t\n", c.Info.Source, c.Info.Stale)
 			return 0, nil
@@ -62,7 +63,7 @@ func (a *App) bench(ctx context.Context, v args) (int, error) {
 		if len(rows) == 0 {
 			return pl.Invalid, fmt.Errorf("non-empty catalog required")
 		}
-		if e = pl.ValidateMonotonic(rows); e != nil {
+		if e = pl.ValidateCatalog(rows); e != nil {
 			return pl.Invalid, e
 		}
 		if v.flags["dry-run"] {
@@ -80,6 +81,9 @@ func (a *App) bench(ctx context.Context, v args) (int, error) {
 		case "set":
 			if e := v.required("profile", "grade", "deviation-ref"); e != nil {
 				return pl.Invalid, e
+			}
+			if !slices.Contains(pl.Grades, v.get("grade")) {
+				return pl.Invalid, fmt.Errorf("invalid grade %q", v.get("grade"))
 			}
 			g := map[string]any{"profile": v.get("profile"), "grade": v.get("grade"), "deviation_ref": v.get("deviation-ref"), "boundary_version": v.get("boundary-version")}
 			if v.flags["dry-run"] {

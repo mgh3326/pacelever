@@ -15,8 +15,9 @@ experiment_id = "downshift-cohort-1"
 Eligibility requires all of the following:
 
 - A task ID and its required grade floor.
-- A placed default-gate baseline and a placed default-gate target meeting that
-  floor. Carrier grades on unmeasured rungs do not count as placements.
+- A placed default-gate baseline meeting the task floor. The default-gate target
+  either has a placed grade meeting that floor or is explicitly `unrated`.
+  Exploration can select an unrated target to gather evidence without an E6 marker.
 - A current paid weekly pace strictly below 1.0, or a proven Free model bucket.
   Unknown/stale pace and the first 5% of a window remain ineligible.
 - The same subscription pool, an enabled target subscription, an allowed seat,

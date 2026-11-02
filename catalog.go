@@ -83,7 +83,7 @@ func defaultEffort(profile string, rows []CatalogRow, defaults map[string]string
 	preferred := defaults[profile]
 	var ordinary []CatalogRow
 	for _, r := range rows {
-		if r.Gate == "default" && r.Placed {
+		if r.Gate == "default" && (r.Placed || r.Grade == GradeUnrated) {
 			ordinary = append(ordinary, r)
 			if preferred != "" && r.Effort == preferred {
 				return preferred, preferred
@@ -261,7 +261,7 @@ func resolveRow(c Catalog, req Request) (CatalogRow, string, string, error) {
 selected:
 	var eligible []CatalogRow
 	for _, r := range rows {
-		if r.Placed || r.Gate == "consult_only" || strings.HasPrefix(profile, "devin-argon") || req.E6Arm == profile+"@"+r.Effort {
+		if r.Placed || r.Grade == GradeUnrated || r.Gate == "consult_only" || strings.HasPrefix(profile, "devin-argon") || req.E6Arm == profile+"@"+r.Effort {
 			eligible = append(eligible, r)
 		}
 	}
@@ -299,7 +299,7 @@ selected:
 		return CatalogRow{}, "", "", deny(Blocked, "rung is not in the catalog")
 	}
 	arm := ""
-	if !chosen.Placed && chosen.Gate != "consult_only" && !strings.HasPrefix(profile, "devin-argon") {
+	if !chosen.Placed && chosen.Grade != GradeUnrated && chosen.Gate != "consult_only" && !strings.HasPrefix(profile, "devin-argon") {
 		if req.E6Arm != profile+"@"+resolved {
 			return CatalogRow{}, "", "", deny(Blocked, "e6_arm_required")
 		}
