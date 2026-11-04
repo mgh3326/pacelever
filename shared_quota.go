@@ -64,14 +64,15 @@ type SharedBucket struct {
 	Model    string     `json:"model,omitempty"`
 }
 type SharedObservation struct {
-	ID         int64            `json:"id"`
-	Kind       string           `json:"kind"`
-	Window     string           `json:"window,omitempty"`
-	MeasuredAt time.Time        `json:"measured_at"`
-	ExpiresAt  *time.Time       `json:"expires_at,omitempty"`
-	Plan       string           `json:"plan,omitempty"`
-	Buckets    []SharedBucket   `json:"buckets"`
-	FreeBucket *FreeBucketState `json:"free_bucket,omitempty"`
+	ID          int64            `json:"id"`
+	Kind        string           `json:"kind"`
+	Window      string           `json:"window,omitempty"`
+	MeasuredAt  time.Time        `json:"measured_at"`
+	ConfirmedAt *time.Time       `json:"confirmed_at,omitempty"`
+	ExpiresAt   *time.Time       `json:"expires_at,omitempty"`
+	Plan        string           `json:"plan,omitempty"`
+	Buckets     []SharedBucket   `json:"buckets"`
+	FreeBucket  *FreeBucketState `json:"free_bucket,omitempty"`
 }
 type SharedLatest struct {
 	Observation *SharedObservation  `json:"observation"`
@@ -118,6 +119,7 @@ func (s HKObservationSource) Lease(ctx context.Context, key, holder string, ttl 
 	return out, err
 }
 func (s HKObservationSource) Publish(ctx context.Context, key, holder string, x SharedObservation) error {
+	x.ConfirmedAt = nil
 	return s.Client.Send(ctx, "PUT", quotaPath(key, "observation"), "quota_share", map[string]any{"holder": holder, "observation": x}, nil)
 }
 func (s HKObservationSource) Release(ctx context.Context, key, holder string) error {
@@ -499,6 +501,13 @@ func rolloverExpired(buckets []Bucket, now time.Time) []Bucket {
 	return out
 }
 
+func sharedValidAt(x *SharedObservation) time.Time {
+	if x.ConfirmedAt != nil && x.ConfirmedAt.After(x.MeasuredAt) {
+		return *x.ConfirmedAt
+	}
+	return x.MeasuredAt
+}
+
 // sharedAuto converts a shared observation. With stale set (the last-good path
 // after a failed probe), a bucket whose reset already passed is kept as a
 // rolled-over 0% marker instead of invalidating the whole observation.
@@ -506,7 +515,8 @@ func sharedAuto(x *SharedObservation, pool, key string, now time.Time, ttl time.
 	if x == nil || x.Kind != "auto" || x.MeasuredAt.IsZero() {
 		return Observation{}, false
 	}
-	age := now.Sub(x.MeasuredAt)
+	validAt := sharedValidAt(x)
+	age := now.Sub(validAt)
 	free, validFree := sharedFreeBucket(x.FreeBucket, pool, now)
 	if age < -time.Minute || age > ttl || !validFree {
 		return Observation{}, false
@@ -520,7 +530,7 @@ func sharedAuto(x *SharedObservation, pool, key string, now time.Time, ttl time.
 	if age < 0 {
 		age = 0
 	}
-	o := Observation{ID: pool, Plan: x.Plan, Source: SourceHandoffkeep, FetchedAt: float64(x.MeasuredAt.UnixMilli()) / 1000, AgeS: ptr(age.Seconds()), AccountFP: accountKeyFP(key), AccountFPKind: FPKindAccount, AccountFPMatch: ptr(true)}
+	o := Observation{ID: pool, Plan: x.Plan, Source: SourceHandoffkeep, FetchedAt: float64(validAt.UnixMilli()) / 1000, AgeS: ptr(age.Seconds()), AccountFP: accountKeyFP(key), AccountFPKind: FPKindAccount, AccountFPMatch: ptr(true)}
 	o.FreeBucket = free
 	if pool == "devin" {
 		// Shared organization identity is for publication. Keeping it separate

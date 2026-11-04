@@ -1240,3 +1240,99 @@ func TestCreditPresenceNeedsHarnessAndLiveCredit(t *testing.T) {
 		})
 	}
 }
+
+func TestSharedConfirmedAtFreshBeforeLease(t *testing.T) {
+	for _, pool := range []string{"grok", "devin"} {
+		t.Run(pool, func(t *testing.T) {
+			now := testNow
+			payload := fmt.Sprintf(`{"kind":"auto","measured_at":%q,"confirmed_at":%q,"buckets":[{"window":"7d","used_pct":24,"scope":"account"}],"free_bucket":{"state":"available"}}`, now.Add(-10*time.Minute).Format(time.RFC3339), now.Add(-time.Minute).Format(time.RFC3339))
+			if pool == "grok" {
+				payload = strings.Replace(payload, `,"free_bucket":{"state":"available"}`, "", 1)
+			}
+			var x SharedObservation
+			if err := json.Unmarshal([]byte(payload), &x); err != nil {
+				t.Fatal(err)
+			}
+			f := &fakeHK{latest: SharedLatest{Observation: &x}}
+			var c Collector
+			if pool == "devin" {
+				c = devinSharedCollector(t, f)
+			} else {
+				c = sharedCollector(t, f)
+				c.Now = func() time.Time { return now }
+			}
+			probes := 0
+			c.Providers = map[string]Provider{pool: ProviderFunc(func(context.Context) Observation { probes++; return Observation{} })}
+			out, err := c.Collect(context.Background(), []string{pool})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(out) != 1 || out[0].Stale || out[0].Source != SourceHandoffkeep || probes != 0 || strings.Join(f.calls, ",") != "read" {
+				t.Fatalf("confirmed reading was not served fresh: observations=%+v calls=%v probes=%d", out, f.calls, probes)
+			}
+			if out[0].AgeS == nil || *out[0].AgeS != 60 || out[0].FetchedAt != float64(now.Add(-time.Minute).UnixMilli())/1000 {
+				t.Fatalf("wrong confirmed time: %+v", out[0])
+			}
+		})
+	}
+}
+
+func TestSharedConfirmedAtBoundariesAndAccount(t *testing.T) {
+	now := testNow
+	for _, tc := range []struct {
+		name      string
+		measured  time.Time
+		confirmed *time.Time
+		fresh     bool
+		age       float64
+	}{
+		{"absent", now.Add(-10 * time.Minute), nil, false, 0},
+		{"older", now.Add(-time.Minute), ptr(now.Add(-2 * time.Minute)), true, 60},
+		{"future", now.Add(-time.Minute), ptr(now.Add(2 * time.Minute)), false, 0},
+		{"confirmed", now.Add(-10 * time.Minute), ptr(now.Add(-time.Minute)), true, 60},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			x := sampleShared(tc.measured)
+			x.ConfirmedAt = tc.confirmed
+			o, ok := sharedAuto(x, "grok", sharedTestKey, now, 5*time.Minute, false)
+			if ok != tc.fresh {
+				t.Fatalf("fresh=%v, want %v", ok, tc.fresh)
+			}
+			if ok && (o.AgeS == nil || *o.AgeS != tc.age || o.FetchedAt != float64(now.Add(-time.Duration(tc.age)*time.Second).UnixMilli())/1000) {
+				t.Fatalf("wrong time: %+v", o)
+			}
+			f := &fakeHK{latest: SharedLatest{Observation: x}}
+			c := sharedCollector(t, f)
+			c.Now = func() time.Time { return now }
+			account, err := c.AccountObservation(context.Background(), sharedTestKey)
+			if (err == nil) != tc.fresh {
+				t.Fatalf("account error=%v, fresh=%v", err, tc.fresh)
+			}
+			if err == nil && (account.AgeS == nil || *account.AgeS != tc.age || account.FetchedAt != o.FetchedAt) {
+				t.Fatalf("account time: %+v", account)
+			}
+		})
+	}
+}
+
+func TestSharedPublishOmitsConfirmedAt(t *testing.T) {
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Observation map[string]any `json:"observation"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if _, ok := body.Observation["confirmed_at"]; ok {
+			t.Error("publish included confirmed_at")
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer h.Close()
+	source := HKObservationSource{Client: BenchClient{URL: h.URL, Token: "fake-token", Config: Config{Bench: BenchConfig{AllowPlaintextQuotaShare: true}}, Client: h.Client()}}
+	x := sampleShared(testNow)
+	x.ConfirmedAt = ptr(testNow)
+	if err := source.Publish(context.Background(), sharedTestKey, "holder", *x); err != nil {
+		t.Fatal(err)
+	}
+}
