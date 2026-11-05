@@ -27,7 +27,7 @@ func TestGateAccountUsesSharedJudgment(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolated(t)
-			now := time.Now().UTC()
+			now := pl.ClockNow(nil)
 			reset := now.Add(5 * 24 * time.Hour)
 			key := "claude:0123456789abcdef"
 			reads := 0
@@ -76,7 +76,7 @@ func TestGateAccountFailsClosed(t *testing.T) {
 	for _, mode := range []string{"missing", "stale", "future", "invalid bucket", "manual kind", "manual only", "http error", "wrong pool", "invalid key", "empty key", "empty equals key", "malformed blocked key", "no backend"} {
 		t.Run(mode, func(t *testing.T) {
 			isolated(t)
-			now := time.Now().UTC()
+			now := pl.ClockNow(nil)
 			reads := 0
 			h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				reads++
@@ -165,7 +165,7 @@ func TestGateAccountCreditPool(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolated(t)
-			now := time.Now().UTC()
+			now := pl.ClockNow(nil)
 			expiry := now.Add(tc.expires)
 			key := "anthropic-api:fedcba9876543210"
 			h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +202,7 @@ func TestGateAccountCreditPool(t *testing.T) {
 // entry admits (review r4437955482).
 func TestGateAccountCreditIgnoresLocalExhaustion(t *testing.T) {
 	isolated(t)
-	now := time.Now().UTC()
+	now := pl.ClockNow(nil)
 	local := pl.ManualObservation{Pool: "anthropic-api", MeasuredAt: now.Format(time.RFC3339), Reason: "console", Credit: &pl.Credit{RemainingUSD: 0, TotalUSD: 200, ExpiresOn: now.Add(14 * 24 * time.Hour).Format(time.RFC3339)}}
 	if _, err := pl.AddManual(local, 0, now); err != nil {
 		t.Fatal(err)

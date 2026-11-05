@@ -94,7 +94,7 @@ func TestMergewakeStructuredNotesAndTextReceipts(t *testing.T) {
 func TestPolicyLaunchExplorationAndLabel(t *testing.T) {
 	isolated(t)
 	cfg := pl.Config{Pools: map[string]pl.PoolPolicy{"claude": {Exploration: pl.ExplorationPolicy{Fraction: 1, ExperimentID: "cohort-fixture"}}}}
-	now := time.Now().UTC()
+	now := pl.ClockNow(nil)
 	var out, err bytes.Buffer
 	app := App{Out: &out, Err: &err, Config: cfg, Bench: pl.BenchClient{}, Collector: pl.Collector{Config: cfg, Providers: map[string]pl.Provider{"claude": pl.ProviderFunc(func(context.Context) pl.Observation {
 		return pl.Observation{ID: "claude", Source: "fixture", Buckets: []pl.Bucket{{Window: "5h", UsedPct: pl.Pct(10), Scope: pl.Scope{Kind: "account"}, ResetsAt: now.Add(3 * time.Hour).Format(time.RFC3339)}, {Window: "7d", UsedPct: pl.Pct(10), Scope: pl.Scope{Kind: "account"}, ResetsAt: now.Add(144 * time.Hour).Format(time.RFC3339)}}}

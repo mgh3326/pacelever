@@ -767,18 +767,18 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		// Wall clock pacing: each window ends at the holder's lease expiry and
 		// the whole wait is bounded by ctx and by two lease windows, so the
 		// loop terminates even if the server keeps reporting new contention.
-		deadline := time.Now().Add(2 * time.Duration(c.Config.Quota.leaseTTL()) * time.Second)
+		deadline := time.Now().Add(2 * time.Duration(c.Config.Quota.leaseTTL()) * time.Second) // wall-clock: pacing
 		for !lease.Acquired || lease.Holder != holder {
-			if !lease.ExpiresAt.After(time.Now()) {
+			if !lease.ExpiresAt.After(time.Now()) { // wall-clock: pacing
 				publisherGone = true
 				break
 			}
-			if time.Now().After(deadline) {
+			if time.Now().After(deadline) { // wall-clock: pacing
 				waitedOut = true
 				break
 			}
 			wait := c.Config.Quota.waitTime()
-			if rem := time.Until(lease.ExpiresAt); rem < wait {
+			if rem := time.Until(lease.ExpiresAt); rem < wait { // wall-clock: pacing
 				wait = rem
 			}
 			if waitQuota(ctx, wait) != nil {
