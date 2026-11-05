@@ -13,7 +13,7 @@ patterns = {
 # Placeholder values that name no one: RFC 2606/6761 reserved domains for
 # email, and one- or two-letter or generic user names in a path. Fixtures use
 # these so tests can exercise parsers without carrying real identities.
-reserved_email = re.compile(r"@(?:[A-Za-z0-9-]+\.)*(?:example(?:\.(?:com|net|org))?|invalid|test|localhost)\b", re.I)
+reserved_email = re.compile(r"@(?:[A-Za-z0-9-]+\.)*(?:example(?:\.(?:com|net|org))?|invalid|test|localhost)\Z", re.I)
 placeholder_path = re.compile(r"/(?:Users|home)/(?:[a-z]{1,2}|user|you|me|runner)/")
 allowed = {
     "email": lambda m: reserved_email.search(m.group(0)) is not None,
