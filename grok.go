@@ -252,7 +252,7 @@ func grokSettingsPlan(ctx context.Context, token string, client HTTPDoer) string
 // again. Failures carry no response body, URL or credential.
 func grokRefresh(ctx context.Context, record grokRecord, client HTTPDoer, now func() time.Time) (grokRecord, Observation, bool) {
 	fail := func(message, kind string) (grokRecord, Observation, bool) {
-		return record, Observation{ID: "grok", Error: message, ErrorKind: kind}, false
+		return record, failed("grok", kind, message), false
 	}
 	if !record.refreshable() {
 		return fail("grok authentication failed; run grok login", ErrKindAuthFailed)

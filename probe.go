@@ -318,7 +318,7 @@ func StartRefresh(pool string) error {
 			StartedAt string `json:"started_at"`
 		}
 		if ReadJSON(pidPath, &active) == nil && active.PID > 1 {
-			if at, e := ParseTime(active.StartedAt); e == nil && time.Since(at) >= 0 && time.Since(at) < 2*time.Minute && syscall.Kill(active.PID, 0) == nil {
+			if at, e := ParseTime(active.StartedAt); e == nil && FreshWithin(ClockNow(nil), at, 2*time.Minute) && syscall.Kill(active.PID, 0) == nil {
 				return nil
 			}
 		}

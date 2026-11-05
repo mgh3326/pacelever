@@ -3,7 +3,6 @@ package pacelever
 import (
 	"context"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -15,7 +14,7 @@ import (
 var devinOrgRE = regexp.MustCompile(`^org[-_][A-Za-z0-9_-]+$`)
 
 func devinWebProvider(cfg Config, client HTTPDoer, now func() time.Time) Provider {
-	token := strings.TrimSpace(os.Getenv("DEVIN_BEARER_TOKEN"))
+	token := FirstEnv("DEVIN_BEARER_TOKEN")
 	org := strings.TrimSpace(cfg.Pools["devin"].OrgID)
 	if token == "" || !devinOrgRE.MatchString(org) {
 		return nil

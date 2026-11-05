@@ -45,12 +45,12 @@ func LoadManual() (ManualStore, error) {
 	p := filepath.Join(CacheDir(), "manual.json")
 	e := ReadJSON(p, &s)
 	if os.IsNotExist(e) {
-		return ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}, nil
+		return newManualStore(), nil
 	}
 	if e != nil {
 		return s, e
 	}
-	if (s.Schema != "scopefuel.manual.v1" && s.Schema != "pacelever.manual.v1") || s.Latest == nil || s.History == nil {
+	if (s.Schema != SchemaManualLegacy && s.Schema != SchemaManual) || s.Latest == nil || s.History == nil {
 		return s, fmt.Errorf("invalid manual observation store")
 	}
 	return s, nil
@@ -186,6 +186,12 @@ func ClearManual(pool string) error {
 		return WriteJSON(filepath.Join(CacheDir(), "manual.json"), s)
 	})
 }
+
+// newManualStore is an empty native manual store.
+func newManualStore() ManualStore {
+	return ManualStore{Schema: SchemaManual, History: []ManualObservation{}, Latest: map[string]string{}}
+}
+
 func RequiredWindows(pool, plan string, manual bool) []string {
 	if IsCreditPool(pool) || manual && pool == "commandcode" {
 		return []string{"credit"}

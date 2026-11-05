@@ -190,9 +190,9 @@ func ObserveLimit(pool string, r LimitRecord, clear bool, accountKey string, now
 	}
 	return WithFileLock(limitPath(pool)+".lock", false, func() error {
 		s := readLimits(pool)
-		s.Schema = "pacelever.devin-free-limit.v1"
+		s.Schema = SchemaDevinFreeLimit
 		if pool == "commandcode" {
-			s.Schema = "pacelever.commandcode-limit.v1"
+			s.Schema = SchemaCommandcodeLimit
 		}
 		if clear {
 			delete(s.Records, accountKey)

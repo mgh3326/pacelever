@@ -8,7 +8,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -146,7 +145,7 @@ func (c Collector) sharedSource() ObservationSource {
 	}
 	// An unset or empty variable keeps the token that NewBenchClient loaded
 	// from config.env (same-origin only, above); a non-empty one always wins.
-	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+	if v := FirstEnv(name); v != "" {
 		b.Token = v
 	}
 	b.Client = &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -512,7 +511,7 @@ func sharedValidAt(x *SharedObservation) time.Time {
 // after a failed probe), a bucket whose reset already passed is kept as a
 // rolled-over 0% marker instead of invalidating the whole observation.
 func sharedAuto(x *SharedObservation, pool, key string, now time.Time, ttl time.Duration, stale bool) (Observation, bool) {
-	if x == nil || x.Kind != "auto" || x.MeasuredAt.IsZero() {
+	if x == nil || x.Kind != SharedAuto || x.MeasuredAt.IsZero() {
 		return Observation{}, false
 	}
 	validAt := sharedValidAt(x)
@@ -543,7 +542,7 @@ func sharedAuto(x *SharedObservation, pool, key string, now time.Time, ttl time.
 		if !validPct(&b.UsedPct) || (b.Scope != ScopeAccount && b.Scope != ScopeModel && b.Scope != ScopeGroup) {
 			return Observation{}, false
 		}
-		bucket := Bucket{Label: b.Window, Window: b.Window, UsedPct: ptr(b.UsedPct), Scope: Scope{Kind: b.Scope, Name: b.Model}, Horizon: horizon(b.Window)}
+		bucket := windowBucket(Scope{Kind: b.Scope, Name: b.Model}, b.Window, ptr(b.UsedPct), "")
 		if b.ResetsAt != nil {
 			if !b.ResetsAt.After(now) {
 				if !stale {
@@ -612,7 +611,7 @@ func (c Collector) AccountCredit(ctx context.Context, key string) (ManualStore, 
 	if err != nil {
 		return ManualStore{}, deny(Unmeasurable, "shared quota unavailable for account")
 	}
-	out := ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}
+	out := newManualStore()
 	for _, m := range sharedManual(latest.Manual, pool) {
 		out.History = append(out.History, m)
 		out.Latest[m.Pool+":"+m.Window] = m.ID
@@ -666,7 +665,7 @@ func (c Collector) RefreshAccount(ctx context.Context, key string) (Observation,
 func sharedManual(xs []SharedObservation, pool string) []ManualObservation {
 	out := []ManualObservation{}
 	for _, x := range xs {
-		if x.Kind != "manual" || x.ExpiresAt == nil || len(x.Buckets) != 1 || x.Buckets[0].Scope != ScopeAccount || x.Buckets[0].Window != x.Window {
+		if x.Kind != SharedManual || x.ExpiresAt == nil || len(x.Buckets) != 1 || x.Buckets[0].Scope != ScopeAccount || x.Buckets[0].Window != x.Window {
 			continue
 		}
 		b := x.Buckets[0]
@@ -710,7 +709,9 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		if kind == ErrKindRateLimited {
 			return c.sharedLocalFallback(pool, key, kind, message, entry, now, false)
 		}
-		return Observation{ID: pool, Stale: true, ErrorKind: kind, Error: message}
+		o := failed(pool, kind, message)
+		o.Stale = true
+		return o
 	}
 	fail := func(kind string) Observation { return failWith(kind, "shared measurement pending") }
 	if key == "" {
@@ -913,7 +914,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 		return finish(fail(kind))
 	}
 	at := c.quotaNow()
-	x := SharedObservation{Kind: "auto", MeasuredAt: at, Plan: observed.Plan, Buckets: []SharedBucket{}, FreeBucket: observed.FreeBucket}
+	x := SharedObservation{Kind: SharedAuto, MeasuredAt: at, Plan: observed.Plan, Buckets: []SharedBucket{}, FreeBucket: observed.FreeBucket}
 	for _, b := range observed.Buckets {
 		if pool == "devin" && devinFreeTag(b) {
 			continue
@@ -961,7 +962,7 @@ func (c Collector) ManualInputs(observations []Observation, local ManualStore) M
 	if c.sharedSource() == nil {
 		return local
 	}
-	out := ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}
+	out := newManualStore()
 	for _, o := range observations {
 		if o.Degraded {
 			continue
@@ -996,7 +997,7 @@ func (c Collector) AddManual(ctx context.Context, m ManualObservation, ttl time.
 		reset, _ := ParseTime(m.ResetsAt)
 		b.ResetsAt = &reset
 	}
-	x := SharedObservation{Kind: "manual", Window: m.Window, MeasuredAt: at, ExpiresAt: &expiry, Buckets: []SharedBucket{b}}
+	x := SharedObservation{Kind: SharedManual, Window: m.Window, MeasuredAt: at, ExpiresAt: &expiry, Buckets: []SharedBucket{b}}
 	err = c.withQuotaLease(ctx, source, key, func(holder string) error { return source.Publish(ctx, key, holder, x) })
 	return m, err
 }
@@ -1029,7 +1030,7 @@ func (c Collector) ReadManual(ctx context.Context) (ManualStore, error) {
 	if source == nil {
 		return LoadManual()
 	}
-	out := ManualStore{Schema: "pacelever.manual.v1", History: []ManualObservation{}, Latest: map[string]string{}}
+	out := newManualStore()
 	for _, pool := range KnownPools() {
 		key, _ := c.accountKey(pool)
 		if key == "" {

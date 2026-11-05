@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 )
@@ -56,7 +58,10 @@ func loadSnapshots(ownPath string) (map[string]CacheEntry, error) {
 		}
 		return nil, e
 	}
-	for pool, data := range raw {
+	// Pools are read in name order so a corrupt entry is reported the same way
+	// on every run.
+	for _, pool := range slices.Sorted(maps.Keys(raw)) {
+		data := raw[pool]
 		if !knownPool(pool) {
 			continue
 		}
@@ -90,7 +95,8 @@ func (c *CacheEntry) UnmarshalJSON(data []byte) error {
 	if len(failed) > 0 && string(failed) != "null" {
 		var message string
 		if json.Unmarshal(failed, &message) == nil {
-			value.LastError = &Observation{Error: message, ErrorKind: ErrKindLegacyFailure}
+			value.LastError = &Observation{}
+			value.LastError.fail(ErrKindLegacyFailure, message)
 		} else {
 			var observation Observation
 			if json.Unmarshal(failed, &observation) != nil {

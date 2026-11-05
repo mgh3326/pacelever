@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -277,7 +276,7 @@ func (a *App) run(ctx context.Context, v args) (int, error) {
 				return 0, a.json(map[string]any{"grade": grade, "rows": rows, "catalog": c.Info})
 			}
 			for _, r := range rows {
-				if v.flags["hide-excluded"] && r.Kind == "excluded" {
+				if v.flags["hide-excluded"] && r.Kind == pl.RecommendExcluded {
 					continue
 				}
 				fmt.Fprintf(a.Out, "%s %-3s %-32s pool=%s %s\n", r.Kind, r.Grade, r.LaunchSpelling(), r.Pool, r.Promotion)
@@ -381,22 +380,29 @@ func statusPayload(in pl.Inputs) map[string]any {
 		data, _ := json.Marshal(o)
 		row := map[string]any{}
 		_ = json.Unmarshal(data, &row)
-		row["status"] = "ok"
+		row["status"] = statusOK
 		if o.Error != "" || o.Warning != "" || o.Stale {
-			row["status"] = "degraded"
+			row["status"] = statusDegraded
 		}
 		if credit, ok := in.CreditStatus(observation.ID); ok {
 			row["credit"] = credit
 			if credit.Expired || credit.Exhausted {
-				row["status"] = "exhausted"
-			} else if credit.Stale && row["status"] == "ok" {
-				row["status"] = "degraded"
+				row["status"] = statusExhausted
+			} else if credit.Stale && row["status"] == statusOK {
+				row["status"] = statusDegraded
 			}
 		}
 		rows = append(rows, row)
 	}
-	return map[string]any{"schema": "scopefuel.v1", "generated_at": in.Now.Format(time.RFC3339Nano), "providers": rows}
+	return map[string]any{"schema": pl.SchemaQuota, "generated_at": in.Now.Format(time.RFC3339Nano), "providers": rows}
 }
+
+// Provider row status in the quota summary JSON.
+const (
+	statusOK        = "ok"
+	statusDegraded  = "degraded"
+	statusExhausted = "exhausted"
+)
 
 // exitAlert is the status exit when --exit-code-on finds a degraded, warning or
 // critical provider. Every other exit uses the pl gate vocabulary.
@@ -501,7 +507,7 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 	record := map[string]any{}
 	data, _ := json.Marshal(d)
 	_ = json.Unmarshal(data, &record)
-	record["schema"] = "scopefuel.gate.v1"
+	record["schema"] = pl.SchemaGate
 	record["generated_at"] = in.Now.Format(time.RFC3339Nano)
 	if key != "" {
 		record["account_key"] = key
@@ -582,14 +588,14 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 	return d.ExitCode, nil
 }
 func (a *App) herdr(ctx context.Context) (int, error) {
-	event, e := pl.ParseHerdrEvent(os.Getenv("HERDR_PLUGIN_EVENT_JSON"))
+	event, e := pl.ParseHerdrEvent(pl.FirstEnv("HERDR_PLUGIN_EVENT_JSON"))
 	if e != nil {
 		return pl.Invalid, e
 	}
 	if event.PaneID == "" || event.Provider == "" {
 		return 0, nil
 	}
-	base := os.Getenv("HERDR_PLUGIN_STATE_DIR")
+	base := pl.FirstEnv("HERDR_PLUGIN_STATE_DIR")
 	if base == "" {
 		base = filepath.Join(pl.CacheDir(), "herdr")
 	}
@@ -602,7 +608,7 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 			Label string `json:"label"`
 		}
 		if pl.ReadJSON(path, &state) == nil {
-			if at, e := pl.ParseTime(state.At); e == nil && a.now().Sub(at) >= 0 && a.now().Sub(at) < time.Minute {
+			if at, e := pl.ParseTime(state.At); e == nil && pl.FreshWithin(a.now(), at, time.Minute) {
 				label = state.Label
 				return nil
 			}
@@ -640,7 +646,7 @@ func (a *App) herdr(ctx context.Context) (int, error) {
 	if err != nil {
 		return pl.Invalid, err
 	}
-	binary := os.Getenv("HERDR_BIN_PATH")
+	binary := pl.FirstEnv("HERDR_BIN_PATH")
 	if binary == "" {
 		binary = "herdr"
 	}

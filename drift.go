@@ -58,7 +58,7 @@ func VerifyModels(ctx context.Context, rows []ServedModel, probe func(context.Co
 }
 func ProbeServedModel(ctx context.Context, slug string) (string, error) {
 	home, _ := os.UserHomeDir()
-	token := os.Getenv("CLINE_API_KEY")
+	token := FirstEnv("CLINE_API_KEY")
 	if token == "" {
 		path := FirstEnv("PACELEVER_OPENCODE_AUTH")
 		if path == "" {
@@ -119,7 +119,7 @@ func StaleBuildWarning(ctx context.Context, commit string, client HTTPDoer) stri
 	path := filepath.Join(CacheDir(), "stale-build.json")
 	var cache staleState
 	if ReadJSON(path, &cache) == nil && cache.Commit == commit {
-		if at, e := ParseTime(cache.CheckedAt); e == nil && time.Since(at) >= 0 && time.Since(at) < time.Hour {
+		if at, e := ParseTime(cache.CheckedAt); e == nil && FreshWithin(ClockNow(nil), at, time.Hour) {
 			return cache.Warning
 		}
 	}

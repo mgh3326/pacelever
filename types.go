@@ -203,6 +203,13 @@ func ClockNow(now func() time.Time) time.Time {
 	return time.Now().UTC()
 }
 
+// FreshWithin reports whether a stamp taken at is no older than ttl at now. A stamp
+// from the future is not fresh: a clock moved backwards must not extend it.
+func FreshWithin(now, at time.Time, ttl time.Duration) bool {
+	age := now.Sub(at)
+	return age >= 0 && age < ttl
+}
+
 // clockFunc is ClockNow as a never-nil clock, for code that passes one on.
 func clockFunc(now func() time.Time) func() time.Time {
 	return func() time.Time { return ClockNow(now) }
