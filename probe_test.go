@@ -66,8 +66,8 @@ func helperBinary(t *testing.T, mode string) string {
 }
 func waitFile(t *testing.T, path string) {
 	t.Helper()
-	until := time.Now().Add(5 * time.Second)
-	for time.Now().Before(until) {
+	until := time.Now().Add(5 * time.Second) // wall-clock: pacing
+	for time.Now().Before(until) {           // wall-clock: pacing
 		if _, e := os.Stat(path); e == nil {
 			return
 		}
@@ -131,8 +131,8 @@ func TestParentDeathWatchdog(t *testing.T) {
 	defer syscall.Kill(-pid, syscall.SIGKILL)
 	_ = owner.Process.Kill()
 	_ = owner.Wait()
-	until := time.Now().Add(3 * time.Second)
-	for time.Now().Before(until) {
+	until := time.Now().Add(3 * time.Second) // wall-clock: pacing
+	for time.Now().Before(until) {           // wall-clock: pacing
 		if syscall.Kill(pid, 0) != nil {
 			return
 		}

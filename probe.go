@@ -148,7 +148,7 @@ func (p PTYProvider) screen(ctx context.Context) (string, error) {
 	cmd := exec.Command(binary, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "NO_COLOR=1")
-	for _, key := range []string{"GROK_HOME", "KIMI_CODE_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"} {
+	for _, key := range homeSelectors() {
 		if value := p.Env[key]; value != "" {
 			cmd.Env = append(cmd.Env, key+"="+value)
 		}
@@ -199,7 +199,7 @@ func (p PTYProvider) screen(ctx context.Context) (string, error) {
 	}()
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
-	started := time.Now()
+	started := time.Now() // wall-clock: pacing
 	typed := false
 	submitted := false
 	typedAt := time.Time{}
@@ -219,7 +219,7 @@ func (p PTYProvider) screen(ctx context.Context) (string, error) {
 				return "", fmt.Errorf("probe exited before complete usage panel stage=%s", stage)
 			}
 			_, _ = out.Write(chunk)
-			lastChange = time.Now()
+			lastChange = time.Now() // wall-clock: pacing
 			stage = "no-prompt"
 			if submitted {
 				stage = "unparsed"
@@ -235,23 +235,23 @@ func (p PTYProvider) screen(ctx context.Context) (string, error) {
 				return "", fmt.Errorf("probe requires workspace trust stage=trust-prompt")
 			}
 			ready := strings.Contains(clean, "❯") || strings.Contains(clean, "›") || strings.Contains(clean, "> ") || strings.Contains(clean, "Shift+Tab") || p.ID == "kiro"
-			if !typed && ready && time.Since(started) > 400*time.Millisecond {
+			if !typed && ready && time.Since(started) > 400*time.Millisecond { // wall-clock: pacing
 				if _, e = terminal.Write([]byte("/usage")); e != nil {
 					return "", fmt.Errorf("probe input failed")
 				}
 				typed = true
-				typedAt = time.Now()
+				typedAt = time.Now() // wall-clock: pacing
 				stage = "no-panel"
 			}
 			// Input text and Enter must never share a write. Wait for the terminal
 			// echo or a bounded input-settle delay; banner mentions do not count.
-			if typed && !submitted && time.Since(typedAt) >= 500*time.Millisecond {
+			if typed && !submitted && time.Since(typedAt) >= 500*time.Millisecond { // wall-clock: pacing
 				if _, e = terminal.Write([]byte("\r")); e != nil {
 					return "", fmt.Errorf("probe submit failed")
 				}
 				submitted = true
 			}
-			if submitted && time.Since(lastChange) > 250*time.Millisecond {
+			if submitted && time.Since(lastChange) > 250*time.Millisecond { // wall-clock: pacing
 				if parsed := ParseScreen(p.ID, out.String(), ClockNow(p.Now)); parsed.Error == "" {
 					return out.String(), nil
 				}
@@ -318,7 +318,7 @@ func StartRefresh(pool string) error {
 			StartedAt string `json:"started_at"`
 		}
 		if ReadJSON(pidPath, &active) == nil && active.PID > 1 {
-			if at, e := ParseTime(active.StartedAt); e == nil && time.Since(at) >= 0 && time.Since(at) < 2*time.Minute && syscall.Kill(active.PID, 0) == nil {
+			if at, e := ParseTime(active.StartedAt); e == nil && FreshWithin(ClockNow(nil), at, 2*time.Minute) && syscall.Kill(active.PID, 0) == nil {
 				return nil
 			}
 		}

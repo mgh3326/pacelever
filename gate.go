@@ -72,7 +72,7 @@ func Gate(in Inputs, req Request) Decision {
 	d := gate(in, req)
 	if !d.OK && d.Grade != nil && d.ExitCode != RoleDenied && d.ExitCode != Unsubscribed {
 		for _, r := range Recommend(in, *d.Grade, req.Role, req.Area) {
-			if r.Profile != req.Profile && r.Kind == "candidate" {
+			if r.Profile != req.Profile && r.Kind == RecommendCandidate {
 				d.Alternatives = append(d.Alternatives, r.LaunchSpelling())
 			}
 		}
@@ -456,9 +456,9 @@ func recommendBase(in Inputs, grade, role, area string) []Recommendation {
 			req.Role = "worker"
 		}
 		d := gate(in, req)
-		r := Recommendation{Profile: row.Profile, Effort: row.Effort, Grade: grade, Pool: row.Pool, Family: row.Family, Billing: row.Billing, Kind: "candidate", Reason: d.Reason, UsedPct: d.UsedPct, priority: 2}
+		r := Recommendation{Profile: row.Profile, Effort: row.Effort, Grade: grade, Pool: row.Pool, Family: row.Family, Billing: row.Billing, Kind: RecommendCandidate, Reason: d.Reason, UsedPct: d.UsedPct, priority: 2}
 		if !d.OK {
-			r.Kind = "excluded"
+			r.Kind = RecommendExcluded
 			r.priority = 9
 		}
 		p := in.Config.Pool(row.Pool, now)
@@ -505,7 +505,7 @@ func recommendBase(in Inputs, grade, role, area string) []Recommendation {
 					r.Reason += " area preference: " + ex.Reason
 				}
 				if ex.Action == "exclude" {
-					r.Kind = "excluded"
+					r.Kind = RecommendExcluded
 					r.priority = 9
 					r.Reason = "area exclusion: " + ex.Reason
 				}

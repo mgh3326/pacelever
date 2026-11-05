@@ -13,7 +13,7 @@ import (
 
 func TestManualCreditFlags(t *testing.T) {
 	isolated(t)
-	now := time.Now().UTC()
+	now := pl.ClockNow(nil)
 	expires := now.Add(10 * 24 * time.Hour).Format(time.RFC3339)
 	var out, err bytes.Buffer
 	code := Run(context.Background(), []string{"manual", "set", "--pool", "anthropic-api", "--credit-balance", "150", "--credit-total", "200", "--expires", expires}, &out, &err, strings.NewReader(""), "dev", "unknown")
@@ -64,9 +64,9 @@ func TestManualCreditFlags(t *testing.T) {
 
 func TestManualCreditLegacyFlags(t *testing.T) {
 	isolated(t)
-	expires := time.Now().UTC().Add(5 * 24 * time.Hour).Format("2006-01-02")
+	expires := pl.ClockNow(nil).Add(5 * 24 * time.Hour).Format("2006-01-02")
 	var out, err bytes.Buffer
-	code := Run(context.Background(), []string{"manual", "set", "anthropic-api", "--window", "credit", "--remaining", "20", "--total", "50", "--expires-on", expires, "--measured-at", time.Now().UTC().Format(time.RFC3339), "--reason", "console"}, &out, &err, strings.NewReader(""), "dev", "unknown")
+	code := Run(context.Background(), []string{"manual", "set", "anthropic-api", "--window", "credit", "--remaining", "20", "--total", "50", "--expires-on", expires, "--measured-at", pl.ClockNow(nil).Format(time.RFC3339), "--reason", "console"}, &out, &err, strings.NewReader(""), "dev", "unknown")
 	if code != 0 {
 		t.Fatalf("legacy credit form %d: %s", code, err.String())
 	}
@@ -79,7 +79,7 @@ func TestManualCreditLegacyFlags(t *testing.T) {
 // The OpenAI grant records like the Anthropic credit and shows its own row.
 func TestManualCreditOpenAIPool(t *testing.T) {
 	isolated(t)
-	now := time.Now().UTC()
+	now := pl.ClockNow(nil)
 	expires := now.Add(16 * 24 * time.Hour).Format(time.RFC3339)
 	var out, err bytes.Buffer
 	code := Run(context.Background(), []string{"manual", "set", "--pool", "openai-api", "--credit-balance", "64.92", "--credit-total", "65", "--expires", expires}, &out, &err, strings.NewReader(""), "dev", "unknown")

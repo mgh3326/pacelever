@@ -71,10 +71,10 @@ func (f *fakeHK) Lease(ctx context.Context, key, holder string, ttl int) (Shared
 	if f.fail == "lease" {
 		return SharedLease{}, errors.New("offline")
 	}
-	acquired := f.holder == "" || !f.expires.After(time.Now()) || f.holder == holder
+	acquired := f.holder == "" || !f.expires.After(time.Now()) || f.holder == holder // wall-clock: pacing
 	if acquired {
 		f.holder = holder
-		f.expires = time.Now().Add(time.Duration(ttl) * time.Second)
+		f.expires = time.Now().Add(time.Duration(ttl) * time.Second) // wall-clock: pacing
 	}
 	return SharedLease{Holder: f.holder, ExpiresAt: f.expires, Acquired: acquired}, nil
 }
@@ -82,7 +82,7 @@ func (f *fakeHK) Publish(ctx context.Context, key, holder string, x SharedObserv
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "publish")
-	if f.fail == "publish" || f.holder != holder || !f.expires.After(time.Now()) {
+	if f.fail == "publish" || f.holder != holder || !f.expires.After(time.Now()) { // wall-clock: pacing
 		return errors.New("refused")
 	}
 	f.published++
@@ -134,7 +134,7 @@ func collectShared(t *testing.T, c Collector) Observation {
 	return out[0]
 }
 func TestSharedQuotaFreshBeforeProbe(t *testing.T) {
-	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now().Add(-time.Minute))}}
+	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(ClockNow(nil).Add(-time.Minute))}}
 	c := sharedCollector(t, f)
 	c.NoCache = true
 	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation { t.Fatal("fresh hk triggered probe"); return Observation{} })
@@ -191,12 +191,12 @@ func TestSharedQuotaFleetSingleProbe(t *testing.T) {
 		t.Fatalf("probes=%d published=%d holder=%s", probes.Load(), f.published, f.holder)
 	}
 	// Every logged-in host records presence: one prober plus five shared readers.
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(2 * time.Second) // wall-clock: pacing
 	for {
 		f.mu.Lock()
 		n := len(f.presence)
 		f.mu.Unlock()
-		if n == 6 || time.Now().After(deadline) {
+		if n == 6 || time.Now().After(deadline) { // wall-clock: pacing
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -221,7 +221,7 @@ func TestSharedQuotaFleetSingleProbe(t *testing.T) {
 // A logged-in host that reads a fresh shared observation still publishes
 // presence, so placement sees hosts that never probe.
 func TestPresencePublishedOnSharedRead(t *testing.T) {
-	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now())}, presenceDone: make(chan struct{}, 1)}
+	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(ClockNow(nil))}, presenceDone: make(chan struct{}, 1)}
 	c := sharedCollector(t, f)
 	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation { t.Fatal("fresh hk triggered probe"); return Observation{} })
 	o := collectShared(t, c)
@@ -243,7 +243,7 @@ func TestPresencePublishedOnSharedRead(t *testing.T) {
 // A host whose local identity does not resolve to the measured key never
 // publishes presence for it, even when it reads fresh shared data.
 func TestPresenceSkippedWhenNotLoggedIn(t *testing.T) {
-	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now())}, presenceDone: make(chan struct{}, 1)}
+	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(ClockNow(nil))}, presenceDone: make(chan struct{}, 1)}
 	c := sharedCollector(t, f)
 	c.Config.Quota.MeasurableAccounts = nil
 	c.Providers["grok"] = ProviderFunc(func(context.Context) Observation { t.Fatal("read-only host probed"); return Observation{} })
@@ -262,7 +262,7 @@ func TestPresenceSkippedWhenNotLoggedIn(t *testing.T) {
 // record survives across CLI runs via the cache dir.
 func TestPresenceRateLimitAcrossRuns(t *testing.T) {
 	dir := t.TempDir()
-	now := time.Now().UTC()
+	now := ClockNow(nil)
 	f := &fakeHK{onRead: func(int) *SharedObservation { return sampleShared(now) }, presenceDone: make(chan struct{}, 2)}
 	run := func() Observation {
 		c := sharedCollector(t, f)
@@ -336,7 +336,7 @@ func TestSharedQuotaRereadAndReadOnly(t *testing.T) {
 	for _, readOnly := range []bool{false, true} {
 		f := &fakeHK{onRead: func(n int) *SharedObservation {
 			if n == 2 {
-				return sampleShared(time.Now())
+				return sampleShared(ClockNow(nil))
 			}
 			return nil
 		}}
@@ -508,7 +508,7 @@ func TestSharedQuotaOtherFailuresDoNotBackoff(t *testing.T) {
 func TestSharedQuotaManualFleet(t *testing.T) {
 	f := &fakeHK{}
 	writer := sharedCollector(t, f)
-	now := time.Now().UTC()
+	now := ClockNow(nil)
 	m := ManualObservation{Pool: "grok", Window: "7d", UsedPct: Pct(33), MeasuredAt: now.Format(time.RFC3339Nano), Reason: "local audit note"}
 	if _, e := writer.AddManual(context.Background(), m, time.Hour, now); e != nil {
 		t.Fatal(e)
@@ -580,7 +580,7 @@ func TestSharedQuotaHTTPWire(t *testing.T) {
 		case "GET":
 			_ = json.NewEncoder(w).Encode(SharedLatest{})
 		case "POST":
-			_ = json.NewEncoder(w).Encode(SharedLease{Holder: body["holder"].(string), Acquired: true, ExpiresAt: time.Now().Add(time.Minute)})
+			_ = json.NewEncoder(w).Encode(SharedLease{Holder: body["holder"].(string), Acquired: true, ExpiresAt: time.Now().Add(time.Minute)}) // wall-clock: pacing
 		case "DELETE":
 			w.WriteHeader(204)
 		case "PUT":
@@ -597,7 +597,7 @@ func TestSharedQuotaHTTPWire(t *testing.T) {
 	if _, e := source.Lease(ctx, sharedTestKey, holder, 120); e != nil {
 		t.Fatal(e)
 	}
-	if e := source.Publish(ctx, sharedTestKey, holder, *sampleShared(time.Now())); e != nil {
+	if e := source.Publish(ctx, sharedTestKey, holder, *sampleShared(ClockNow(nil))); e != nil {
 		t.Fatal(e)
 	}
 	if e := source.Release(ctx, sharedTestKey, holder); e != nil {
@@ -609,7 +609,7 @@ func TestSharedQuotaHTTPWire(t *testing.T) {
 }
 
 func TestSharedQuotaClockSkew(t *testing.T) {
-	now := time.Now().UTC()
+	now := ClockNow(nil)
 	key := sharedTestKey
 	if o, ok := sharedAuto(sampleShared(now.Add(20*time.Second)), "grok", key, now, 5*time.Minute, false); !ok || o.Stale || o.AgeS == nil || *o.AgeS != 0 {
 		t.Fatal("small clock skew invalidated fresh observation")
@@ -909,7 +909,7 @@ func TestPresenceAcceptsEqualExplicitHostID(t *testing.T) {
 // A configured id that is not the node's refuses presence, warns once, and
 // leaves the shared read and the verdict alone.
 func TestPresenceRefusedOnMismatch(t *testing.T) {
-	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now().Add(-time.Minute))}}
+	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(ClockNow(nil).Add(-time.Minute))}}
 	c := presenceCollector(t, f, "desktop")
 	c.NoCache = true
 	c.Config.Quota.HostID = "laptop"
@@ -933,7 +933,7 @@ func TestPresenceRefusedOnMismatch(t *testing.T) {
 // With no node env and no explicit id nothing is published, a warning is
 // recorded once, and reads still work.
 func TestPresenceNotPublishedWithoutNodeID(t *testing.T) {
-	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(time.Now().Add(-time.Minute))}}
+	f := &fakeHK{latest: SharedLatest{Observation: sampleShared(ClockNow(nil).Add(-time.Minute))}}
 	c := presenceCollector(t, f, "")
 	c.NoCache = true
 	o := collectShared(t, c)
@@ -1006,7 +1006,7 @@ func TestSharedAutoStaleKeepsUnexpiredBuckets(t *testing.T) {
 // reading marked stale, with the expired window rolled over, and the gate
 // accepts it for a pool far from its limit.
 func TestSharedQuotaStaleKeepsUnexpiredBuckets(t *testing.T) {
-	now := time.Now().UTC()
+	now := ClockNow(nil)
 	past := now.Add(-time.Hour)
 	future := now.Add(120 * time.Hour)
 	f := &fakeHK{latest: SharedLatest{Observation: &SharedObservation{Kind: "auto", MeasuredAt: now.Add(-2 * time.Hour), Buckets: []SharedBucket{
@@ -1097,7 +1097,7 @@ func TestSharedQuotaSkipsUnmeasuredBucket(t *testing.T) {
 // holder's lease expires, then taken over: a failed or killed measurement
 // cannot pin the account on "pending".
 func TestSharedQuotaDeadPublisherTakenOver(t *testing.T) {
-	f := &fakeHK{holder: "dead-host", expires: time.Now().Add(150 * time.Millisecond)}
+	f := &fakeHK{holder: "dead-host", expires: time.Now().Add(150 * time.Millisecond)} // wall-clock: pacing
 	c := sharedCollector(t, f)
 	o := collectShared(t, c)
 	if o.Stale || o.Degraded || o.Error != "" || len(o.Buckets) != 1 || f.published != 1 || f.holder != "" {
@@ -1108,10 +1108,10 @@ func TestSharedQuotaDeadPublisherTakenOver(t *testing.T) {
 // While the lease is contended the waiter polls until the in-flight
 // publication lands instead of reporting pending after one short wait.
 func TestSharedQuotaMidWindowPublishServed(t *testing.T) {
-	f := &fakeHK{holder: "busy-host", expires: time.Now().Add(2 * time.Second)}
+	f := &fakeHK{holder: "busy-host", expires: time.Now().Add(2 * time.Second)} // wall-clock: pacing
 	f.onRead = func(n int) *SharedObservation {
 		if n >= 3 {
-			return sampleShared(time.Now())
+			return sampleShared(ClockNow(nil))
 		}
 		return nil
 	}
@@ -1149,7 +1149,7 @@ func (l leaseDeniedHK) Release(ctx context.Context, key, holder string) error {
 func TestSharedQuotaClosedWindowReportsFailed(t *testing.T) {
 	f := &fakeHK{}
 	c := sharedCollector(t, f)
-	c.Shared = leaseDeniedHK{inner: f, deadline: time.Now().Add(50 * time.Millisecond)}
+	c.Shared = leaseDeniedHK{inner: f, deadline: time.Now().Add(50 * time.Millisecond)} // wall-clock: pacing
 	o := collectShared(t, c)
 	if o.ErrorKind != ErrKindSharedFailed || f.published != 0 {
 		t.Fatalf("closed window %+v published=%d", o, f.published)
@@ -1184,7 +1184,7 @@ func TestSharedQuotaFailedPublishReleasesLease(t *testing.T) {
 // A credit pool has no local login: a host holds it when omp is installed and
 // the shared store carries a live credit reading for the configured key.
 func TestCreditPresenceNeedsHarnessAndLiveCredit(t *testing.T) {
-	now := time.Now()
+	now := ClockNow(nil)
 	live, expired := now.Add(14*24*time.Hour), now.Add(-time.Minute)
 	reading := func(expires time.Time) []SharedObservation {
 		return []SharedObservation{{ID: 7, Kind: "manual", Window: "credit", MeasuredAt: now.Add(-time.Hour), ExpiresAt: &expires, Buckets: []SharedBucket{{Window: "credit", UsedPct: 20, Scope: ScopeAccount}}}}

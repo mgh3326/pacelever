@@ -125,7 +125,7 @@ func TestGateAccountFreeDevinPublishedAndAdmitted(t *testing.T) {
 
 func TestGateAccountStaleSameAccountRefreshesThenAdmits(t *testing.T) {
 	key := devinHost(t, refreshOrg)
-	stale := &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: time.Now().Add(-time.Hour), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketAvailable}}
+	stale := &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: pl.ClockNow(nil).Add(-time.Hour), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketAvailable}}
 	hk := &memoryHK{latest: pl.SharedLatest{Observation: stale}}
 	code, record, err := gateAccount(t, hk, []string{key}, "devin-swe2-medium", key)
 	if err != nil || code != pl.Admitted || record["account_key"] != key {
@@ -139,7 +139,7 @@ func TestGateAccountStaleSameAccountRefreshesThenAdmits(t *testing.T) {
 func TestGateAccountStaleOtherAccountStillRefused(t *testing.T) {
 	local := devinHost(t, refreshOrg)
 	other := devinKey(otherOrg)
-	stale := &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: time.Now().Add(-time.Hour), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketAvailable}}
+	stale := &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: pl.ClockNow(nil).Add(-time.Hour), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketAvailable}}
 	hk := &memoryHK{latest: pl.SharedLatest{Observation: stale}}
 	code, record, err := gateAccount(t, hk, []string{local, other}, "devin-swe2-medium", other)
 	if err == nil || code != pl.Unmeasurable || record["ok"] == true || !strings.Contains(err.Error(), "does not hold the account") {
@@ -172,7 +172,7 @@ func TestGateAccountRefreshPublishRefused(t *testing.T) {
 
 func TestGateAccountFreeStateGatesTheFreeRung(t *testing.T) {
 	key := devinHost(t, refreshOrg)
-	reset := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	reset := pl.ClockNow(nil).Add(time.Hour).UTC().Truncate(time.Second)
 	for _, tc := range []struct {
 		name string
 		free *pl.FreeBucketState
@@ -183,7 +183,7 @@ func TestGateAccountFreeStateGatesTheFreeRung(t *testing.T) {
 		{"unknown", &pl.FreeBucketState{State: pl.FreeBucketUnknown}, pl.Unmeasurable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fresh := &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: time.Now(), Buckets: []pl.SharedBucket{}, FreeBucket: tc.free}
+			fresh := &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: pl.ClockNow(nil), Buckets: []pl.SharedBucket{}, FreeBucket: tc.free}
 			hk := &memoryHK{latest: pl.SharedLatest{Observation: fresh}}
 			code, record, _ := gateAccount(t, hk, nil, "devin-swe2-medium", key)
 			if code != tc.want || (tc.want != pl.Admitted && record["ok"] == true) {
@@ -199,10 +199,10 @@ func TestGateAccountMalformedReadingIsNotRefreshed(t *testing.T) {
 		name string
 		x    *pl.SharedObservation
 	}{
-		{"exhausted without reset", &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: time.Now(), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketExhausted}}},
-		{"invalid percentage", &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: time.Now().Add(-time.Hour), Buckets: []pl.SharedBucket{{Window: "7d", UsedPct: 101, Scope: "account"}}}},
-		{"future measurement", &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: time.Now().Add(time.Hour), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketAvailable}}},
-		{"manual kind", &pl.SharedObservation{ID: 1, Kind: "manual", MeasuredAt: time.Now(), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketAvailable}}},
+		{"exhausted without reset", &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: pl.ClockNow(nil), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketExhausted}}},
+		{"invalid percentage", &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: pl.ClockNow(nil).Add(-time.Hour), Buckets: []pl.SharedBucket{{Window: "7d", UsedPct: 101, Scope: "account"}}}},
+		{"future measurement", &pl.SharedObservation{ID: 1, Kind: "auto", MeasuredAt: pl.ClockNow(nil).Add(time.Hour), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketAvailable}}},
+		{"manual kind", &pl.SharedObservation{ID: 1, Kind: "manual", MeasuredAt: pl.ClockNow(nil), Buckets: []pl.SharedBucket{}, FreeBucket: &pl.FreeBucketState{State: pl.FreeBucketAvailable}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hk := &memoryHK{latest: pl.SharedLatest{Observation: tc.x}}

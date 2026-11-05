@@ -96,7 +96,7 @@ func TestLaunchCLIGoldens(t *testing.T) {
 }
 func TestGateStreamsAndAudit(t *testing.T) {
 	isolated(t)
-	now := time.Now().UTC()
+	now := pl.ClockNow(nil)
 	var out, err bytes.Buffer
 	app := App{Out: &out, Err: &err, Commit: "unknown", Bench: pl.BenchClient{}, Collector: pl.Collector{Providers: map[string]pl.Provider{"claude": pl.ProviderFunc(func(context.Context) pl.Observation {
 		return pl.Observation{ID: "claude", Buckets: []pl.Bucket{{Label: "7d", Window: "7d", UsedPct: pl.Pct(10), Scope: pl.Scope{Kind: "account"}, ResetsAt: now.Add(5 * 24 * time.Hour).Format(time.RFC3339)}}}
@@ -123,7 +123,7 @@ func TestGateStreamsAndAudit(t *testing.T) {
 	}
 }
 func TestStatusProviderContract(t *testing.T) {
-	now := time.Now().UTC()
+	now := pl.ClockNow(nil)
 	payload := statusPayload(pl.Inputs{Now: now, Observations: []pl.Observation{{ID: "claude", Source: "fixture", Buckets: []pl.Bucket{{Window: "7d", UsedPct: pl.Pct(10)}}}}})
 	data, _ := json.Marshal(payload)
 	var parsed struct {
@@ -169,7 +169,7 @@ func TestGateSwe2FreeBucket(t *testing.T) {
 		return err.String()
 	}
 	// An unreadable reset holds the rung for the conservative default.
-	now := time.Now().UTC()
+	now := pl.ClockNow(nil)
 	log := observe("--unparsed", "--observed", now.Format(time.RFC3339), "--rung", "devin-swe2", "--source", "job:fixture")
 	hold := now.Add(pl.UnknownResetHold).Format(time.RFC3339)
 	if !strings.Contains(log, "reset time unknown") || !strings.Contains(log, hold) {

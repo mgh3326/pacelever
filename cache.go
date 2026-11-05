@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 )
@@ -56,7 +58,10 @@ func loadSnapshots(ownPath string) (map[string]CacheEntry, error) {
 		}
 		return nil, e
 	}
-	for pool, data := range raw {
+	// Pools are read in name order so a corrupt entry is reported the same way
+	// on every run.
+	for _, pool := range slices.Sorted(maps.Keys(raw)) {
+		data := raw[pool]
 		if !knownPool(pool) {
 			continue
 		}
@@ -90,7 +95,8 @@ func (c *CacheEntry) UnmarshalJSON(data []byte) error {
 	if len(failed) > 0 && string(failed) != "null" {
 		var message string
 		if json.Unmarshal(failed, &message) == nil {
-			value.LastError = &Observation{Error: message, ErrorKind: ErrKindLegacyFailure}
+			value.LastError = &Observation{}
+			value.LastError.fail(ErrKindLegacyFailure, message)
 		} else {
 			var observation Observation
 			if json.Unmarshal(failed, &observation) != nil {
@@ -140,17 +146,6 @@ func updateSnapshot(ownPath, pool string, obs Observation, now time.Time, previo
 		entries[pool] = entry
 		return WriteJSON(ownPath, entries)
 	})
-}
-func ttlFor(pool string) time.Duration {
-	switch pool {
-	case "claude":
-		return 900 * time.Second
-	case "agy":
-		return 300 * time.Second
-	case "devin", "commandcode":
-		return 180 * time.Second
-	}
-	return 60 * time.Second
 }
 func (c Collector) Collect(ctx context.Context, pools []string) ([]Observation, error) {
 	own := c.CachePath
@@ -229,7 +224,7 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 	}
 	ttl := c.TTL
 	if ttl <= 0 {
-		ttl = ttlFor(pool)
+		ttl = traitsOf(pool).cacheTTL()
 	}
 	age := float64(now.UnixMilli())/1000 - entry.FetchedAt
 	if !c.NoCache && entry.FetchedAt > 0 && age >= 0 && age <= ttl.Seconds() {

@@ -200,7 +200,24 @@ func ClockNow(now func() time.Time) time.Time {
 	if now != nil {
 		return now()
 	}
-	return time.Now().UTC()
+	return time.Now().UTC().Add(wallOffset) // wall-clock: the one clock read
+}
+
+// wallOffset moves the wall clock that ClockNow(nil) reads. It is zero in
+// production; a test binary sets it once, before any test runs.
+var wallOffset time.Duration
+
+// SetWallClockOffset makes ClockNow(nil) read the wall clock plus d. It exists
+// so a test suite can run as if it were a later date (scripts/check.sh does,
+// via PACELEVER_TEST_CLOCK_OFFSET) and expose fixtures that would expire.
+// Call it only from TestMain, before tests start.
+func SetWallClockOffset(d time.Duration) { wallOffset = d }
+
+// FreshWithin reports whether a stamp taken at is no older than ttl at now. A stamp
+// from the future is not fresh: a clock moved backwards must not extend it.
+func FreshWithin(now, at time.Time, ttl time.Duration) bool {
+	age := now.Sub(at)
+	return age >= 0 && age < ttl
 }
 
 // clockFunc is ClockNow as a never-nil clock, for code that passes one on.

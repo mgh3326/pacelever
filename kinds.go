@@ -70,3 +70,27 @@ const (
 	BenchUnavailable = "unavailable" // nothing usable
 	BenchSnapshot    = "snapshot"    // the bundled catalog snapshot
 )
+
+// Recommendation.Kind values.
+const (
+	RecommendCandidate = "candidate" // eligible now
+	RecommendExcluded  = "excluded"  // listed with the reason it is not eligible
+)
+
+// SharedObservation.Kind values in the shared quota store.
+const (
+	SharedAuto   = "auto"   // a provider measurement
+	SharedManual = "manual" // an operator observation with an expiry
+)
+
+// Wire schema names. They are part of the compatibility contract: a reader
+// checks them and a writer stamps them, so both use these names.
+const (
+	SchemaQuota            = "scopefuel.v1"      // quota summary JSON
+	SchemaGate             = "scopefuel.gate.v1" // --gate-output audit record
+	SchemaManual           = "pacelever.manual.v1"
+	SchemaManualLegacy     = "scopefuel.manual.v1" // read-only legacy store
+	SchemaGrades           = "pacelever.grades.v1"
+	SchemaDevinFreeLimit   = "pacelever.devin-free-limit.v1"
+	SchemaCommandcodeLimit = "pacelever.commandcode-limit.v1"
+)

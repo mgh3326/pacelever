@@ -94,7 +94,7 @@ func ProposeGrades(c Catalog, reps []Rep, source string, minPasses, window int, 
 	if rate <= 0 || rate > 1 {
 		rate = 0.4
 	}
-	p := GradeProposal{Schema: "pacelever.grades.v1", Rule: "1.3", OutcomeRule: OutcomeRule, Outcomes: []RungOutcomeMetrics{}, Fingerprint: EvidenceFingerprint(c, reps), CatalogSource: c.Info.Source, RepsSource: source, MinPasses: minPasses, DemoteWindow: window, DemoteRate: rate, Changes: []GradeChange{}, Excluded: hydrationErrors}
+	p := GradeProposal{Schema: SchemaGrades, Rule: "1.3", OutcomeRule: OutcomeRule, Outcomes: []RungOutcomeMetrics{}, Fingerprint: EvidenceFingerprint(c, reps), CatalogSource: c.Info.Source, RepsSource: source, MinPasses: minPasses, DemoteWindow: window, DemoteRate: rate, Changes: []GradeChange{}, Excluded: hydrationErrors}
 	resolvedProfiles, resolvedEfforts := make([]string, len(reps)), make([]string, len(reps))
 	for i, r := range reps {
 		resolvedProfiles[i], resolvedEfforts[i], _ = ResolveRepRung(c, r)
@@ -225,7 +225,7 @@ func ProposeGrades(c Catalog, reps []Rep, source string, minPasses, window int, 
 	return p
 }
 func ApplyGrades(p GradeProposal, c Catalog, reps []Rep, only map[string]bool, decidedBy, ref, allowDegraded string, now time.Time) ([]CatalogRow, error) {
-	if p.Schema != "pacelever.grades.v1" || p.Rule != "1.3" || p.OutcomeRule != OutcomeRule || p.Fingerprint != EvidenceFingerprint(c, reps) {
+	if p.Schema != SchemaGrades || p.Rule != "1.3" || p.OutcomeRule != OutcomeRule || p.Fingerprint != EvidenceFingerprint(c, reps) {
 		return nil, fmt.Errorf("proposal evidence changed; regenerate proposal")
 	}
 	if (c.Info.Stale || c.Info.Source == BenchSnapshot || p.RepsSource == BenchLocal || p.RepsSource == BenchCacheStale || strings.Contains(p.RepsSource, "truncated")) && strings.TrimSpace(allowDegraded) == "" {

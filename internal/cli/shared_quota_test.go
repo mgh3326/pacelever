@@ -15,7 +15,7 @@ import (
 
 func TestSharedQuotaManualOnlyStatus(t *testing.T) {
 	isolated(t)
-	now := time.Now().UTC()
+	now := pl.ClockNow(nil)
 	expiry := now.Add(time.Hour)
 	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" || !strings.HasSuffix(r.URL.Path, "/latest") {

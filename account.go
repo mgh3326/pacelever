@@ -49,13 +49,7 @@ func localAccountFP(pool string, selectors map[string]string) string {
 
 // codexHome is the Codex CLI home: the selector, then CODEX_HOME, then ~/.codex.
 func codexHome(home string, selectors map[string]string) string {
-	if dir := selectors["CODEX_HOME"]; dir != "" {
-		return dir
-	}
-	if dir := os.Getenv("CODEX_HOME"); dir != "" {
-		return dir
-	}
-	return filepath.Join(home, ".codex")
+	return cliHome("codex", home, selectors)
 }
 
 // codexTokens is the token block of the Codex login file.

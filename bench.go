@@ -37,7 +37,7 @@ func NewBenchClient(cfg Config) BenchClient {
 	envOverride := FirstEnv("HANDOFFKEEP_URL", "HANDOFFKEEP_TOKEN") != ""
 	values := map[string]string{}
 	if !envOverride {
-		path := os.Getenv("HANDOFFKEEP_CONFIG")
+		path := FirstEnv("HANDOFFKEEP_CONFIG")
 		if path == "" {
 			path = filepath.Join(configBase(), "handoffkeep", "config.env")
 		}
@@ -54,7 +54,7 @@ func NewBenchClient(cfg Config) BenchClient {
 		}
 	}
 	read := func(k string) string {
-		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+		if v := FirstEnv(k); v != "" {
 			return v
 		}
 		if !envOverride {

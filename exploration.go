@@ -287,7 +287,7 @@ func RecommendFor(in Inputs, req RecommendationRequest) []Recommendation {
 	}
 	normalIndex := -1
 	for i, r := range rows {
-		if r.Kind == "candidate" {
+		if r.Kind == RecommendCandidate {
 			normalIndex = i
 			break
 		}
@@ -313,7 +313,7 @@ func RecommendFor(in Inputs, req RecommendationRequest) []Recommendation {
 	if selected.Label.Arm != "downshift" {
 		return rows
 	}
-	candidate := Recommendation{Profile: selected.Profile, Effort: selected.Effort, Grade: selected.Grade, Pool: selected.Pool, Family: selected.Family, Billing: selected.Billing, Kind: "candidate", Label: selected.Label, Exploration: selected.Exploration, Reason: "exploration offer: one-step downshift", Promotion: "experiment " + *selected.Label.ExperimentID + " downshift"}
+	candidate := Recommendation{Profile: selected.Profile, Effort: selected.Effort, Grade: selected.Grade, Pool: selected.Pool, Family: selected.Family, Billing: selected.Billing, Kind: RecommendCandidate, Label: selected.Label, Exploration: selected.Exploration, Reason: "exploration offer: one-step downshift", Promotion: "experiment " + *selected.Label.ExperimentID + " downshift"}
 	remaining := make([]Recommendation, 0, len(rows)+1)
 	remaining = append(remaining, candidate)
 	for _, row := range rows {
