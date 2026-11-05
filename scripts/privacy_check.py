@@ -10,6 +10,15 @@ patterns = {
     "credential": re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|-----BEGIN (?:RSA |OPENSSH )?PRIVATE KEY-----)"),
     "personal filesystem path": re.compile(r"/(?:Users|home)/[A-Za-z0-9_.-]+/"),
 }
+# Placeholder values that name no one: RFC 2606/6761 reserved domains for
+# email, and one- or two-letter or generic user names in a path. Fixtures use
+# these so tests can exercise parsers without carrying real identities.
+reserved_email = re.compile(r"@(?:[A-Za-z0-9-]+\.)*(?:example(?:\.(?:com|net|org))?|invalid|test|localhost)\b", re.I)
+placeholder_path = re.compile(r"/(?:Users|home)/(?:[a-z]{1,2}|user|you|me|runner)/")
+allowed = {
+    "email": lambda m: reserved_email.search(m.group(0)) is not None,
+    "personal filesystem path": lambda m: placeholder_path.fullmatch(m.group(0)) is not None,
+}
 failures = []
 for name in subprocess.check_output(["git", "ls-files"], text=True).splitlines():
     try:
@@ -17,7 +26,8 @@ for name in subprocess.check_output(["git", "ls-files"], text=True).splitlines()
     except UnicodeDecodeError:
         continue
     for label, pattern in patterns.items():
-        if pattern.search(text):
+        keep = allowed.get(label, lambda m: False)
+        if any(not keep(m) for m in pattern.finditer(text)):
             failures.append(f"{name}: {label}")
 if failures:
     raise SystemExit("\n".join(failures))
