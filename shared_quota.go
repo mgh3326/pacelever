@@ -183,8 +183,7 @@ func (c Collector) accountKey(pool string) (string, bool) {
 		}
 		return pool + ":" + local, true
 	}
-	switch pool {
-	case "claude", "codex", "devin":
+	if traitsOf(pool).LocalIdentity {
 		return "", false
 	}
 	fp := c.Config.Quota.Accounts[pool]
@@ -862,7 +861,7 @@ func (c Collector) sharedOne(ctx context.Context, source ObservationSource, pool
 			return finish(fail(ErrKindAccountMismatch))
 		}
 	}
-	if (fp != "" && (kind != FPKindAccount || pool+":"+fp != key)) || (pool == "codex" || pool == "claude") && fp == "" {
+	if (fp != "" && (kind != FPKindAccount || pool+":"+fp != key)) || traitsOf(pool).RequireAccount && fp == "" {
 		return finish(fail(ErrKindAccountMismatch))
 	}
 	if pool == "devin" {

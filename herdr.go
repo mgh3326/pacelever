@@ -52,7 +52,8 @@ func ParseHerdrEvent(raw string) (HerdrEvent, error) {
 	}
 	_ = json.Unmarshal(payload, &env)
 	identity := ""
-	for _, key := range []string{"HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME", "KIMI_CODE_HOME"} {
+	// The credential id hashes these in a fixed order; see poolTable.
+	for _, key := range append([]string{"HOME"}, homeSelectors()...) {
 		if value := env[key]; value != "" {
 			identity += key + "=" + value + "|"
 			if key != "HOME" {
@@ -61,19 +62,8 @@ func ParseHerdrEvent(raw string) (HerdrEvent, error) {
 		}
 	}
 	if home := env["HOME"]; home != "" {
-		key, subdir := "", ""
-		switch e.Provider {
-		case "claude":
-			key, subdir = "CLAUDE_CONFIG_DIR", ".claude"
-		case "codex":
-			key, subdir = "CODEX_HOME", ".codex"
-		case "grok":
-			key, subdir = "GROK_HOME", ".grok"
-		case "kimi":
-			key, subdir = "KIMI_CODE_HOME", ".kimi"
-		}
-		if key != "" && e.Selectors[key] == "" {
-			e.Selectors[key] = filepath.Join(home, subdir)
+		if t := traitsOf(e.Provider); t.HomeEnv != "" && e.Selectors[t.HomeEnv] == "" {
+			e.Selectors[t.HomeEnv] = filepath.Join(home, t.HomeDir)
 		}
 	}
 	if identity != "" {

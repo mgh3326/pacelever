@@ -816,10 +816,10 @@ func TestNegativeCacheHonorsRetryAfter(t *testing.T) {
 }
 
 func TestProviderTTL(t *testing.T) {
-	if ttlFor("claude") != 900*time.Second {
+	if traitsOf("claude").cacheTTL() != 900*time.Second {
 		t.Fatal("claude TTL must be 900s")
 	}
-	if ttlFor("agy") != 300*time.Second {
+	if traitsOf("agy").cacheTTL() != 300*time.Second {
 		t.Fatal("agy TTL must be 300s")
 	}
 }

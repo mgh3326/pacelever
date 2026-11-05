@@ -148,7 +148,7 @@ func (p PTYProvider) screen(ctx context.Context) (string, error) {
 	cmd := exec.Command(binary, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "NO_COLOR=1")
-	for _, key := range []string{"GROK_HOME", "KIMI_CODE_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"} {
+	for _, key := range homeSelectors() {
 		if value := p.Env[key]; value != "" {
 			cmd.Env = append(cmd.Env, key+"="+value)
 		}

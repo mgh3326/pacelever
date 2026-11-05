@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -42,14 +41,7 @@ func (r grokRecord) refreshable() bool {
 }
 
 func grokAuthPath(home string, selectors map[string]string) string {
-	dir := selectors["GROK_HOME"]
-	if dir == "" {
-		dir = os.Getenv("GROK_HOME")
-	}
-	if dir == "" {
-		dir = filepath.Join(home, ".grok")
-	}
-	return filepath.Join(dir, "auth.json")
+	return filepath.Join(cliHome("grok", home, selectors), "auth.json")
 }
 
 func grokRecords(home string, selectors map[string]string) []grokRecord {

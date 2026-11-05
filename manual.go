@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"time"
 )
@@ -204,23 +205,7 @@ func RequiredWindows(pool, plan string, manual bool) []string {
 			return []string{"30d"}
 		}
 	}
-	switch pool {
-	case "claude", "codex", "kimi":
-		return []string{"5h", "7d"}
-	case "devin", "grok":
-		return []string{"7d"}
-	case "agy":
-		return []string{"5h", "7d"}
-	case "kiro":
-		return []string{"30d"}
-	case "clinepass":
-		return []string{"5h", "7d", "30d"}
-	case "commandcode":
-		// The HTTP windows are the measurable requirement; credits are
-		// informational for stale acceptance.
-		return []string{"5h", "7d"}
-	}
-	return nil
+	return slices.Clone(traitsOf(pool).Windows)
 }
 
 // Preserve legacy audit fields when copying history into the native store.

@@ -147,17 +147,6 @@ func updateSnapshot(ownPath, pool string, obs Observation, now time.Time, previo
 		return WriteJSON(ownPath, entries)
 	})
 }
-func ttlFor(pool string) time.Duration {
-	switch pool {
-	case "claude":
-		return 900 * time.Second
-	case "agy":
-		return 300 * time.Second
-	case "devin", "commandcode":
-		return 180 * time.Second
-	}
-	return 60 * time.Second
-}
 func (c Collector) Collect(ctx context.Context, pools []string) ([]Observation, error) {
 	own := c.CachePath
 	if own == "" {
@@ -235,7 +224,7 @@ func (c Collector) one(ctx context.Context, pool string, entry CacheEntry) Obser
 	}
 	ttl := c.TTL
 	if ttl <= 0 {
-		ttl = ttlFor(pool)
+		ttl = traitsOf(pool).cacheTTL()
 	}
 	age := float64(now.UnixMilli())/1000 - entry.FetchedAt
 	if !c.NoCache && entry.FetchedAt > 0 && age >= 0 && age <= ttl.Seconds() {
