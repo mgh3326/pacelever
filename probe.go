@@ -234,7 +234,7 @@ func (p PTYProvider) screen(ctx context.Context) (string, error) {
 			if strings.Contains(lower, "trust this folder") || strings.Contains(lower, "do you trust the contents") {
 				return "", fmt.Errorf("probe requires workspace trust stage=trust-prompt")
 			}
-			ready := strings.Contains(clean, "❯") || strings.Contains(clean, "›") || strings.Contains(clean, "> ") || strings.Contains(clean, "Shift+Tab") || p.ID == "kiro"
+			ready := strings.Contains(clean, "❯") || strings.Contains(clean, "❭") || strings.Contains(clean, "›") || strings.Contains(clean, "> ") || strings.Contains(clean, "Shift+Tab") || p.ID == "kiro"
 			if !typed && ready && time.Since(started) > 400*time.Millisecond { // wall-clock: pacing
 				if _, e = terminal.Write([]byte("/usage")); e != nil {
 					return "", fmt.Errorf("probe input failed")
