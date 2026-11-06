@@ -480,17 +480,7 @@ func (a *App) gate(ctx context.Context, v args) (int, error) {
 			d = pl.Gate(in, req)
 		}
 	} else if d.ExitCode == pl.Unmeasurable {
-		pools := []string{}
-		seen := map[string]bool{}
-		for _, r := range c.Rows {
-			if r.Profile == c.Canonical(req.Profile) || (preliminary.Grade != nil && r.Grade == *preliminary.Grade) {
-				if !seen[r.Pool] {
-					pools = append(pools, r.Pool)
-					seen[r.Pool] = true
-				}
-			}
-		}
-		in, e = a.inputs(ctx, c, pools)
+		in, e = a.inputs(ctx, c, []string{d.ProviderID})
 		if e != nil {
 			return pl.Invalid, e
 		}
