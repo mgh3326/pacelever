@@ -11,24 +11,35 @@ patterns = {
     "personal filesystem path": re.compile(r"/(?:Users|home)/[A-Za-z0-9_.-]+/"),
 }
 # Placeholder values that name no one: RFC 2606/6761 reserved domains for
-# email, and one- or two-letter or generic user names in a path. Fixtures use
-# these so tests can exercise parsers without carrying real identities.
+# email, and an explicit list of generic user names in a path (a short name can
+# be a real account, so length alone never qualifies). Fixtures use these so
+# tests can exercise parsers without carrying real identities.
 reserved_email = re.compile(r"@(?:[A-Za-z0-9-]+\.)*(?:example(?:\.(?:com|net|org))?|invalid|test|localhost)\Z", re.I)
-placeholder_path = re.compile(r"/(?:Users|home)/(?:[a-z]{1,2}|user|you|me|runner)/")
+placeholder_path = re.compile(r"/(?:Users|home)/(?:x|user|you|me|runner)/")
 allowed = {
     "email": lambda m: reserved_email.search(m.group(0)) is not None,
     "personal filesystem path": lambda m: placeholder_path.fullmatch(m.group(0)) is not None,
 }
 failures = []
-for name in subprocess.check_output(["git", "ls-files"], text=True).splitlines():
+# -z: names arrive verbatim (no core.quotePath escaping of unusual bytes).
+for name in subprocess.check_output(["git", "ls-files", "-z"], text=True).split("\0"):
+    if not name:
+        continue
     try:
         text = pathlib.Path(name).read_text()
-    except UnicodeDecodeError:
+    except (UnicodeDecodeError, FileNotFoundError):
+        # Not text, or indexed but deleted from the working tree.
         continue
     for label, pattern in patterns.items():
         keep = allowed.get(label, lambda m: False)
-        if any(not keep(m) for m in pattern.finditer(text)):
-            failures.append(f"{name}: {label}")
+        # Overlapping scan: a match's trailing '/' can start the next one
+        # (/home/me/home/<name>/), and finditer would skip that occurrence.
+        pos = 0
+        while (m := pattern.search(text, pos)) is not None:
+            if not keep(m):
+                failures.append(f"{name}: {label}")
+                break
+            pos = m.start() + 1
 if failures:
     raise SystemExit("\n".join(failures))
 print("Public-content check passed (matched values are never printed)")
