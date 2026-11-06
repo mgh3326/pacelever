@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Check tracked public artifacts without echoing matched values."""
+import os
 import pathlib
 import re
 import subprocess
@@ -21,15 +22,25 @@ allowed = {
     "personal filesystem path": lambda m: placeholder_path.fullmatch(m.group(0)) is not None,
 }
 failures = []
-# -z: names arrive verbatim (no core.quotePath escaping of unusual bytes).
-for name in subprocess.check_output(["git", "ls-files", "-z"], text=True).split("\0"):
-    if not name:
+# -z and raw bytes: names arrive verbatim (no quotePath escaping, no newline
+# translation of a \r in a name), and os.fsdecode keeps any byte sequence.
+for raw in subprocess.check_output(["git", "ls-files", "-z"]).split(b"\0"):
+    if not raw:
+        continue
+    name = os.fsdecode(raw)
+    path = pathlib.Path(name)
+    # Deleted from the working tree, a symlink (git stores only its target
+    # text) or a gitlink/directory: there is no file content to scan.
+    if path.is_symlink() or not path.is_file():
         continue
     try:
-        text = pathlib.Path(name).read_text()
-    except (UnicodeDecodeError, FileNotFoundError):
-        # Not text, or indexed but deleted from the working tree.
+        data = path.read_bytes()
+    except OSError:
+        failures.append(f"{name}: unreadable")
         continue
+    # Every needle is ASCII, so any encoding is scanned: undecodable bytes
+    # become surrogates instead of skipping the file.
+    text = data.decode("utf-8", "surrogateescape")
     for label, pattern in patterns.items():
         keep = allowed.get(label, lambda m: False)
         # Overlapping scan: a match's trailing '/' can start the next one
