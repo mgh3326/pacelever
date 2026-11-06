@@ -3,6 +3,11 @@ on:
   push:
     branches: [main]
   pull_request:
+concurrency:
+  # One group per ref: a new push to main (or to a PR branch) cancels the older
+  # run of that ref (hk:doc policy/fleet-ci-main-cancel).
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
