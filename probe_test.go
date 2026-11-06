@@ -1,6 +1,7 @@
 package pacelever
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -29,6 +30,8 @@ func TestProbeHelper(t *testing.T) {
 		_ = os.WriteFile(os.Getenv("PACELEVER_TEST_PID"), []byte(strconv.Itoa(os.Getpid())), 0600)
 		fmt.Fprint(os.Stdout, "❯ ")
 		time.Sleep(time.Minute)
+	case "devin-tui":
+		devinTUIHelper()
 	case "reaper":
 		pid, _ := strconv.Atoi(os.Getenv("PACELEVER_TEST_PGID"))
 		_ = RunReaper(pid)
@@ -37,6 +40,24 @@ func TestProbeHelper(t *testing.T) {
 		_ = p.Fetch(context.Background())
 	}
 	os.Exit(0)
+}
+
+// devinTUIHelper imitates the devin CLI: its input prompt is drawn with U+276D
+// (not U+276F) and /usage opens a panel. Invoked with stdin at EOF (the
+// `models list` call) it prints the banner and exits.
+func devinTUIHelper() {
+	fmt.Fprint(os.Stdout, "Devin CLI\r\nv3000.11.234\r\n\r\n"+
+		strings.Repeat("\u2500", 40)+"\r\n"+
+		"\u276d Ask Devin to build features, fix bugs, or work on your code\r\n"+
+		strings.Repeat("\u2500", 40)+"\r\n")
+	lines := bufio.NewScanner(os.Stdin)
+	for lines.Scan() {
+		if strings.TrimSpace(lines.Text()) != "/usage" {
+			continue
+		}
+		fmt.Fprint(os.Stdout, "Usage\r\nWeekly: 62% used \u00b7 resets in 6d 2h\r\n")
+		time.Sleep(time.Minute)
+	}
 }
 func helperGuard(pgid int) (func(), error) {
 	r, w, e := os.Pipe()
