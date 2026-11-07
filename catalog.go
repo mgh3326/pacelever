@@ -155,13 +155,8 @@ func roleCheck(req Request, row CatalogRow) error {
 	purpose := normalize(req.Purpose)
 	if credit(req.Profile) {
 		allowed := role == "worker" || role == "tester" || (role == "builder" && row.Placed && row.Gate == "default")
-		// Command Code's monthly plan may also review (operator 2026-11-06);
-		// the pi- credit rungs stay worker/tester.
-		if req.Profile == "cmd-dsflash41" && role == "reviewer" {
-			allowed = true
-		}
 		if !allowed {
-			return deny(RoleDenied, "role_restricted: credit rung requires worker/tester (cmd-dsflash41 also reviewer); placed default rungs also allow builder")
+			return deny(RoleDenied, "role_restricted: credit rung requires worker/tester; placed default rungs also allow builder")
 		}
 	}
 	if req.Profile == "codex-astra" || req.Profile == "fable" {
