@@ -9,7 +9,7 @@
 name: CI main
 on:
   push:
-    branches: [main, wk/ci-three-tiers]
+    branches: [main]
   workflow_dispatch:
 concurrency:
   # One group per ref: a newer push to main cancels the older run of that ref.
