@@ -1,0 +1,162 @@
+# Deploy stage: the heavy checks, run for the sha a successful main-stage run
+# built (workflow_run on "CI main"), or manually for any ref.
+#
+# Never cancelled: one deploy runs per repo and a newly queued head replaces an
+# older *pending* one, so a running candidate is always allowed to finish.
+# This workflow deploys, publishes, tags and pushes nothing; it only posts the
+# `deploy-ok` commit status on the candidate sha with its evidence.
+name: Deploy
+on:
+  workflow_run:
+    workflows: ["CI main"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Ref or SHA to run the deploy stage on (empty uses the dispatched ref)
+        required: false
+        default: ''
+concurrency:
+  # One deploy per repository. cancel-in-progress is false, so the newest head
+  # waits for the running deploy; only older pending runs are replaced.
+  group: deploy
+  cancel-in-progress: false
+permissions:
+  contents: read
+  statuses: write
+  actions: read
+jobs:
+  target:
+    name: target
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.ref || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve the candidate sha
+        id: resolve
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Confirm the candidate is the main-stage head
+        if: github.event_name == 'workflow_run'
+        env:
+          EXPECTED: ${{ github.event.workflow_run.head_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED"
+
+  race:
+    name: race
+    needs: target
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.target.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: true
+      # No excluded tests: the full suite is green under -race in ci.yml today.
+      - run: go test -race ./...
+
+  macos:
+    name: macos
+    needs: target
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.target.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: true
+      - run: go test . -run 'TestCommandcodeSeparateEnter|TestKilledCallerReleasesLock|TestProbeDeadlineReapsGroup|TestParentDeathWatchdog|TestLegacyBenchReader' -count=1
+
+  release:
+    name: release-build
+    needs: target
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.evidence.outputs.digest }}
+      policy_revision: ${{ steps.evidence.outputs.policy_revision }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.target.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: true
+      - name: Build the release assets
+        run: |
+          tag="v0.0.0-deploy.$GITHUB_RUN_NUMBER"
+          sh scripts/build-release.sh "$tag" dist/release
+          sh scripts/verify-release.sh "$tag" dist/release
+          cat dist/release/SHA256SUMS
+      - name: Test-install smoke
+        run: |
+          native="dist/release/pacelever-$(go env GOHOSTOS)-$(go env GOHOSTARCH)"
+          "$native" --version
+          "$native" --help >/dev/null
+      - name: Record candidate evidence
+        id: evidence
+        run: |
+          echo "digest=$(sha256sum dist/release/SHA256SUMS | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "policy_revision=$(git log -1 --format=%H -- .mergewake/policy.yaml)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deploy-candidate-assets
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy-ok:
+    name: deploy-ok
+    needs: [target, race, macos, release]
+    if: always() && needs.target.outputs.sha != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post deploy-ok with candidate evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.target.outputs.sha }}
+          DIGEST: ${{ needs.release.outputs.digest }}
+          POLICY_REVISION: ${{ needs.release.outputs.policy_revision }}
+          NEEDS: ${{ toJSON(needs) }}
+          TRIGGER: ${{ github.event_name }}
+        run: |
+          result=success
+          for job in race macos release; do
+            [ "$(printf '%s' "$NEEDS" | jq -r --arg job "$job" '.[$job].result')" = success ] || result=failure
+          done
+          [ -n "$DIGEST" ] || DIGEST=unavailable
+          [ -n "$POLICY_REVISION" ] || POLICY_REVISION=unavailable
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" \
+            -f state="$result" \
+            -f context=deploy-ok \
+            -f description="deploy $result: race,macos,release,install-smoke" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          {
+            echo "## Deploy stage candidate evidence"
+            echo
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| repo | $GITHUB_REPOSITORY |"
+            echo "| sha | $SHA |"
+            echo "| policy_revision | $POLICY_REVISION |"
+            echo "| suite | race, macos, release-build, install-smoke |"
+            echo "| environment | ci |"
+            echo "| run_id | $GITHUB_RUN_ID |"
+            echo "| trigger | $TRIGGER |"
+            echo "| result | $result |"
+            echo "| artifact_digest | $DIGEST |"
+          } >> "$GITHUB_STEP_SUMMARY"

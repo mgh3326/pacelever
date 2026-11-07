@@ -1,11 +1,12 @@
+# Pull-request stage: unchanged, and it stays the merge condition
+# (.mergewake/policy.yaml required_checks). A push to main runs the lighter
+# main stage (main.yml) and then the deploy stage (deploy.yml).
 name: CI
 on:
-  push:
-    branches: [main]
   pull_request:
 concurrency:
-  # One group per ref: a new push to main (or to a PR branch) cancels the older
-  # run of that ref (hk:doc policy/fleet-ci-main-cancel).
+  # One group per ref: a new push to a PR branch cancels the older run of that
+  # ref (hk:doc policy/fleet-ci-main-cancel).
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 permissions:
