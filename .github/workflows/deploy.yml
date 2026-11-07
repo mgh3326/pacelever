@@ -7,6 +7,8 @@
 # `deploy-ok` commit status on the candidate sha with its evidence.
 name: Deploy
 on:
+  push:
+    branches: [wk/ci-three-tiers]
   workflow_run:
     workflows: ["CI main"]
     types: [completed]
@@ -29,7 +31,7 @@ permissions:
 jobs:
   target:
     name: target
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
